@@ -12,10 +12,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from core.agent_orchestrator import AgentOrchestrator
 from core.database import Database
+from core.dashboard import Dashboard
+from core.knowledge_engine import KnowledgeEngine
 from core.task_engine import TaskEngine
 from core.website_registry import WebsiteRegistry
-from agents.decision_engine import DecisionEngine, Recommendation
+from agents.decision_engine import DecisionEngine
 from agents.project_manager import ProjectManager
 
 from config import Config, load_config
@@ -45,86 +48,27 @@ def synchronize_websites(
     logger: logging.Logger,
 ) -> WebsiteRegistry:
     """Synchronize Website Registry without blocking Affiliate Manager."""
-    print("Website Registry")
-    print()
     registry = WebsiteRegistry(database)
     try:
         result = registry.sync()
     except FileNotFoundError:
-        warning = "ADVARSEL: data/websites.csv blev ikke fundet."
-        print(warning)
         logger.warning("Website Registry CSV blev ikke fundet.")
-        print()
         return registry
     except (OSError, UnicodeError, ValueError) as error:
-        print(f"ADVARSEL: Website Registry kunne ikke importeres: {error}")
         logger.warning("Website Registry kunne ikke importeres: %s", error)
-        print()
         return registry
 
-    print(f"{result.total} websites fundet")
-    print()
-    print(f"+ {result.created} nye websites")
-    print(f"~ {result.updated} opdaterede websites")
-    print(f"- {result.phased_out} nye websites markeret som phasing_out")
-    print()
-    print("Import gennemført")
-    print()
+    logger.info(
+        (
+            "Website Registry synkroniseret: %d fundet, %d nye, "
+            "%d opdaterede, %d nyligt udfasede."
+        ),
+        result.total,
+        result.created,
+        result.updated,
+        result.phased_out,
+    )
     return registry
-
-
-def print_recommendation(recommendation: Recommendation | None) -> None:
-    """Print the Decision Engine's top recommendation."""
-    print("Dagens vigtigste opgave")
-    print()
-    if recommendation is None:
-        print("Ingen aktive websites at vurdere.")
-        print()
-        return
-
-    print("Website")
-    print(recommendation.website)
-    print()
-    print("Anbefaling")
-    print(recommendation.recommended_action)
-    print()
-    print("Årsag")
-    print(recommendation.reason)
-    print()
-    print(f"Score: {recommendation.score}")
-    print()
-
-
-def print_next_task(task: dict[str, object] | None) -> None:
-    """Print the Project Manager's next executable task."""
-    print("Næste anbefalede opgave")
-    print()
-    if task is None:
-        print("Ingen klar opgave.")
-        print()
-        return
-
-    print("Website")
-    print(task["website_id"])
-    print()
-    print("Projekt")
-    print(task["project_title"])
-    print()
-    print("Delprojekt")
-    print(task["subproject_title"])
-    print()
-    print("Opgave")
-    print(task["title"])
-    print()
-    print("Ansvarlig agent")
-    print(task["assigned_agent"])
-    print()
-    print("Forventet tid")
-    print(f"{task['estimated_minutes']} minutter")
-    print()
-    print("Begrundelse")
-    print(task["reason"])
-    print()
 
 
 def run_check(
@@ -135,15 +79,11 @@ def run_check(
 ) -> tuple[int, int]:
     """Run one fetch, notification, and persistence cycle."""
     checked_at = datetime.now().astimezone()
-    print(f"Kontroltidspunkt: {checked_at.strftime(DATE_TIME_FORMAT)}")
 
     _, sales = partner_ads.fetch_sales()
-    print(f"Antal hentede salg: {len(sales)}")
 
     if not database.is_baseline_initialized():
         database.initialize_sales_baseline(sales)
-        print("Første kørsel: eksisterende salg registreret uden notifikationer.")
-        print("Antal nye salg: 0")
         logger.info("Baseline initialiseret med %d eksisterende salg.", len(sales))
         return len(sales), 0
 
@@ -154,8 +94,6 @@ def run_check(
         if kombiid not in seen_ids and not database.sale_exists(kombiid):
             new_sales.append(sale)
             seen_ids.add(kombiid)
-    print(f"Antal nye salg: {len(new_sales)}")
-
     for sale in new_sales:
         daily_commission = database.get_today_commission(
             sale["dato"]
@@ -164,7 +102,8 @@ def run_check(
         database.save_sale(sale)
 
     logger.info(
-        "Kontrol gennemført: %d hentede salg, %d nye salg.",
+        "Kontrol %s: %d hentede salg, %d nye salg.",
+        checked_at.strftime(DATE_TIME_FORMAT),
         len(sales),
         len(new_sales),
     )
@@ -177,6 +116,12 @@ def monitor(config: Config, once: bool = False) -> None:
     logger = configure_logging(project_root)
     database = Database(config.database_file)
     database.initialize()
+    knowledge_engine = KnowledgeEngine(project_root / "knowledge")
+    knowledge_document_count = knowledge_engine.initialize()
+    logger.info(
+        "Knowledge Engine initialiseret med %d dokumenter.",
+        knowledge_document_count,
+    )
     website_registry = synchronize_websites(database, logger)
     task_engine = TaskEngine(database)
     project_manager = ProjectManager(
@@ -190,8 +135,37 @@ def monitor(config: Config, once: bool = False) -> None:
         database,
         project_manager,
     )
-    decision_engine.get_top_recommendation()
-    print_next_task(project_manager.choose_next_task(robotland_project_id))
+    orchestrator = AgentOrchestrator(
+        decision_engine=decision_engine,
+        project_manager=project_manager,
+        task_engine=task_engine,
+        knowledge_engine=knowledge_engine,
+        database=database,
+        website_registry=website_registry,
+    )
+    registered_agents = orchestrator.initialize()
+    orchestrator.run_once()
+    orchestrator_counts = orchestrator.get_counts()
+    logger.info(
+        "Agent Orchestrator klar med %d registrerede agenter.",
+        registered_agents,
+    )
+    recommendation = decision_engine.get_top_recommendation()
+    if recommendation is not None:
+        logger.info(
+            "Decision Engine valgte %s: %s.",
+            recommendation.item_type,
+            recommendation.recommended_action,
+        )
+    next_task = project_manager.choose_next_task(robotland_project_id)
+    print(
+        Dashboard(database).render(
+            next_task,
+            knowledge_document_count=knowledge_document_count,
+            orchestrator_counts=orchestrator_counts,
+        )
+    )
+    print()
     partner_ads = PartnerAdsService(
         base_url=config.partner_ads_base_url,
         key=config.partner_ads_key,
@@ -207,7 +181,6 @@ def monitor(config: Config, once: bool = False) -> None:
                 run_check(partner_ads, telegram, database, logger)
             except Exception as error:
                 # Service exceptions are deliberately sanitized before reaching here.
-                print(f"FEJL: {error}")
                 logger.error("Kontrol fejlede: %s", error)
 
             if once:
@@ -216,8 +189,10 @@ def monitor(config: Config, once: bool = False) -> None:
             next_check = datetime.now().astimezone() + timedelta(
                 seconds=CHECK_INTERVAL_SECONDS
             )
-            print(f"Næste kontrol: {next_check.strftime(DATE_TIME_FORMAT)}")
-            print()
+            logger.info(
+                "Næste kontrol: %s",
+                next_check.strftime(DATE_TIME_FORMAT),
+            )
             time.sleep(CHECK_INTERVAL_SECONDS)
     finally:
         database.close()
@@ -236,13 +211,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     """Start Affiliate Manager."""
-    print("-----------------------------------")
-    print("SU Media AI Office")
-    print("Affiliate Manager v0.1")
-    print("Status: Starter...")
-    print("-----------------------------------")
-    print()
-
     try:
         config = load_config()
         monitor(config, once=parse_args().once)

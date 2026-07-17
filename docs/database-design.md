@@ -140,6 +140,47 @@ Indeholder konkrete, tildelte arbejdsopgaver på højst 120 minutter.
 
 Projekter, delprojekter og opgaver bruger statusværdierne `planning`, `ready`, `in_progress`, `blocked`, `completed` og `cancelled`.
 
+### `events`
+
+Indeholder ensartede hændelser, der skal routes af Agent Orchestrator.
+
+| Felt | Beskrivelse |
+| --- | --- |
+| `id` | Intern unik identifikator |
+| `event_type` | Hændelsens type |
+| `source` | Komponenten eller datakilden bag hændelsen |
+| `website` | Berørt website |
+| `title` | Kort titel |
+| `description` | Beskrivelse af hændelsen |
+| `priority` | Numerisk prioritet |
+| `data_json` | Strukturerede supplerende data |
+| `status` | Hændelsens lifecycle-status |
+| `created_at` | Oprettelsestidspunkt |
+| `processed_at` | Tidspunkt for routing |
+
+### `actions`
+
+Indeholder agenthandlinger oprettet fra en hændelse.
+
+| Felt | Beskrivelse |
+| --- | --- |
+| `id` | Intern unik identifikator |
+| `event_id` | Reference til den udløsende hændelse |
+| `action_type` | Handlingens type |
+| `assigned_agent` | Den ansvarlige registrerede agent |
+| `website` | Berørt website |
+| `project_id` | Eventuel reference til et projekt |
+| `task_id` | Eventuel reference til en opgave |
+| `reason` | Begrundelse for routingen |
+| `priority` | Numerisk prioritet |
+| `status` | Handlingens lifecycle-status |
+| `depends_on_action_id` | Eventuel handling, der skal afsluttes først |
+| `result_json` | Det strukturerede resultat |
+| `created_at` | Oprettelsestidspunkt |
+| `completed_at` | Afslutningstidspunkt |
+
+Orchestrator-tabellerne bruger statusværdierne `pending`, `routed`, `in_progress`, `blocked`, `completed`, `failed` og `cancelled`.
+
 ### `measurements`
 
 Indeholder målinger af effekten før og efter udførte opgaver.

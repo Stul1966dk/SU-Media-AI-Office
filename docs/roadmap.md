@@ -46,6 +46,18 @@ Succeskriterium: Et nyt salg udløser præcis én korrekt Telegram-besked, og en
 
 Succeskriterium: Project Manager kan omsætte et projekt til små, afhængige opgaver og altid pege på den næste opgave, der reelt kan udføres.
 
+## Version 0.5 - Agent Orchestrator
+
+- [x] Definér en ensartet hændelsesmodel
+- [x] Definér en ensartet handlingsmodel
+- [x] Registrér agenter og kapabiliteter
+- [x] Route hændelser i en fast, deterministisk rækkefølge
+- [x] Gem hændelser, handlinger, afhængigheder og resultater
+- [x] Vis køstatus på dashboardet
+- [ ] Tilføj sikre workers, som udfører de ventende handlinger
+
+Succeskriterium: En hændelse kan fordeles til en eller flere agenter uden direkte afhængigheder mellem specialagenterne, og rækkefølgen kan genoptages fra databasen.
+
 ## Senere kandidater
 
 - Plausible Analytics

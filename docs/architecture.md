@@ -112,6 +112,48 @@ Projekt
   -> næste udførbare opgave
 ```
 
+## AI Office Dashboard
+
+Opstartsskærmen samles af `core/dashboard.py`. Dashboardet læser aggregerede nøgletal gennem den centrale `Database` og viser websites, provision, aktive projekter, åbne opgaver og Project Managers næste konkrete opgave.
+
+```text
+Website Registry + salg + projekter + opgaver
+  -> central Database
+  -> Dashboard
+  -> samlet opstartsskærm
+```
+
+Tekniske hændelser som registry-synkronisering, Partner-ads-kontroller, fejl og tidspunktet for næste kontrol skrives til `logs/affiliate_manager.log`. Terminalen bruges til den operationelle oversigt, en eventuel fatal opstartsfejl og bekræftelse ved stop med `Ctrl+C`.
+
+## Knowledge Engine
+
+Knowledge Engine ligger i `core/knowledge_engine.py` og indekserer den fælles Markdown-viden under `knowledge/`. Motoren leverer dokumenter, kategorier, søgning og virksomhedsregler uden at kende eller importere de enkelte AI-agenter.
+
+```text
+knowledge/company + seo + wordpress + affiliate + development
+  -> Knowledge Engine
+  -> kategoriseret og søgbar viden
+  -> fælles adgang for AI Office-komponenter
+```
+
+Dashboardet initialiserer Knowledge Engine ved opstart og viser status samt antal fundne dokumenter. Kategoridokumenterne er de centrale kilder til regler; agentspecifik beslutningslogik forbliver uden for Knowledge Engine.
+
+## Agent Orchestrator
+
+Agent Orchestrator ligger i `core/agent_orchestrator.py` og er det centrale, agent-neutrale routinglag. Den kender de fælles engines og registrerede agenters kapabiliteter, men indeholder ikke specialistlogik for SEO, indhold, design eller affiliate.
+
+```text
+Hændelse
+  -> Agent Orchestrator
+  -> kapabilitetsbaseret routing i fast rækkefølge
+  -> en eller flere persistente handlinger
+  -> afhængighedskæde
+  -> specialagent
+  -> gemt resultat og frigivelse af næste handling
+```
+
+Hændelser og handlinger gemmes i SQLite-tabellerne `events` og `actions`. En handling med en ufærdig forgænger har status `blocked`; når forgængeren færdigmarkeres, ændres den næste til `pending`. Dashboardet viser ventende hændelser, ventende handlinger og antal registrerede agenter.
+
 ## Sikkerhed
 
 Tokens, API-nøgler, Chat ID'er og andre hemmeligheder må aldrig gemmes i dokumentation eller versionsstyret kode. De skal senere placeres i sikker lokal konfiguration eller et secrets-system.
