@@ -85,24 +85,60 @@ Indeholder normaliserede salg fra Partner-ads og senere andre affiliatenetværk.
 | `source_url` | URL eller kilde knyttet til salget |
 | `created_at` | Tidspunktet, hvor posten blev oprettet |
 
-### `tasks`
+### `projects`
 
-Indeholder konkrete arbejdsopgaver, som systemet eller en AI-medarbejder har identificeret.
+Indeholder overordnede projekter knyttet til et website.
 
 | Felt | Beskrivelse |
 | --- | --- |
 | `id` | Intern unik identifikator |
-| `website_id` | Reference til det website, opgaven vedrører |
-| `title` | Kort titel |
-| `description` | Beskrivelse af opgaven |
-| `reason` | Begrundelse for, at opgaven bør udføres |
-| `data_source` | Datakilden bag opgaven |
-| `expected_minutes` | Forventet tidsforbrug i minutter |
+| `website_id` | Reference til projektets website |
+| `title` | Projektets titel |
+| `description` | Projektets beskrivelse |
+| `status` | Lifecycle-status |
+| `priority` | Projektets prioritet |
+| `expected_effect` | Forventet effekt |
+| `created_at` | Oprettelsestidspunkt |
+| `completed_at` | Afslutningstidspunkt |
+
+### `subprojects`
+
+Indeholder de ordnede dele af et projekt.
+
+| Felt | Beskrivelse |
+| --- | --- |
+| `id` | Intern unik identifikator |
+| `project_id` | Reference til det overordnede projekt |
+| `title` | Delprojektets titel |
+| `description` | Delprojektets beskrivelse |
+| `status` | Lifecycle-status |
+| `sequence` | Delprojektets rækkefølge |
+| `created_at` | Oprettelsestidspunkt |
+| `completed_at` | Afslutningstidspunkt |
+
+### `tasks`
+
+Indeholder konkrete, tildelte arbejdsopgaver på højst 120 minutter.
+
+| Felt | Beskrivelse |
+| --- | --- |
+| `id` | Intern unik identifikator |
+| `subproject_id` | Reference til delprojektet |
+| `website_id` | Reference til opgavens website |
+| `title` | Opgavens titel |
+| `description` | Konkret beskrivelse |
+| `reason` | Begrundelse for opgaven |
+| `assigned_agent` | Ansvarlig AI-medarbejder |
+| `estimated_minutes` | Forventet tidsforbrug, maksimalt 120 minutter |
 | `expected_effect` | Forventet effekt |
 | `priority_score` | Beregnet prioritet |
-| `status` | Opgavens aktuelle status |
-| `created_at` | Tidspunktet, hvor opgaven blev oprettet |
-| `completed_at` | Tidspunktet, hvor opgaven blev afsluttet |
+| `status` | Lifecycle-status |
+| `depends_on_task_id` | Eventuel opgave, som først skal færdiggøres |
+| `created_at` | Oprettelsestidspunkt |
+| `started_at` | Starttidspunkt |
+| `completed_at` | Afslutningstidspunkt |
+
+Projekter, delprojekter og opgaver bruger statusværdierne `planning`, `ready`, `in_progress`, `blocked`, `completed` og `cancelled`.
 
 ### `measurements`
 

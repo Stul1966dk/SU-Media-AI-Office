@@ -34,6 +34,18 @@ Succeskriterium: Et nyt salg udløser præcis én korrekt Telegram-besked, og en
 - [ ] Markér fakta og hypoteser separat
 - [ ] Opret første målbare arbejdsordre og feedback-loop
 
+## Version 0.4 - Project Manager og Task Engine
+
+- [x] Opret projekter og ordnede delprojekter
+- [x] Opret konkrete opgaver på højst 120 minutter
+- [x] Tildel en ansvarlig agent
+- [x] Håndter status, blokering og afhængigheder
+- [x] Vælg næste udførbare opgave
+- [x] Opret første redesignprojekt for Robotland.dk
+- [ ] Knyt afsluttede opgaver til effektmålinger
+
+Succeskriterium: Project Manager kan omsætte et projekt til små, afhængige opgaver og altid pege på den næste opgave, der reelt kan udføres.
+
 ## Senere kandidater
 
 - Plausible Analytics

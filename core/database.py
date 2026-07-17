@@ -53,6 +53,7 @@ class Database:
         self.connection.row_factory = sqlite3.Row
         self._create_or_migrate_sales_table()
         self._create_or_migrate_websites_table()
+        self._create_work_tables()
         self.connection.execute(
             """
             CREATE TABLE IF NOT EXISTS app_state (
@@ -62,6 +63,239 @@ class Database:
             """
         )
         self.connection.commit()
+
+    def _create_work_tables(self) -> None:
+        """Create project, subproject, and task tables."""
+        self._connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                status TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                expected_effect TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                completed_at TEXT,
+                UNIQUE (website_id, title),
+                FOREIGN KEY (website_id) REFERENCES websites(website)
+            );
+
+            CREATE TABLE IF NOT EXISTS subprojects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                status TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                completed_at TEXT,
+                UNIQUE (project_id, title),
+                FOREIGN KEY (project_id) REFERENCES projects(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                subproject_id INTEGER NOT NULL,
+                website_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                assigned_agent TEXT NOT NULL,
+                estimated_minutes INTEGER NOT NULL,
+                expected_effect TEXT NOT NULL,
+                priority_score INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                depends_on_task_id INTEGER,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                FOREIGN KEY (subproject_id) REFERENCES subprojects(id),
+                FOREIGN KEY (website_id) REFERENCES websites(website),
+                FOREIGN KEY (depends_on_task_id) REFERENCES tasks(id)
+            );
+            """
+        )
+
+    def create_project_record(self, values: dict[str, Any]) -> int:
+        """Insert a project or return the matching existing project ID."""
+        existing = self._connection.execute(
+            """
+            SELECT id FROM projects
+            WHERE website_id = ? AND title = ?
+            """,
+            (values["website_id"], values["title"]),
+        ).fetchone()
+        if existing:
+            return int(existing["id"])
+
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                INSERT INTO projects (
+                    website_id, title, description, status, priority,
+                    expected_effect, created_at, completed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    values["website_id"],
+                    values["title"],
+                    values["description"],
+                    values["status"],
+                    values["priority"],
+                    values["expected_effect"],
+                    values["created_at"],
+                    values.get("completed_at"),
+                ),
+            )
+        return int(cursor.lastrowid)
+
+    def create_subproject_record(self, values: dict[str, Any]) -> int:
+        """Insert a subproject or return the matching existing ID."""
+        existing = self._connection.execute(
+            """
+            SELECT id FROM subprojects
+            WHERE project_id = ? AND title = ?
+            """,
+            (values["project_id"], values["title"]),
+        ).fetchone()
+        if existing:
+            return int(existing["id"])
+
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                INSERT INTO subprojects (
+                    project_id, title, description, status, sequence,
+                    created_at, completed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    values["project_id"],
+                    values["title"],
+                    values["description"],
+                    values["status"],
+                    values["sequence"],
+                    values["created_at"],
+                    values.get("completed_at"),
+                ),
+            )
+        return int(cursor.lastrowid)
+
+    def create_task_record(self, values: dict[str, Any]) -> int:
+        """Insert one concrete task and return its ID."""
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                INSERT INTO tasks (
+                    subproject_id, website_id, title, description, reason,
+                    assigned_agent, estimated_minutes, expected_effect,
+                    priority_score, status, depends_on_task_id, created_at,
+                    started_at, completed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    values["subproject_id"],
+                    values["website_id"],
+                    values["title"],
+                    values["description"],
+                    values["reason"],
+                    values["assigned_agent"],
+                    values["estimated_minutes"],
+                    values["expected_effect"],
+                    values["priority_score"],
+                    values["status"],
+                    values.get("depends_on_task_id"),
+                    values["created_at"],
+                    values.get("started_at"),
+                    values.get("completed_at"),
+                ),
+            )
+        return int(cursor.lastrowid)
+
+    def get_project_record(self, project_id: int) -> dict[str, Any] | None:
+        """Return one project."""
+        row = self._connection.execute(
+            "SELECT * FROM projects WHERE id = ?",
+            (project_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_subprojects_for_project(
+        self, project_id: int
+    ) -> list[dict[str, Any]]:
+        """Return a project's subprojects in execution order."""
+        rows = self._connection.execute(
+            """
+            SELECT * FROM subprojects
+            WHERE project_id = ?
+            ORDER BY sequence, id
+            """,
+            (project_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_task_record(self, task_id: int) -> dict[str, Any] | None:
+        """Return one task with project and subproject context."""
+        row = self._connection.execute(
+            """
+            SELECT
+                t.*, sp.project_id, sp.title AS subproject_title,
+                p.title AS project_title
+            FROM tasks t
+            JOIN subprojects sp ON sp.id = t.subproject_id
+            JOIN projects p ON p.id = sp.project_id
+            WHERE t.id = ?
+            """,
+            (task_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_task_records_for_project(
+        self, project_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Return tasks with their project and subproject context."""
+        query = """
+            SELECT
+                t.*, sp.project_id, sp.title AS subproject_title,
+                sp.sequence AS subproject_sequence,
+                p.title AS project_title
+            FROM tasks t
+            JOIN subprojects sp ON sp.id = t.subproject_id
+            JOIN projects p ON p.id = sp.project_id
+        """
+        parameters: tuple[Any, ...] = ()
+        if project_id is not None:
+            query += " WHERE p.id = ?"
+            parameters = (project_id,)
+        query += " ORDER BY sp.sequence, t.priority_score DESC, t.id"
+        rows = self._connection.execute(query, parameters).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_task_status(
+        self,
+        task_id: int,
+        status: str,
+        *,
+        started_at: str | None = None,
+        completed_at: str | None = None,
+    ) -> None:
+        """Update a task's lifecycle status and timestamps."""
+        with self._connection:
+            self._connection.execute(
+                """
+                UPDATE tasks
+                SET status = ?,
+                    started_at = COALESCE(?, started_at),
+                    completed_at = COALESCE(?, completed_at)
+                WHERE id = ?
+                """,
+                (status, started_at, completed_at, task_id),
+            )
 
     def _create_websites_table(self) -> None:
         """Create the shared website registry table."""

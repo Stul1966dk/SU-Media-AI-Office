@@ -45,6 +45,14 @@ Registry-synkroniseringen kører automatisk ved Affiliate Managers opstart. Impo
 
 Faste og entydige kontroller løses med programregler. AI anvendes til fortolkning, forklaring og prioritering, hvor der reelt er behov for dømmekraft.
 
+Decision Engine v0.1 ligger i `agents/decision_engine.py` og bruger den centrale `Database` og `WebsiteRegistry`. Den vurderer kun aktive websites, der ikke er markeret som `phasing_out`, og vælger én anbefaling med en transparent regelbaseret score.
+
+Scoren bruger websiteprioritet, monetization og handlingssignaler i noter: `needs design`, `needs content`, `high potential` og `drop`. Resultatet indeholder website, begrundelse, score og anbefalet handling og vises ved programmets opstart.
+
+Project Manager ligger i `agents/project_manager.py` og omsætter projekter til ordnede delprojekter og konkrete opgaver. Task Engine i `core/task_engine.py` håndhæver statusværdier, maksimalt 120 minutters varighed, afhængigheder og opgavernes lifecycle. SQL for projekter og opgaver forbliver i den centrale `Database`.
+
+Decision Engine kan returnere en projektanbefaling eller en opgave. Når der findes planlagte opgaver, er det altid Project Manager, der vælger den konkrete næste opgave med opfyldte afhængigheder.
+
 ### AI-medarbejdere
 
 Affiliate Manager er første medarbejder. Senere kan SEO Manager, Content Manager og Webmaster bruge samme hukommelse, standarder og fælles tjenester.
@@ -81,6 +89,28 @@ Website-CSV
 Domænet er den unikke nøgle. Gentagne importer opdaterer eksisterende websites og opretter kun poster for nye domæner.
 
 Websites, der ikke længere findes i CSV-filen, slettes ikke automatisk. Dermed bevares historik og oplysninger, indtil en særskilt, kontrolleret sletning gennemføres.
+
+## Decision Engine v0.1
+
+```text
+Website Registry + Database
+  -> filtrering af active og phasing_out
+  -> regelbaseret scoring
+  -> højeste anbefaling
+  -> terminalvisning
+```
+
+## Project Manager og Task Engine
+
+```text
+Projekt
+  -> Project Manager
+  -> ordnede delprojekter
+  -> konkrete opgaver på højst 120 minutter
+  -> Task Engine
+  -> afhængigheds- og statuskontrol
+  -> næste udførbare opgave
+```
 
 ## Sikkerhed
 
