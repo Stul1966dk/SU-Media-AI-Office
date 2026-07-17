@@ -28,3 +28,20 @@ Dette dokument er den centrale kilde til SU Medias SEO-regler.
 - Mål relevante placeringer, organisk trafik, klik og affiliateprovision.
 - Vurder effekten over en defineret periode og gem konklusionen.
 - Antag ikke, at trafikfald skyldes én årsag uden data.
+
+## SEO Recovery
+
+- Brug som udgangspunkt 28 hele dage mod de foregående 28 hele dage.
+- Opret ikke et recovery-projekt på baggrund af ét lille udsving.
+- Et recovery-projekt kræver mindst ét af følgende:
+  - SEO-score under 35,
+  - `critical` trend,
+  - mindst 25 procent fald i klik,
+  - mindst 15 procent fald i klik sammen med dårligere placering,
+  - mindst 15 procent fald i klik sammen med fald i CTR.
+- Ignorér websites med status `phasing_out`, `archived` eller `cancelled`.
+- Adskil observerede data, foreløbige hypoteser og anbefalede handlinger.
+- Start med at lokalisere faldet på sider og sektioner før en årsag antages.
+- Genbrug og opdatér et aktivt SEO Recovery-projekt frem for at oprette en dublet.
+- Konkrete startopgaver må højst vare 120 minutter og skal have en målemetode.
+- SEO Manager må ikke ændre websites; agenten må kun analysere, anbefale og planlægge.

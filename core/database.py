@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 
 SALE_COLUMNS = (
@@ -58,6 +59,8 @@ class Database:
         self._create_search_console_table()
         self._create_search_console_daily_metrics_table()
         self._create_seo_health_history_table()
+        self._create_seo_recommendations_table()
+        self._create_website_intelligence_tables()
         self.connection.execute(
             """
             CREATE TABLE IF NOT EXISTS app_state (
@@ -126,6 +129,99 @@ class Database:
                 UNIQUE (website_id, date, period),
                 FOREIGN KEY (website_id) REFERENCES websites(website)
             )
+            """
+        )
+
+    def _create_seo_recommendations_table(self) -> None:
+        """Create idempotent SEO Manager analysis recommendations."""
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS seo_recommendations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT NOT NULL,
+                analysis_date TEXT NOT NULL,
+                seo_score REAL NOT NULL,
+                trend TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                recommendation TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                project_id INTEGER,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (website_id, analysis_date),
+                FOREIGN KEY (website_id) REFERENCES websites(website),
+                FOREIGN KEY (project_id) REFERENCES projects(id)
+            )
+            """
+        )
+
+    def _create_website_intelligence_tables(self) -> None:
+        """Create current, statistical, categorical, and historical profiles."""
+        self._connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS website_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                cms TEXT NOT NULL,
+                theme TEXT NOT NULL,
+                monetization TEXT NOT NULL,
+                niche TEXT NOT NULL,
+                website_health REAL NOT NULL,
+                strong_areas_json TEXT NOT NULL,
+                weak_areas_json TEXT NOT NULL,
+                ai_recommendations_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (website_id) REFERENCES websites(website)
+            );
+
+            CREATE TABLE IF NOT EXISTS website_statistics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT NOT NULL,
+                statistic_date TEXT NOT NULL,
+                search_clicks INTEGER NOT NULL,
+                search_impressions INTEGER NOT NULL,
+                search_ctr REAL NOT NULL,
+                average_position REAL,
+                sales_count INTEGER NOT NULL,
+                revenue REAL NOT NULL,
+                commission REAL NOT NULL,
+                seo_score REAL,
+                seo_trend TEXT,
+                active_projects INTEGER NOT NULL,
+                active_tasks INTEGER NOT NULL,
+                website_health REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (website_id, statistic_date),
+                FOREIGN KEY (website_id) REFERENCES websites(website)
+            );
+
+            CREATE TABLE IF NOT EXISTS website_categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT NOT NULL,
+                category TEXT NOT NULL,
+                category_type TEXT NOT NULL,
+                rank INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE (website_id, category, category_type),
+                FOREIGN KEY (website_id) REFERENCES websites(website)
+            );
+
+            CREATE TABLE IF NOT EXISTS website_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT NOT NULL,
+                history_date TEXT NOT NULL,
+                changed_fields_json TEXT NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (website_id, history_date),
+                FOREIGN KEY (website_id) REFERENCES websites(website)
+            );
             """
         )
 
@@ -694,6 +790,87 @@ class Database:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def upsert_seo_recommendation(
+        self,
+        *,
+        website_id: str,
+        analysis_date: str,
+        seo_score: float,
+        trend: str,
+        reason: str,
+        recommendation: str,
+        priority: str,
+        project_id: int | None,
+        status: str,
+    ) -> str:
+        """Insert or update one daily SEO Manager recommendation."""
+        existing = self._connection.execute(
+            """
+            SELECT id FROM seo_recommendations
+            WHERE website_id = ? AND analysis_date = ?
+            """,
+            (website_id, analysis_date),
+        ).fetchone()
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO seo_recommendations (
+                    website_id, analysis_date, seo_score, trend, reason,
+                    recommendation, priority, project_id, status,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(website_id, analysis_date) DO UPDATE SET
+                    seo_score = excluded.seo_score,
+                    trend = excluded.trend,
+                    reason = excluded.reason,
+                    recommendation = excluded.recommendation,
+                    priority = excluded.priority,
+                    project_id = excluded.project_id,
+                    status = excluded.status,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    website_id,
+                    analysis_date,
+                    seo_score,
+                    trend,
+                    reason,
+                    recommendation,
+                    priority,
+                    project_id,
+                    status,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+        return "updated" if existing else "created"
+
+    def get_seo_recommendations(
+        self,
+        website_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return SEO recommendations ordered by urgency and score."""
+        query = "SELECT * FROM seo_recommendations"
+        parameters: tuple[Any, ...] = ()
+        if website_id:
+            query += " WHERE website_id = ?"
+            parameters = (website_id,)
+        query += """
+            ORDER BY
+                CASE priority
+                    WHEN 'critical' THEN 1
+                    WHEN 'high' THEN 2
+                    WHEN 'medium' THEN 3
+                    ELSE 4
+                END,
+                seo_score,
+                website_id
+        """
+        rows = self._connection.execute(query, parameters).fetchall()
+        return [dict(row) for row in rows]
+
     @staticmethod
     def _percent_change(current: float, previous: float) -> float | None:
         if previous == 0:
@@ -958,6 +1135,7 @@ class Database:
                 assigned_agent TEXT NOT NULL,
                 estimated_minutes INTEGER NOT NULL,
                 expected_effect TEXT NOT NULL,
+                measurement_method TEXT NOT NULL DEFAULT '',
                 priority_score INTEGER NOT NULL,
                 status TEXT NOT NULL,
                 depends_on_task_id INTEGER,
@@ -970,6 +1148,17 @@ class Database:
             );
             """
         )
+        task_columns = {
+            row["name"]
+            for row in self._connection.execute("PRAGMA table_info(tasks)")
+        }
+        if "measurement_method" not in task_columns:
+            self._connection.execute(
+                """
+                ALTER TABLE tasks
+                ADD COLUMN measurement_method TEXT NOT NULL DEFAULT ''
+                """
+            )
 
     def create_project_record(self, values: dict[str, Any]) -> int:
         """Insert a project or return the matching existing project ID."""
@@ -1004,6 +1193,56 @@ class Database:
                 ),
             )
         return int(cursor.lastrowid)
+
+    def get_project_by_website_and_title(
+        self,
+        website_id: str,
+        title: str,
+    ) -> dict[str, Any] | None:
+        """Return one project by its stable website/title identity."""
+        row = self._connection.execute(
+            """
+            SELECT * FROM projects
+            WHERE website_id = ? AND title = ?
+            """,
+            (website_id, title),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update_project_record(
+        self,
+        project_id: int,
+        *,
+        description: str,
+        status: str,
+        priority: str,
+        expected_effect: str,
+    ) -> None:
+        """Update the mutable planning fields of a project."""
+        with self._connection:
+            self._connection.execute(
+                """
+                UPDATE projects
+                SET description = ?,
+                    status = ?,
+                    priority = ?,
+                    expected_effect = ?,
+                    completed_at = CASE
+                        WHEN ? IN ('completed', 'cancelled')
+                        THEN completed_at
+                        ELSE NULL
+                    END
+                WHERE id = ?
+                """,
+                (
+                    description,
+                    status,
+                    priority,
+                    expected_effect,
+                    status,
+                    project_id,
+                ),
+            )
 
     def create_subproject_record(self, values: dict[str, Any]) -> int:
         """Insert a subproject or return the matching existing ID."""
@@ -1046,10 +1285,10 @@ class Database:
                 INSERT INTO tasks (
                     subproject_id, website_id, title, description, reason,
                     assigned_agent, estimated_minutes, expected_effect,
-                    priority_score, status, depends_on_task_id, created_at,
-                    started_at, completed_at
+                    measurement_method, priority_score, status,
+                    depends_on_task_id, created_at, started_at, completed_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     values["subproject_id"],
@@ -1060,6 +1299,7 @@ class Database:
                     values["assigned_agent"],
                     values["estimated_minutes"],
                     values["expected_effect"],
+                    values.get("measurement_method", ""),
                     values["priority_score"],
                     values["status"],
                     values.get("depends_on_task_id"),
@@ -1371,6 +1611,695 @@ class Database:
             """
         ).fetchone()
         return int(row["total"])
+
+    def get_website_intelligence_source(
+        self,
+        website_id: str,
+    ) -> dict[str, Any] | None:
+        """Return all stored inputs needed to build one website profile."""
+        website = self.get_website(website_id)
+        if website is None:
+            return None
+        search = self._connection.execute(
+            """
+            SELECT
+                COALESCE(SUM(clicks), 0) AS clicks,
+                COALESCE(SUM(impressions), 0) AS impressions,
+                COALESCE(SUM(clicks) * 1.0 /
+                    NULLIF(SUM(impressions), 0), 0) AS ctr,
+                SUM(average_position * impressions) /
+                    NULLIF(SUM(impressions), 0) AS average_position
+            FROM (
+                SELECT clicks, impressions, average_position
+                FROM search_console_daily_metrics
+                WHERE website_id = ?
+                ORDER BY metric_date DESC
+                LIMIT 28
+            )
+            """,
+            (website_id,),
+        ).fetchone()
+        seo = self._connection.execute(
+            """
+            SELECT score, trend, click_change, impression_change,
+                   ctr_change, position_change, date
+            FROM seo_health_history
+            WHERE website_id = ? AND period = '28d'
+            ORDER BY date DESC
+            LIMIT 1
+            """,
+            (website_id,),
+        ).fetchone()
+        project_rows = self._connection.execute(
+            """
+            SELECT id, title, status, priority, expected_effect, created_at
+            FROM projects
+            WHERE website_id = ?
+              AND status NOT IN ('completed', 'cancelled')
+            ORDER BY id
+            """,
+            (website_id,),
+        ).fetchall()
+        task_rows = self._connection.execute(
+            """
+            SELECT
+                t.id, p.title AS project, sp.title AS subproject,
+                t.title, t.assigned_agent, t.estimated_minutes,
+                t.priority_score, t.status, t.expected_effect,
+                t.measurement_method
+            FROM tasks t
+            JOIN subprojects sp ON sp.id = t.subproject_id
+            JOIN projects p ON p.id = sp.project_id
+            WHERE t.website_id = ?
+              AND t.status NOT IN ('completed', 'cancelled')
+            ORDER BY t.priority_score DESC, t.id
+            """,
+            (website_id,),
+        ).fetchall()
+        sales = []
+        for row in self._connection.execute(
+            """
+            SELECT dato, tidspunkt, omsaetning, provision, url, created_at
+            FROM registered_sales
+            ORDER BY created_at DESC
+            """
+        ).fetchall():
+            sale = dict(row)
+            if self._normalize_website_from_url(sale["url"]) == website_id:
+                sales.append(sale)
+        return {
+            "website": website,
+            "search_console": dict(search),
+            "seo_health": dict(seo) if seo else None,
+            "partner_ads": {
+                "sales": sales,
+                "sales_count": len(sales),
+                "revenue": sum(
+                    Decimal(str(item["omsaetning"])) for item in sales
+                ),
+                "commission": sum(
+                    Decimal(str(item["provision"])) for item in sales
+                ),
+            },
+            "active_projects": [dict(row) for row in project_rows],
+            "active_tasks": [dict(row) for row in task_rows],
+        }
+
+    def upsert_website_profile(self, profile: dict[str, Any]) -> str:
+        """Insert or update one current website intelligence profile."""
+        existing = self._connection.execute(
+            "SELECT * FROM website_profiles WHERE website_id = ?",
+            (profile["website_id"],),
+        ).fetchone()
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        serialized = {
+            "strong_areas_json": json.dumps(
+                profile["strong_areas"],
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            "weak_areas_json": json.dumps(
+                profile["weak_areas"],
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            "ai_recommendations_json": json.dumps(
+                profile["ai_recommendations"],
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        }
+        mutable_fields = (
+            "display_name",
+            "status",
+            "cms",
+            "theme",
+            "monetization",
+            "niche",
+            "website_health",
+        )
+        if existing:
+            unchanged = all(
+                existing[field] == profile[field] for field in mutable_fields
+            ) and all(
+                existing[field] == value
+                for field, value in serialized.items()
+            )
+            if unchanged:
+                return "unchanged"
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO website_profiles (
+                    website_id, display_name, status, cms, theme,
+                    monetization, niche, website_health,
+                    strong_areas_json, weak_areas_json,
+                    ai_recommendations_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(website_id) DO UPDATE SET
+                    display_name = excluded.display_name,
+                    status = excluded.status,
+                    cms = excluded.cms,
+                    theme = excluded.theme,
+                    monetization = excluded.monetization,
+                    niche = excluded.niche,
+                    website_health = excluded.website_health,
+                    strong_areas_json = excluded.strong_areas_json,
+                    weak_areas_json = excluded.weak_areas_json,
+                    ai_recommendations_json =
+                        excluded.ai_recommendations_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    profile["website_id"],
+                    profile["display_name"],
+                    profile["status"],
+                    profile["cms"],
+                    profile["theme"],
+                    profile["monetization"],
+                    profile["niche"],
+                    profile["website_health"],
+                    serialized["strong_areas_json"],
+                    serialized["weak_areas_json"],
+                    serialized["ai_recommendations_json"],
+                    timestamp,
+                    timestamp,
+                ),
+            )
+        return "updated" if existing else "created"
+
+    def upsert_website_statistics(
+        self,
+        statistics: dict[str, Any],
+    ) -> str:
+        """Insert or update one daily website intelligence snapshot."""
+        existing = self._connection.execute(
+            """
+            SELECT id FROM website_statistics
+            WHERE website_id = ? AND statistic_date = ?
+            """,
+            (statistics["website_id"], statistics["statistic_date"]),
+        ).fetchone()
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO website_statistics (
+                    website_id, statistic_date, search_clicks,
+                    search_impressions, search_ctr, average_position,
+                    sales_count, revenue, commission, seo_score, seo_trend,
+                    active_projects, active_tasks, website_health,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(website_id, statistic_date) DO UPDATE SET
+                    search_clicks = excluded.search_clicks,
+                    search_impressions = excluded.search_impressions,
+                    search_ctr = excluded.search_ctr,
+                    average_position = excluded.average_position,
+                    sales_count = excluded.sales_count,
+                    revenue = excluded.revenue,
+                    commission = excluded.commission,
+                    seo_score = excluded.seo_score,
+                    seo_trend = excluded.seo_trend,
+                    active_projects = excluded.active_projects,
+                    active_tasks = excluded.active_tasks,
+                    website_health = excluded.website_health,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    statistics["website_id"],
+                    statistics["statistic_date"],
+                    statistics["search_clicks"],
+                    statistics["search_impressions"],
+                    statistics["search_ctr"],
+                    statistics["average_position"],
+                    statistics["sales_count"],
+                    statistics["revenue"],
+                    statistics["commission"],
+                    statistics["seo_score"],
+                    statistics["seo_trend"],
+                    statistics["active_projects"],
+                    statistics["active_tasks"],
+                    statistics["website_health"],
+                    timestamp,
+                    timestamp,
+                ),
+            )
+        return "updated" if existing else "created"
+
+    def replace_website_categories(
+        self,
+        website_id: str,
+        categories: list[dict[str, Any]],
+    ) -> None:
+        """Replace one website's ranked intelligence categories."""
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            self._connection.execute(
+                "DELETE FROM website_categories WHERE website_id = ?",
+                (website_id,),
+            )
+            self._connection.executemany(
+                """
+                INSERT INTO website_categories (
+                    website_id, category, category_type, rank, created_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        website_id,
+                        item["category"],
+                        item["category_type"],
+                        item["rank"],
+                        timestamp,
+                    )
+                    for item in categories
+                ],
+            )
+
+    def save_website_history(
+        self,
+        website_id: str,
+        history_date: str,
+        snapshot: dict[str, Any],
+    ) -> str:
+        """Persist a history row only when the profile snapshot changed."""
+        latest = self._connection.execute(
+            """
+            SELECT snapshot_json FROM website_history
+            WHERE website_id = ?
+            ORDER BY history_date DESC, id DESC
+            LIMIT 1
+            """,
+            (website_id,),
+        ).fetchone()
+        previous = json.loads(latest["snapshot_json"]) if latest else {}
+        changed_fields = sorted(
+            key
+            for key in set(previous) | set(snapshot)
+            if previous.get(key) != snapshot.get(key)
+        )
+        if not changed_fields:
+            return "unchanged"
+        existing_date = self._connection.execute(
+            """
+            SELECT id FROM website_history
+            WHERE website_id = ? AND history_date = ?
+            """,
+            (website_id, history_date),
+        ).fetchone()
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        snapshot_json = json.dumps(
+            snapshot,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO website_history (
+                    website_id, history_date, changed_fields_json,
+                    snapshot_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(website_id, history_date) DO UPDATE SET
+                    changed_fields_json = excluded.changed_fields_json,
+                    snapshot_json = excluded.snapshot_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    website_id,
+                    history_date,
+                    json.dumps(changed_fields, ensure_ascii=False),
+                    snapshot_json,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+        return "updated" if existing_date else "created"
+
+    def get_website_profiles(self) -> list[dict[str, Any]]:
+        """Return current website profiles for dashboard selection."""
+        rows = self._connection.execute(
+            """
+            SELECT
+                website_id, display_name, status, niche, website_health,
+                updated_at
+            FROM website_profiles
+            ORDER BY display_name, website_id
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_website_profile_detail(
+        self,
+        website_id: str,
+    ) -> dict[str, Any] | None:
+        """Return a complete read-only website profile dashboard payload."""
+        profile_row = self._connection.execute(
+            "SELECT * FROM website_profiles WHERE website_id = ?",
+            (website_id,),
+        ).fetchone()
+        if profile_row is None:
+            return None
+        profile = dict(profile_row)
+        for key in (
+            "strong_areas_json",
+            "weak_areas_json",
+            "ai_recommendations_json",
+        ):
+            profile[key.removesuffix("_json")] = json.loads(profile.pop(key))
+        statistics = self._connection.execute(
+            """
+            SELECT * FROM website_statistics
+            WHERE website_id = ?
+            ORDER BY statistic_date DESC
+            LIMIT 1
+            """,
+            (website_id,),
+        ).fetchone()
+        categories = self._connection.execute(
+            """
+            SELECT category, category_type, rank
+            FROM website_categories
+            WHERE website_id = ?
+            ORDER BY rank, category
+            """,
+            (website_id,),
+        ).fetchall()
+        history_rows = self._connection.execute(
+            """
+            SELECT history_date, changed_fields_json, snapshot_json, updated_at
+            FROM website_history
+            WHERE website_id = ?
+            ORDER BY history_date DESC, id DESC
+            LIMIT 20
+            """,
+            (website_id,),
+        ).fetchall()
+        projects = self._connection.execute(
+            """
+            SELECT id, title, status, priority, expected_effect, created_at
+            FROM projects
+            WHERE website_id = ?
+              AND status NOT IN ('completed', 'cancelled')
+            ORDER BY id
+            """,
+            (website_id,),
+        ).fetchall()
+        tasks = self._connection.execute(
+            """
+            SELECT
+                t.id, p.title AS project, t.title,
+                t.assigned_agent, t.priority_score,
+                t.estimated_minutes, t.status
+            FROM tasks t
+            JOIN subprojects sp ON sp.id = t.subproject_id
+            JOIN projects p ON p.id = sp.project_id
+            WHERE t.website_id = ?
+              AND t.status NOT IN ('completed', 'cancelled')
+            ORDER BY t.priority_score DESC, t.id
+            """,
+            (website_id,),
+        ).fetchall()
+        return {
+            "profile": profile,
+            "statistics": dict(statistics) if statistics else None,
+            "categories": [dict(row) for row in categories],
+            "history": [
+                {
+                    **dict(row),
+                    "changed_fields": json.loads(
+                        row["changed_fields_json"]
+                    ),
+                    "snapshot": json.loads(row["snapshot_json"]),
+                }
+                for row in history_rows
+            ],
+            "active_projects": [dict(row) for row in projects],
+            "active_tasks": [dict(row) for row in tasks],
+        }
+
+    @staticmethod
+    def _normalize_website_from_url(value: str) -> str:
+        parsed = urlsplit(value if "://" in value else f"//{value}")
+        domain = (parsed.hostname or "").lower().rstrip(".")
+        return domain[4:] if domain.startswith("www.") else domain
+
+    def set_system_status(self, component: str, is_ok: bool) -> None:
+        """Persist one component's latest known health state."""
+        allowed = {
+            "partner_ads",
+            "search_console",
+            "agent_orchestrator",
+            "knowledge_engine",
+        }
+        if component not in allowed:
+            raise ValueError(f"Ukendt systemkomponent: {component}")
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO app_state (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (f"system_status:{component}", "ok" if is_ok else "error"),
+            )
+
+    def get_dashboard_system_status(self) -> dict[str, bool]:
+        """Return database-backed status for dashboard components."""
+        rows = self._connection.execute(
+            """
+            SELECT key, value
+            FROM app_state
+            WHERE key LIKE 'system_status:%'
+            """
+        ).fetchall()
+        stored = {
+            row["key"].split(":", 1)[1]: row["value"] == "ok"
+            for row in rows
+        }
+        search_summary = self.get_search_console_summary()
+        baseline = self._connection.execute(
+            """
+            SELECT value FROM app_state
+            WHERE key = 'baseline_initialized'
+            """
+        ).fetchone()
+        return {
+            "database": True,
+            "partner_ads": stored.get(
+                "partner_ads",
+                bool(baseline and baseline["value"] == "1"),
+            ),
+            "search_console": stored.get(
+                "search_console",
+                search_summary["latest_sync"] is not None,
+            ),
+            "agent_orchestrator": stored.get(
+                "agent_orchestrator",
+                self._table_exists("events") and self._table_exists("actions"),
+            ),
+            "knowledge_engine": stored.get("knowledge_engine", False),
+        }
+
+    def get_dashboard_overview(self) -> dict[str, int]:
+        """Return website, project, and task totals for dashboard cards."""
+        websites = self._connection.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE
+                    WHEN active = 1
+                     AND status NOT IN ('phasing_out', 'archived', 'cancelled')
+                    THEN 1 ELSE 0 END
+                ) AS active,
+                SUM(CASE WHEN monetized = 1 THEN 1 ELSE 0 END) AS monetized,
+                SUM(CASE WHEN status = 'phasing_out' THEN 1 ELSE 0 END)
+                    AS phasing_out
+            FROM websites
+            """
+        ).fetchone()
+        return {
+            "websites": int(websites["total"] or 0),
+            "active_websites": int(websites["active"] or 0),
+            "monetized": int(websites["monetized"] or 0),
+            "phasing_out": int(websites["phasing_out"] or 0),
+            "active_projects": self.get_active_project_count(),
+            "open_tasks": self.get_open_task_count(),
+        }
+
+    def get_dashboard_economy(
+        self,
+        reference_time: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Return current daily and monthly commission and sale counts."""
+        current = reference_time or datetime.now().astimezone()
+        sale_date = f"{current.day}-{current.month}-{current.year}"
+        rows = self._connection.execute(
+            "SELECT dato, provision FROM registered_sales"
+        ).fetchall()
+        today_count = 0
+        month_count = 0
+        today_commission = Decimal("0")
+        month_commission = Decimal("0")
+        for row in rows:
+            try:
+                day, month, year = (
+                    int(part) for part in row["dato"].split("-")
+                )
+                provision = Decimal(str(row["provision"]))
+            except (AttributeError, TypeError, ValueError, InvalidOperation):
+                continue
+            if (day, month, year) == (
+                current.day,
+                current.month,
+                current.year,
+            ):
+                today_count += 1
+                today_commission += provision
+            if (month, year) == (current.month, current.year):
+                month_count += 1
+                month_commission += provision
+        return {
+            "today_commission": today_commission,
+            "month_commission": month_commission,
+            "today_sales": today_count,
+            "month_sales": month_count,
+        }
+
+    def get_priority_tasks(self, limit: int = 5) -> list[dict[str, Any]]:
+        """Return the highest-priority open tasks with project context."""
+        rows = self._connection.execute(
+            """
+            SELECT
+                t.website_id AS website,
+                p.title AS project,
+                t.title AS task,
+                t.assigned_agent,
+                t.priority_score,
+                t.estimated_minutes,
+                t.status
+            FROM tasks t
+            JOIN subprojects sp ON sp.id = t.subproject_id
+            JOIN projects p ON p.id = sp.project_id
+            WHERE t.status NOT IN ('completed', 'cancelled')
+            ORDER BY t.priority_score DESC, t.id
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_latest_seo_health_sites(
+        self,
+        trend: str | None = None,
+        period: str = "28d",
+    ) -> list[dict[str, Any]]:
+        """Return latest SEO Health rows, optionally filtered by trend."""
+        parameters: list[Any] = [period, period]
+        trend_filter = ""
+        if trend:
+            trend_filter = " AND h.trend = ?"
+            parameters.append(trend)
+        rows = self._connection.execute(
+            f"""
+            SELECT
+                h.website_id AS website,
+                h.score,
+                h.trend,
+                h.click_change,
+                h.impression_change,
+                h.ctr_change,
+                h.position_change
+            FROM seo_health_history h
+            WHERE h.period = ?
+              AND h.date = (
+                  SELECT MAX(date)
+                  FROM seo_health_history
+                  WHERE period = ?
+              )
+              {trend_filter}
+            ORDER BY h.score, h.website_id
+            """,
+            parameters,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_active_seo_recovery_projects(self) -> list[dict[str, Any]]:
+        """Return active SEO Recovery projects with latest 28-day health."""
+        rows = self._connection.execute(
+            """
+            SELECT
+                p.website_id AS website,
+                h.score AS seo_score,
+                h.trend,
+                p.title AS project,
+                p.status
+            FROM projects p
+            LEFT JOIN seo_health_history h
+                ON h.website_id = p.website_id
+               AND h.period = '28d'
+               AND h.date = (
+                   SELECT MAX(h2.date)
+                   FROM seo_health_history h2
+                   WHERE h2.website_id = p.website_id
+                     AND h2.period = '28d'
+               )
+            WHERE p.title LIKE 'SEO Recovery – %'
+              AND p.status NOT IN ('completed', 'cancelled')
+            ORDER BY h.score, p.website_id
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_recent_sales(self, limit: int = 5) -> list[dict[str, Any]]:
+        """Return recent sales with a normalized website label."""
+        rows = self._connection.execute(
+            """
+            SELECT dato, tidspunkt, url, omsaetning, provision, created_at
+            FROM registered_sales
+            ORDER BY created_at DESC, kombiid DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            parsed = urlsplit(
+                item["url"] if "://" in item["url"] else f"//{item['url']}"
+            )
+            item["website"] = parsed.hostname or item["url"] or "Ukendt"
+            results.append(item)
+        return results
+
+    def get_recent_events(self, limit: int = 5) -> list[dict[str, Any]]:
+        """Return the latest Agent Orchestrator events."""
+        rows = self._connection.execute(
+            """
+            SELECT
+                created_at, event_type, source, website, title, status
+            FROM events
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _table_exists(self, table_name: str) -> bool:
+        row = self._connection.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = ?
+            """,
+            (table_name,),
+        ).fetchone()
+        return row is not None
 
     def get_sales(self, date: str) -> list[dict[str, Any]]:
         """Return all registered sales for the supplied sale date."""

@@ -237,6 +237,47 @@ Indeholder deterministiske SEO Health-snapshots for 7, 28 og 90 dage sammenligne
 
 Kombinationen af `website_id`, `date` og `period` er unik. Gentagen analyse samme dag opdaterer derfor snapshot-resultatet uden dubletter.
 
+### `seo_recommendations`
+
+Indeholder SEO Managers daglige analysebeslutning og koblingen til et eventuelt recovery-projekt.
+
+| Felt | Beskrivelse |
+| --- | --- |
+| `id` | Intern unik identifikator |
+| `website_id` | Website fra Website Registry |
+| `analysis_date` | Dato for agentanalysen |
+| `seo_score` | Den anvendte 28-dages SEO-score |
+| `trend` | Den dokumenterede SEO-trend |
+| `reason` | Databaseret begrundelse |
+| `recommendation` | Anbefalet næste handling |
+| `priority` | `critical`, `high`, `medium` eller `low` |
+| `project_id` | Eventuelt SEO Recovery-projekt |
+| `status` | `no_action`, `project_created` eller `project_updated` |
+| `created_at` | Første analysetidspunkt |
+| `updated_at` | Seneste analysetidspunkt |
+
+Kombinationen af `website_id` og `analysis_date` er unik. En gentagen agentkørsel samme dag opdaterer anbefalingen uden dublet.
+
+### Udvidelse af `tasks`
+
+Opgaver har feltet `measurement_method`, som beskriver den konkrete metode til at kontrollere opgavens resultat. Eksisterende databaser migreres automatisk med en tom standardværdi.
+
+### `website_profiles`
+
+Aktuel samlet profil pr. website med CMS, tema, monetization, niche, website health, stærke/svage områder og gemte anbefalinger. `website_id` er unik.
+
+### `website_statistics`
+
+Dagligt snapshot med Search Console-totaler, Partner Ads-salg/provision, SEO Health og antal aktive projekter/opgaver. Kombinationen af `website_id` og `statistic_date` er unik.
+
+### `website_categories`
+
+Rangerede niche- og monetization-kategorier pr. website. Kombinationen af website, kategori og kategoritype er unik.
+
+### `website_history`
+
+Versionerede profilsnapshots med listen over ændrede topniveau-felter. Kombinationen af `website_id` og `history_date` er unik, og uændrede gentagelser opretter ingen række.
+
 ### `measurements`
 
 Indeholder målinger af effekten før og efter udførte opgaver.

@@ -20,7 +20,7 @@ from core.search_console_service import (
     SearchConsoleDataSyncResult,
     SearchConsoleService,
 )
-from core.seo_history import analyze_all_sites
+from core.seo_history import SEOHistory
 from core.task_engine import TaskEngine
 from core.website_registry import WebsiteRegistry
 from integrations.search_console import (
@@ -29,6 +29,8 @@ from integrations.search_console import (
 )
 from agents.decision_engine import DecisionEngine
 from agents.project_manager import ProjectManager
+from agents.seo_manager import SEOManager, SEOManagerResult
+from agents.website_intelligence import WebsiteIntelligenceAgent
 
 from config import Config, load_config
 from partner_ads import PartnerAdsService
@@ -90,6 +92,7 @@ def run_check(
     checked_at = datetime.now().astimezone()
 
     _, sales = partner_ads.fetch_sales()
+    database.set_system_status("partner_ads", True)
 
     if not database.is_baseline_initialized():
         database.initialize_sales_baseline(sales)
@@ -197,6 +200,27 @@ def format_lowest_seo_scores(
     return "\n".join(lines)
 
 
+def format_seo_manager(result: SEOManagerResult) -> str:
+    """Format the SEO Manager run summary."""
+    highest = result.highest_priority
+    highest_text = (
+        f"{highest['website_id']} – {highest['reason']}"
+        if highest
+        else "Ingen"
+    )
+    return "\n".join(
+        [
+            "SEO Manager",
+            "",
+            f"Analyserede websites        {result.websites_analyzed}",
+            f"Nye projekter               {result.new_projects}",
+            f"Opdaterede projekter        {result.updated_projects}",
+            f"Ingen handling               {result.no_action}",
+            f"Højeste prioritet           {highest_text}",
+        ]
+    )
+
+
 def _format_percent(value: object) -> str:
     if value is None:
         return "ny/ingen tidligere værdi"
@@ -217,6 +241,7 @@ def monitor(config: Config, once: bool = False) -> None:
     database.initialize()
     knowledge_engine = KnowledgeEngine(project_root / "knowledge")
     knowledge_document_count = knowledge_engine.initialize()
+    database.set_system_status("knowledge_engine", True)
     logger.info(
         "Knowledge Engine initialiseret med %d dokumenter.",
         knowledge_document_count,
@@ -247,15 +272,18 @@ def monitor(config: Config, once: bool = False) -> None:
         search_result = search_console.synchronize()
         data_sync_result = search_console.sync_all_properties(days=180)
     except SearchConsoleAuthenticationError as error:
+        database.set_system_status("search_console", False)
         logger.warning("Search Console-forbindelse fejlede: %s", error)
         print(f"Search Console-forbindelse fejlede: {error}")
     except Exception as error:
+        database.set_system_status("search_console", False)
         logger.error(
             "Search Console-forbindelse fejlede (%s).",
             type(error).__name__,
         )
         print("Search Console-forbindelse fejlede. Se loggen.")
     else:
+        database.set_system_status("search_console", True)
         summary = database.get_search_console_summary()
         search_console_status = {
             "connection_ok": search_result.connection_ok,
@@ -276,10 +304,6 @@ def monitor(config: Config, once: bool = False) -> None:
         print()
         print(format_click_declines(search_console.get_comparisons()))
         print()
-    analyze_all_sites(database)
-    seo_health_status = database.get_seo_health_summary(period="28d")
-    print(format_lowest_seo_scores(database.get_lowest_seo_scores()))
-    print()
     task_engine = TaskEngine(database)
     project_manager = ProjectManager(
         task_engine,
@@ -301,6 +325,35 @@ def monitor(config: Config, once: bool = False) -> None:
         website_registry=website_registry,
     )
     registered_agents = orchestrator.initialize()
+    database.set_system_status("agent_orchestrator", True)
+    seo_manager = SEOManager(
+        database=database,
+        seo_history=SEOHistory(database),
+        website_registry=website_registry,
+        project_manager=project_manager,
+        task_engine=task_engine,
+        knowledge_engine=knowledge_engine,
+        agent_orchestrator=orchestrator,
+    )
+    seo_manager_result = seo_manager.analyze_all_sites()
+    intelligence_result = WebsiteIntelligenceAgent(
+        database,
+        website_registry,
+    ).analyze_all_sites()
+    logger.info(
+        (
+            "Website Intelligence analyserede %d websites: %d nye, "
+            "%d opdaterede profiler."
+        ),
+        intelligence_result.websites_analyzed,
+        intelligence_result.profiles_created,
+        intelligence_result.profiles_updated,
+    )
+    seo_health_status = database.get_seo_health_summary(period="28d")
+    print(format_lowest_seo_scores(database.get_lowest_seo_scores()))
+    print()
+    print(format_seo_manager(seo_manager_result))
+    print()
     orchestrator.run_once()
     orchestrator_counts = orchestrator.get_counts()
     logger.info(
@@ -322,6 +375,13 @@ def monitor(config: Config, once: bool = False) -> None:
             orchestrator_counts=orchestrator_counts,
             search_console_status=search_console_status,
             seo_health_status=seo_health_status,
+            seo_manager_status={
+                "websites_analyzed": seo_manager_result.websites_analyzed,
+                "new_projects": seo_manager_result.new_projects,
+                "updated_projects": seo_manager_result.updated_projects,
+                "no_action": seo_manager_result.no_action,
+                "highest_priority": seo_manager_result.highest_priority,
+            },
         )
     )
     print()
@@ -339,6 +399,7 @@ def monitor(config: Config, once: bool = False) -> None:
             try:
                 run_check(partner_ads, telegram, database, logger)
             except Exception as error:
+                database.set_system_status("partner_ads", False)
                 # Service exceptions are deliberately sanitized before reaching here.
                 logger.error("Kontrol fejlede: %s", error)
 

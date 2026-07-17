@@ -177,6 +177,58 @@ Google OAuth (read-only)
 
 Dashboardet viser forbindelsesstatus, property-antal, seneste synkronisering, antal gemte dagspunkter og fordelingen af 28-dages SEO Health. Terminalen viser importresultatet, op til fem websites med størst fald i klik og de fem laveste 28-dages SEO-scorer. Analysen opretter ingen opgaver eller Orchestrator-hændelser, bruger ikke Project Manager og sender ingen Telegram-beskeder.
 
+## SEO Manager
+
+`agents/seo_manager.py` er den første specialistagent. Den bruger 28-dages `SEOHealth` og ignorerer websites med status `phasing_out`, `archived` eller `cancelled`. Et recovery-projekt kræver dokumenteret forværring: score under 35, `critical` trend, mindst 25 procent klikfald eller mindst 15 procent klikfald kombineret med dårligere placering eller CTR.
+
+```text
+SEO History (28d)
+  -> SEO Manager
+  -> seo_recommendations
+  -> SEO Recovery-projekt (opret eller opdater)
+  -> seks faste delprojekter
+  -> fem korte, afhængige startopgaver
+  -> seo_recovery_project_created event ved nyt projekt
+  -> Agent Orchestrator
+```
+
+Projektidentiteten er kombinationen af website og titlen `SEO Recovery – [website]`. En eksisterende projektpost opdateres og genbruges, og allerede oprettede startopgaver duplikeres ikke. Startopgaverne indeholder målemetode, varer højst 120 minutter og fordeles mellem SEO Manager, Webmaster og Content Manager.
+
+SEO Manager må kun analysere, anbefale og planlægge. Den har ingen website-skrivevej og sender ingen Telegram-beskeder. Dashboard og terminal viser antal analyserede websites, nye og opdaterede recovery-projekter, websites uden handling samt den højest prioriterede anbefaling.
+
+## Web Dashboard
+
+Sprint 17 tilføjer et lokalt Streamlit-dashboard i `dashboard/`. `dashboard/app.py` er indgangspunktet, `dashboard/components/` indeholder data- og UI-komponenter, `dashboard/pages/` indeholder placeholdersider, og `dashboard/assets/` indeholder det mørke responsive tema.
+
+```text
+Streamlit UI
+  -> dashboard.components.data
+  -> Database read-only facade
+  -> SQLite
+```
+
+UI-laget indeholder ingen SQL og importerer ingen eksterne integrationer. Alle sektioner læses via `Database`-metoder for systemstatus, overblik, økonomi, SEO Health, vigtigste opgaver, SEO Recovery, seneste salg og Orchestrator-events. En sektion med tomme eller utilgængelige data viser `Ingen data.` uden at blokere de øvrige sektioner.
+
+Dashboardprocessen foretager ingen Telegram-, Search Console- eller Partner Ads-kald. De eksisterende baggrundsprocesser gemmer seneste kendte komponentstatus i `app_state`, som dashboardet læser sammen med de øvrige databaseværdier.
+
+## Website Intelligence
+
+`agents/website_intelligence.py` opbygger én samlet, deterministisk profil pr. website ud fra allerede gemte data. Agenten læser Website Registry, Search Console-dagstal, Partner Ads-salg, 28-dages SEO Health og aktive projekter/opgaver gennem `Database`.
+
+```text
+Website Registry + gemte driftsdata
+  -> Website Intelligence Agent
+  -> website_profiles
+  -> website_statistics
+  -> website_categories
+  -> website_history
+  -> Website Profile (Streamlit, read-only)
+```
+
+`website_profiles` holder den aktuelle profil og website health. `website_statistics` gemmer daglige sammenkoblede målinger. `website_categories` gemmer niche- og monetization-kategorier. `website_history` gemmer kun snapshots, når data faktisk ændres. CMS og tema registreres fra eksisterende metadata; ukendte værdier gemmes som `Ukendt` og gættes ikke.
+
+Website Profile-siden åbner et website via en selector og viser profil, SEO, provision, historik, aktive projekter, aktive opgaver og de gemte deterministiske anbefalinger. Siden har ingen SQL og kalder ingen eksterne tjenester.
+
 ## Sikkerhed
 
 Tokens, API-nøgler, Chat ID'er og andre hemmeligheder må aldrig gemmes i dokumentation eller versionsstyret kode. De skal senere placeres i sikker lokal konfiguration eller et secrets-system.

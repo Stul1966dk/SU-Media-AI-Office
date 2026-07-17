@@ -1,0 +1,73 @@
+:root {
+    color-scheme: dark;
+}
+
+.stApp {
+    background:
+        radial-gradient(
+            circle at top right,
+            rgba(38, 110, 96, 0.12),
+            transparent 32rem
+        ),
+        #0b0f14;
+}
+
+[data-testid="stHeader"] {
+    background: rgba(11, 15, 20, 0.86);
+}
+
+[data-testid="stSidebarNav"] {
+    display: none;
+}
+
+[data-testid="stMetric"] {
+    background: #121821;
+    border: 1px solid #253041;
+    border-radius: 0.75rem;
+    padding: 1rem;
+}
+
+.status-card {
+    align-items: center;
+    background: #121821;
+    border: 1px solid #253041;
+    border-radius: 0.75rem;
+    display: flex;
+    gap: 0.75rem;
+    min-height: 4.5rem;
+    padding: 0.85rem 1rem;
+}
+
+.status-card small {
+    color: #9aa8ba;
+    display: block;
+}
+
+.status-dot {
+    border-radius: 999px;
+    display: block;
+    height: 0.75rem;
+    width: 0.75rem;
+}
+
+.status-ok .status-dot {
+    background: #39d98a;
+    box-shadow: 0 0 0 0.25rem rgba(57, 217, 138, 0.13);
+}
+
+.status-error .status-dot {
+    background: #ff5c65;
+    box-shadow: 0 0 0 0.25rem rgba(255, 92, 101, 0.13);
+}
+
+div[data-testid="stButton"] > button {
+    min-height: 5rem;
+    white-space: pre-line;
+}
+
+@media (max-width: 640px) {
+    [data-testid="stMetric"],
+    .status-card {
+        min-height: auto;
+    }
+}

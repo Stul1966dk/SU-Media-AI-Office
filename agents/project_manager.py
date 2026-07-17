@@ -76,6 +76,26 @@ class ProjectManager:
             )
         ]
 
+    def update_project(
+        self,
+        project_id: int,
+        *,
+        description: str,
+        priority: str,
+        expected_effect: str,
+        status: str = "ready",
+    ) -> None:
+        """Update an existing project's mutable planning fields."""
+        if self.task_engine.get_project(project_id) is None:
+            raise ValueError(f"Projekt {project_id} findes ikke.")
+        self.database.update_project_record(
+            project_id,
+            description=description,
+            status=status,
+            priority=priority,
+            expected_effect=expected_effect,
+        )
+
     def create_concrete_task(
         self,
         *,
@@ -89,6 +109,7 @@ class ProjectManager:
         expected_effect: str,
         priority_score: int,
         depends_on_task_id: int | None = None,
+        measurement_method: str = "",
     ) -> list[int]:
         """Create one task or split work exceeding 120 minutes into a chain."""
         if estimated_minutes <= MAX_TASK_MINUTES:
@@ -104,6 +125,7 @@ class ProjectManager:
                     expected_effect=expected_effect,
                     priority_score=priority_score,
                     depends_on_task_id=depends_on_task_id,
+                    measurement_method=measurement_method,
                 )
             ]
 
@@ -126,6 +148,7 @@ class ProjectManager:
                 expected_effect=expected_effect,
                 priority_score=priority_score,
                 depends_on_task_id=dependency,
+                measurement_method=measurement_method,
             )
             task_ids.append(task_id)
             dependency = task_id

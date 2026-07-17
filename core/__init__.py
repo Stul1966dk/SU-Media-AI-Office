@@ -8,7 +8,12 @@ from .search_console_service import (
     SearchConsoleService,
     SearchConsoleSyncResult,
 )
-from .seo_history import SEOHealth, analyze_all_sites, analyze_site
+from .seo_history import (
+    SEOHealth,
+    SEOHistory,
+    analyze_all_sites,
+    analyze_site,
+)
 from .website_registry import ImportResult, WebsiteRegistry
 
 __all__ = [
@@ -21,6 +26,7 @@ __all__ = [
     "SearchConsoleService",
     "SearchConsoleSyncResult",
     "SEOHealth",
+    "SEOHistory",
     "WebsiteRegistry",
     "analyze_all_sites",
     "analyze_site",

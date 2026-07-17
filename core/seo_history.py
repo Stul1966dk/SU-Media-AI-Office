@@ -23,6 +23,26 @@ class SEOHealth:
     score: float
 
 
+class SEOHistory:
+    """Object-oriented facade used by specialist agents."""
+
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    def analyze_site(
+        self,
+        website: str,
+        analysis_date: date | None = None,
+    ) -> list[SEOHealth]:
+        return analyze_site(self.database, website, analysis_date)
+
+    def analyze_all_sites(
+        self,
+        analysis_date: date | None = None,
+    ) -> list[SEOHealth]:
+        return analyze_all_sites(self.database, analysis_date)
+
+
 def analyze_site(
     database: Database,
     website: str,

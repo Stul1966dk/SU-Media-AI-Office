@@ -82,6 +82,7 @@ class TaskEngine:
         priority_score: int,
         status: str = "ready",
         depends_on_task_id: int | None = None,
+        measurement_method: str = "",
     ) -> int:
         """Create one executable task of at most 120 minutes."""
         self._validate_status(status)
@@ -103,6 +104,7 @@ class TaskEngine:
                 "assigned_agent": assigned_agent,
                 "estimated_minutes": estimated_minutes,
                 "expected_effect": expected_effect,
+                "measurement_method": measurement_method,
                 "priority_score": priority_score,
                 "status": status,
                 "depends_on_task_id": depends_on_task_id,
