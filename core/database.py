@@ -52,6 +52,7 @@ class Database:
         self.connection = sqlite3.connect(self.path)
         self.connection.row_factory = sqlite3.Row
         self._create_or_migrate_sales_table()
+        self._create_or_migrate_websites_table()
         self.connection.execute(
             """
             CREATE TABLE IF NOT EXISTS app_state (
@@ -61,6 +62,130 @@ class Database:
             """
         )
         self.connection.commit()
+
+    def _create_websites_table(self) -> None:
+        """Create the shared website registry table."""
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS websites (
+                website TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                active INTEGER NOT NULL,
+                monetized INTEGER NOT NULL,
+                priority TEXT NOT NULL,
+                primary_income_source TEXT NOT NULL,
+                niche TEXT NOT NULL,
+                domain_age TEXT NOT NULL,
+                notes TEXT NOT NULL,
+                status TEXT NOT NULL
+            )
+            """
+        )
+
+    def _create_or_migrate_websites_table(self) -> None:
+        """Create the website table or add fields introduced later."""
+        exists = self._connection.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'websites'
+            """
+        ).fetchone()
+        if not exists:
+            self._create_websites_table()
+            return
+
+        columns = {
+            row["name"]
+            for row in self._connection.execute("PRAGMA table_info(websites)")
+        }
+        if "status" not in columns:
+            with self._connection:
+                self._connection.execute(
+                    """
+                    ALTER TABLE websites
+                    ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
+                    """
+                )
+                self._connection.execute(
+                    """
+                    UPDATE websites
+                    SET status = 'phasing_out'
+                    WHERE LOWER(notes) LIKE '%will be terminated%'
+                    """
+                )
+
+    def upsert_website(self, website: dict[str, Any]) -> None:
+        """Insert a website or update all fields for an existing domain."""
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO websites (
+                    website, display_name, active, monetized, priority,
+                    primary_income_source, niche, domain_age, notes
+                    , status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(website) DO UPDATE SET
+                    display_name = excluded.display_name,
+                    active = excluded.active,
+                    monetized = excluded.monetized,
+                    priority = excluded.priority,
+                    primary_income_source = excluded.primary_income_source,
+                    niche = excluded.niche,
+                    domain_age = excluded.domain_age,
+                    notes = excluded.notes,
+                    status = excluded.status
+                """,
+                (
+                    website["website"],
+                    website["display_name"],
+                    int(website["active"]),
+                    int(website["monetized"]),
+                    website["priority"],
+                    website["primary_income_source"],
+                    website["niche"],
+                    website["domain_age"],
+                    website["notes"],
+                    website["status"],
+                ),
+            )
+
+    def get_all_websites(self) -> list[dict[str, Any]]:
+        """Return every website ordered by its unique domain."""
+        rows = self._connection.execute(
+            """
+            SELECT
+                website, display_name, active, monetized, priority,
+                primary_income_source, niche, domain_age, notes
+                , status
+            FROM websites
+            ORDER BY website
+            """
+        ).fetchall()
+        return [self._website_row(row) for row in rows]
+
+    def get_website(self, website: str) -> dict[str, Any] | None:
+        """Return one website by its normalized unique domain."""
+        row = self._connection.execute(
+            """
+            SELECT
+                website, display_name, active, monetized, priority,
+                primary_income_source, niche, domain_age, notes
+                , status
+            FROM websites
+            WHERE website = ?
+            """,
+            (website,),
+        ).fetchone()
+        return self._website_row(row) if row is not None else None
+
+    @staticmethod
+    def _website_row(row: sqlite3.Row) -> dict[str, Any]:
+        website = dict(row)
+        website["active"] = bool(website["active"])
+        website["monetized"] = bool(website["monetized"])
+        return website
 
     def close(self) -> None:
         """Close the active database connection."""

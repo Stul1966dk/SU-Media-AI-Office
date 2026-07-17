@@ -36,6 +36,23 @@ Tabellen gemmer følgende felter for hvert registreret salg:
 
 Affiliate Manager migrerer automatisk en eksisterende `registered_sales`-tabel, hvis en eller flere af disse kolonner mangler. Eksisterende registreringer og deres unikke ID'er bevares under migrationen.
 
+Tabellen `websites` er det centrale register over de websites, som SU Media AI Office arbejder med. Feltet `website` indeholder et normaliseret domæne og er tabellens unikke nøgle. En ny CSV-import opdaterer alle felter for et eksisterende domæne og opretter en post, når domænet ikke findes.
+
+Ved programstart sammenlignes CSV-data med tabellen felt for felt. Importresultatet registrerer antal fundne, nye, opdaterede og nyligt markerede `phasing_out`-websites. Poster slettes ikke automatisk, hvis de fjernes fra CSV-filen.
+
+| Felt | Beskrivelse |
+| --- | --- |
+| `website` | Normaliseret domæne og tabellens primære nøgle |
+| `display_name` | Navnet, der vises for brugere og AI-medarbejdere |
+| `active` | Om websitet er aktivt |
+| `monetized` | Om websitet aktuelt er monetiseret |
+| `priority` | Websitets prioritet |
+| `primary_income_source` | Den primære indtægtskilde |
+| `niche` | Websitets niche |
+| `domain_age` | Den registrerede dato eller alder for domænet |
+| `notes` | Supplerende noter |
+| `status` | `active` eller `phasing_out`, afledt af CSV-feltet `notes` |
+
 ## Principper
 
 - Rå data gemmes, så de oprindelige værdier kan genbehandles og kontrolleres senere.
@@ -46,18 +63,6 @@ Affiliate Manager migrerer automatisk en eksisterende `registered_sales`-tabel, 
 - Ændringer og resultater skal kunne måles over tid, så effekten af opgaver og anbefalinger kan dokumenteres.
 
 ## Planlagte tabeller
-
-### `websites`
-
-Indeholder de websites, som SU Media AI Office arbejder med.
-
-| Felt | Beskrivelse |
-| --- | --- |
-| `id` | Intern unik identifikator |
-| `domain` | Websitets domæne |
-| `name` | Websitets navn |
-| `category` | Websitets kategori eller forretningsområde |
-| `status` | Aktuel status, eksempelvis aktiv eller inaktiv |
 
 ### `affiliate_sales`
 

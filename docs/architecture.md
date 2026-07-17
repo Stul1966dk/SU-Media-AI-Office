@@ -37,6 +37,10 @@ Den centrale databaseadgang ligger i `core/database.py`. Klassen `Database` er d
 
 Denne grænse holder forretningslogikken uafhængig af den aktuelle database og gør en senere migration fra SQLite til Supabase PostgreSQL enklere.
 
+Website Registry ligger i `core/website_registry.py`. Komponenten importerer og normaliserer websiteoplysninger fra CSV, mens den centrale `Database` udfører lagring og opslag. Andre komponenter bruger registret via metoderne `get_all()` og `get()` og behøver derfor ikke kende CSV-filens placering eller format.
+
+Registry-synkroniseringen kører automatisk ved Affiliate Managers opstart. Importen sammenligner de normaliserede CSV-data med den eksisterende `websites`-tabel og returnerer et struktureret resultat med antal fundne, oprettede, opdaterede og nyligt udfasede websites. Manglende eller ugyldig CSV vises som en advarsel og må ikke stoppe salgsmonitoreringen.
+
 ### Beslutningslag
 
 Faste og entydige kontroller løses med programregler. AI anvendes til fortolkning, forklaring og prioritering, hvor der reelt er behov for dømmekraft.
@@ -62,6 +66,21 @@ Partner-ads XML
 ```
 
 Version 0.1 indeholder ikke et fleragentsystem eller en avanceret beslutningsmotor.
+
+## Website Registry
+
+```text
+Website-CSV
+  -> WebsiteRegistry
+  -> domænenormalisering og validering
+  -> central Database-klasse
+  -> websites-tabel
+  -> AI-medarbejdere og fælles tjenester
+```
+
+Domænet er den unikke nøgle. Gentagne importer opdaterer eksisterende websites og opretter kun poster for nye domæner.
+
+Websites, der ikke længere findes i CSV-filen, slettes ikke automatisk. Dermed bevares historik og oplysninger, indtil en særskilt, kontrolleret sletning gennemføres.
 
 ## Sikkerhed
 

@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.database import Database
+from core.website_registry import WebsiteRegistry
 
 from config import Config, load_config
 from partner_ads import PartnerAdsService
@@ -34,6 +35,35 @@ def configure_logging(project_root: Path) -> logging.Logger:
         encoding="utf-8",
     )
     return logging.getLogger("affiliate_manager")
+
+
+def synchronize_websites(database: Database, logger: logging.Logger) -> None:
+    """Synchronize Website Registry without blocking Affiliate Manager."""
+    print("Website Registry")
+    print()
+    registry = WebsiteRegistry(database)
+    try:
+        result = registry.sync()
+    except FileNotFoundError:
+        warning = "ADVARSEL: data/websites.csv blev ikke fundet."
+        print(warning)
+        logger.warning("Website Registry CSV blev ikke fundet.")
+        print()
+        return
+    except (OSError, UnicodeError, ValueError) as error:
+        print(f"ADVARSEL: Website Registry kunne ikke importeres: {error}")
+        logger.warning("Website Registry kunne ikke importeres: %s", error)
+        print()
+        return
+
+    print(f"{result.total} websites fundet")
+    print()
+    print(f"+ {result.created} nye websites")
+    print(f"~ {result.updated} opdaterede websites")
+    print(f"- {result.phased_out} nye websites markeret som phasing_out")
+    print()
+    print("Import gennemført")
+    print()
 
 
 def run_check(
@@ -86,6 +116,7 @@ def monitor(config: Config, once: bool = False) -> None:
     logger = configure_logging(project_root)
     database = Database(config.database_file)
     database.initialize()
+    synchronize_websites(database, logger)
     partner_ads = PartnerAdsService(
         base_url=config.partner_ads_base_url,
         key=config.partner_ads_key,
