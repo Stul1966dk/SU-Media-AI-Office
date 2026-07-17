@@ -33,6 +33,10 @@ Hver integration henter og validerer data, normaliserer formatet, håndterer fej
 
 Systemet skal med tiden gemme salg, trafik, websites, arbejdsordrer, beslutninger, målinger og dokumenterede erfaringer. Fakta, hypoteser, beslutninger og resultater skal holdes adskilt.
 
+Den centrale databaseadgang ligger i `core/database.py`. Klassen `Database` er den eneste komponent, der må indeholde SQL eller arbejde direkte med SQLite. Affiliate Manager og fremtidige AI-medarbejdere bruger klassens offentlige metoder til initialisering, dubletkontrol, lagring og læsning af salg.
+
+Denne grænse holder forretningslogikken uafhængig af den aktuelle database og gør en senere migration fra SQLite til Supabase PostgreSQL enklere.
+
 ### Beslutningslag
 
 Faste og entydige kontroller løses med programregler. AI anvendes til fortolkning, forklaring og prioritering, hvor der reelt er behov for dømmekraft.
@@ -50,7 +54,8 @@ Handlinger kan være Telegram-notifikationer, advarsler, rapporter og konkrete a
 ```text
 Partner-ads XML
   -> Partner-ads-integration
-  -> salgslager
+  -> central Database-klasse
+  -> SQLite-salgslager
   -> kontrol af nye salg
   -> Notification Service
   -> Telegram

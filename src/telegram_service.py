@@ -6,9 +6,9 @@ import requests
 from requests import RequestException
 
 
-def format_danish_currency(value: str) -> str:
+def format_danish_currency(value: str | int | float | Decimal) -> str:
     """Format a decimal value with Danish thousands and decimal separators."""
-    normalized = value.strip().replace(" ", "")
+    normalized = str(value).strip().replace(" ", "")
     if "," in normalized and "." in normalized:
         normalized = normalized.replace(".", "").replace(",", ".")
     else:
@@ -22,7 +22,10 @@ def format_danish_currency(value: str) -> str:
     return f"{amount:,.2f}".translate(str.maketrans({",": ".", ".": ","}))
 
 
-def build_sale_message(sale: dict[str, str]) -> str:
+def build_sale_message(
+    sale: dict[str, str],
+    daily_commission: str | int | float | Decimal,
+) -> str:
     """Build the Telegram message for one Partner-ads sale."""
     required_fields = (
         "program",
@@ -40,6 +43,7 @@ def build_sale_message(sale: dict[str, str]) -> str:
 
     revenue = format_danish_currency(sale["omsaetning"])
     commission = format_danish_currency(sale["provision"])
+    daily_commission_formatted = format_danish_currency(daily_commission)
     return (
         "Nyt salg\n\n"
         "Program\n"
@@ -52,6 +56,8 @@ def build_sale_message(sale: dict[str, str]) -> str:
         f"{revenue} kr.\n\n"
         "Provision\n"
         f"{commission} kr.\n\n"
+        "Dagens provision\n"
+        f"{daily_commission_formatted} kr.\n\n"
         "Website\n"
         f"{sale['url']}"
     )
@@ -90,6 +96,10 @@ class TelegramService:
                 f"Telegram-beskeden kunne ikke sendes: {description}"
             ) from None
 
-    def send_sale(self, sale: dict[str, str]) -> None:
+    def send_sale(
+        self,
+        sale: dict[str, str],
+        daily_commission: str | int | float | Decimal,
+    ) -> None:
         """Send a message for the supplied Partner-ads sale."""
-        self.send_message(build_sale_message(sale))
+        self.send_message(build_sale_message(sale, daily_commission))

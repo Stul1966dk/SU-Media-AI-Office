@@ -2,12 +2,19 @@
 
 import argparse
 import logging
+import sys
 import time
 from datetime import datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from core.database import Database
+
 from config import Config, load_config
-from models import SalesDatabase
 from partner_ads import PartnerAdsService
 from telegram_service import TelegramService
 
@@ -32,7 +39,7 @@ def configure_logging(project_root: Path) -> logging.Logger:
 def run_check(
     partner_ads: PartnerAdsService,
     telegram: TelegramService,
-    database: SalesDatabase,
+    database: Database,
     logger: logging.Logger,
 ) -> tuple[int, int]:
     """Run one fetch, notification, and persistence cycle."""
@@ -42,19 +49,28 @@ def run_check(
     _, sales = partner_ads.fetch_sales()
     print(f"Antal hentede salg: {len(sales)}")
 
-    if not database.is_initialized():
-        database.initialize_baseline(sales)
+    if not database.is_baseline_initialized():
+        database.initialize_sales_baseline(sales)
         print("Første kørsel: eksisterende salg registreret uden notifikationer.")
         print("Antal nye salg: 0")
         logger.info("Baseline initialiseret med %d eksisterende salg.", len(sales))
         return len(sales), 0
 
-    new_sales = database.find_new(sales)
+    new_sales: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    for sale in sales:
+        kombiid = sale["kombiid"]
+        if kombiid not in seen_ids and not database.sale_exists(kombiid):
+            new_sales.append(sale)
+            seen_ids.add(kombiid)
     print(f"Antal nye salg: {len(new_sales)}")
 
     for sale in new_sales:
-        telegram.send_sale(sale)
-        database.register(sale)
+        daily_commission = database.get_today_commission(
+            sale["dato"]
+        ) + Decimal(sale["provision"])
+        telegram.send_sale(sale, daily_commission)
+        database.save_sale(sale)
 
     logger.info(
         "Kontrol gennemført: %d hentede salg, %d nye salg.",
@@ -68,7 +84,8 @@ def monitor(config: Config, once: bool = False) -> None:
     """Monitor Partner-ads once or every 30 minutes."""
     project_root = config.sales_file.parent.parent
     logger = configure_logging(project_root)
-    database = SalesDatabase(config.database_file)
+    database = Database(config.database_file)
+    database.initialize()
     partner_ads = PartnerAdsService(
         base_url=config.partner_ads_base_url,
         key=config.partner_ads_key,
