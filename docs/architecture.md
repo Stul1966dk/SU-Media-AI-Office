@@ -154,6 +154,29 @@ Hændelse
 
 Hændelser og handlinger gemmes i SQLite-tabellerne `events` og `actions`. En handling med en ufærdig forgænger har status `blocked`; når forgængeren færdigmarkeres, ændres den næste til `pending`. Dashboardet viser ventende hændelser, ventende handlinger og antal registrerede agenter.
 
+## Google Search Console
+
+Den read-only Search Console-integration ligger i `integrations/search_console.py`. Et eksplicit desktop OAuth-login bruger den lokale `credentials.json` og gemmer tokenet i `token.json`. Den normale dataimport kræver og genbruger `token.json`; den starter aldrig et browser-login automatisk. Begge filer er udelukket fra Git.
+
+`core/search_console_service.py` henter property-listen, matcher property-domæner med Website Registry og gemmer resultatet gennem den centrale `Database`. Kun aktive properties med et website-match får hentet Search Analytics-data. Den automatiske import forespørger de seneste 180 dage med datodimension, så SEO History Engine har grundlag for 90 mod 90 dage, og gemmer ét samlet dagspunkt pr. website. En fejl isoleres til den enkelte property og logges kun med property-navn og exceptiontype.
+
+```text
+Google OAuth (read-only)
+  -> SearchConsoleConnector
+  -> SearchConsoleService
+  -> Website Registry-domænematch
+  -> search_console_properties
+  -> Search Analytics API (daglige totaler)
+  -> search_console_daily_metrics
+  -> SEO History Engine (7/28/90 dage mod foregående periode)
+  -> seo_health_history
+  -> Dashboard
+```
+
+`core/seo_history.py` beregner en deterministisk `SEOHealth` for hvert website og hver periode. Scoren er afgrænset til 0-100 med 50 som neutral baseline og klassificeres som `growing`, `stable`, `declining` eller `critical`. Klik og visninger måles som procentændringer, CTR som procentpoint og placering som forskellen i vægtet gennemsnitsplacering. Manglende sammenligningsgrundlag behandles neutralt.
+
+Dashboardet viser forbindelsesstatus, property-antal, seneste synkronisering, antal gemte dagspunkter og fordelingen af 28-dages SEO Health. Terminalen viser importresultatet, op til fem websites med størst fald i klik og de fem laveste 28-dages SEO-scorer. Analysen opretter ingen opgaver eller Orchestrator-hændelser, bruger ikke Project Manager og sender ingen Telegram-beskeder.
+
 ## Sikkerhed
 
 Tokens, API-nøgler, Chat ID'er og andre hemmeligheder må aldrig gemmes i dokumentation eller versionsstyret kode. De skal senere placeres i sikker lokal konfiguration eller et secrets-system.

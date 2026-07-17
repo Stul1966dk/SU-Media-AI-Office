@@ -58,6 +58,25 @@ Succeskriterium: Project Manager kan omsætte et projekt til små, afhængige op
 
 Succeskriterium: En hændelse kan fordeles til en eller flere agenter uden direkte afhængigheder mellem specialagenterne, og rækkefølgen kan genoptages fra databasen.
 
+## Version 0.6 - Search Console Connector
+
+- [x] Tilføj read-only desktop OAuth
+- [x] Gem og genbrug lokalt OAuth-token
+- [x] Hent alle tilgængelige properties og tilladelsesniveauer
+- [x] Match properties med Website Registry
+- [x] Gem properties uden dubletter
+- [x] Vis forbindelsesstatus på dashboardet
+- [x] Hent dagstal for klik, visninger, CTR og placering
+- [x] Gem dagstal idempotent for matchede websites
+- [x] Sammenlign seneste 7 hele dage med de foregående 7 dage
+- [x] Vis synkronisering og de fem største klikfald i terminalen
+- [x] Hent 180 dages historik til 7/28/90-periodeanalyse
+- [x] Beregn og gem SEO Health-score uden dubletter
+- [x] Vis trendfordeling og de fem laveste SEO-scorer
+- [ ] Hent søgeords- og sidedimensioner
+
+Succeskriterium: AI Office kan sikkert hente og historisere daglige Search Console-totaler for alle matchede websites, fortsætte efter fejl på en enkelt property og sammenligne udviklingen uden at credentials eller tokens versionsstyres eller logges.
+
 ## Senere kandidater
 
 - Plausible Analytics

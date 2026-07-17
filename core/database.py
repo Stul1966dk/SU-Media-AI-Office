@@ -8,7 +8,7 @@ later migration to Supabase PostgreSQL.
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -55,6 +55,9 @@ class Database:
         self._create_or_migrate_websites_table()
         self._create_work_tables()
         self._create_orchestrator_tables()
+        self._create_search_console_table()
+        self._create_search_console_daily_metrics_table()
+        self._create_seo_health_history_table()
         self.connection.execute(
             """
             CREATE TABLE IF NOT EXISTS app_state (
@@ -64,6 +67,647 @@ class Database:
             """
         )
         self.connection.commit()
+
+    def _create_search_console_table(self) -> None:
+        """Create the Google Search Console property registry."""
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS search_console_properties (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_url TEXT NOT NULL UNIQUE,
+                permission_level TEXT NOT NULL,
+                website_id TEXT,
+                active INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (website_id) REFERENCES websites(website)
+            )
+            """
+        )
+
+    def _create_search_console_daily_metrics_table(self) -> None:
+        """Create daily Search Console metrics with an idempotent key."""
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS search_console_daily_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT NOT NULL,
+                site_url TEXT NOT NULL,
+                metric_date TEXT NOT NULL,
+                clicks INTEGER NOT NULL,
+                impressions INTEGER NOT NULL,
+                ctr REAL NOT NULL,
+                average_position REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (website_id, metric_date),
+                FOREIGN KEY (website_id) REFERENCES websites(website)
+            )
+            """
+        )
+
+    def _create_seo_health_history_table(self) -> None:
+        """Create idempotent SEO health snapshots for every analysis period."""
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS seo_health_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT NOT NULL,
+                date TEXT NOT NULL,
+                period TEXT NOT NULL,
+                score REAL NOT NULL,
+                trend TEXT NOT NULL,
+                click_change REAL,
+                impression_change REAL,
+                ctr_change REAL,
+                position_change REAL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (website_id, date, period),
+                FOREIGN KEY (website_id) REFERENCES websites(website)
+            )
+            """
+        )
+
+    def upsert_search_console_property(
+        self,
+        *,
+        site_url: str,
+        permission_level: str,
+        website_id: str | None,
+        active: bool = True,
+    ) -> int:
+        """Insert or update one Search Console property without duplicates."""
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO search_console_properties (
+                    site_url, permission_level, website_id, active,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(site_url) DO UPDATE SET
+                    permission_level = excluded.permission_level,
+                    website_id = excluded.website_id,
+                    active = excluded.active,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    site_url,
+                    permission_level,
+                    website_id,
+                    int(active),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+        row = self._connection.execute(
+            "SELECT id FROM search_console_properties WHERE site_url = ?",
+            (site_url,),
+        ).fetchone()
+        return int(row["id"])
+
+    def get_search_console_properties(self) -> list[dict[str, Any]]:
+        """Return every stored Search Console property."""
+        rows = self._connection.execute(
+            """
+            SELECT
+                id, site_url, permission_level, website_id, active,
+                created_at, updated_at
+            FROM search_console_properties
+            ORDER BY site_url
+            """
+        ).fetchall()
+        properties = [dict(row) for row in rows]
+        for item in properties:
+            item["active"] = bool(item["active"])
+        return properties
+
+    def upsert_search_console_daily_metric(
+        self,
+        *,
+        website_id: str,
+        site_url: str,
+        metric_date: str,
+        clicks: int,
+        impressions: int,
+        ctr: float,
+        average_position: float,
+    ) -> str:
+        """Insert or update one daily metric and return the write action."""
+        existing = self._connection.execute(
+            """
+            SELECT id
+            FROM search_console_daily_metrics
+            WHERE website_id = ? AND metric_date = ?
+            """,
+            (website_id, metric_date),
+        ).fetchone()
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO search_console_daily_metrics (
+                    website_id, site_url, metric_date, clicks, impressions,
+                    ctr, average_position, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(website_id, metric_date) DO UPDATE SET
+                    site_url = excluded.site_url,
+                    clicks = excluded.clicks,
+                    impressions = excluded.impressions,
+                    ctr = excluded.ctr,
+                    average_position = excluded.average_position,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    website_id,
+                    site_url,
+                    metric_date,
+                    clicks,
+                    impressions,
+                    ctr,
+                    average_position,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+        return "updated" if existing else "created"
+
+    def get_search_console_daily_metrics(
+        self,
+        website_id: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return stored daily metrics with optional website/date filters."""
+        conditions: list[str] = []
+        parameters: list[str] = []
+        if website_id:
+            conditions.append("website_id = ?")
+            parameters.append(website_id)
+        if start_date:
+            conditions.append("metric_date >= ?")
+            parameters.append(start_date)
+        if end_date:
+            conditions.append("metric_date <= ?")
+            parameters.append(end_date)
+        where_clause = (
+            f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        )
+        rows = self._connection.execute(
+            f"""
+            SELECT
+                id, website_id, site_url, metric_date, clicks, impressions,
+                ctr, average_position, created_at, updated_at
+            FROM search_console_daily_metrics
+            {where_clause}
+            ORDER BY website_id, metric_date
+            """,
+            parameters,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_search_console_summary(self) -> dict[str, Any]:
+        """Return dashboard totals and the latest metric synchronization."""
+        row = self._connection.execute(
+            """
+            SELECT
+                COUNT(*) AS stored_metrics,
+                MAX(updated_at) AS latest_sync
+            FROM search_console_daily_metrics
+            """
+        ).fetchone()
+        property_row = self._connection.execute(
+            """
+            SELECT
+                COUNT(*) AS properties,
+                MAX(updated_at) AS latest_property_sync
+            FROM search_console_properties
+            WHERE active = 1 AND website_id IS NOT NULL
+            """
+        ).fetchone()
+        latest_sync = max(
+            filter(
+                None,
+                [row["latest_sync"], property_row["latest_property_sync"]],
+            ),
+            default=None,
+        )
+        return {
+            "properties": int(property_row["properties"]),
+            "stored_metrics": int(row["stored_metrics"]),
+            "latest_sync": latest_sync,
+        }
+
+    def get_search_console_comparisons(
+        self,
+        reference_date: date | None = None,
+    ) -> list[dict[str, Any]]:
+        """Compare the latest seven complete days with the prior seven."""
+        today = reference_date or date.today()
+        current_end = today - timedelta(days=1)
+        current_start = today - timedelta(days=7)
+        previous_end = today - timedelta(days=8)
+        previous_start = today - timedelta(days=14)
+        rows = self._connection.execute(
+            """
+            SELECT
+                website_id,
+                SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                    THEN clicks ELSE 0 END) AS current_clicks,
+                SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                    THEN clicks ELSE 0 END) AS previous_clicks,
+                SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                    THEN impressions ELSE 0 END) AS current_impressions,
+                SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                    THEN impressions ELSE 0 END) AS previous_impressions,
+                SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                    THEN clicks ELSE 0 END) * 1.0 /
+                    NULLIF(SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                        THEN impressions ELSE 0 END), 0) AS current_ctr,
+                SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                    THEN clicks ELSE 0 END) * 1.0 /
+                    NULLIF(SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                        THEN impressions ELSE 0 END), 0) AS previous_ctr,
+                SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                    THEN average_position * impressions ELSE 0 END) /
+                    NULLIF(SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                        THEN impressions ELSE 0 END), 0)
+                    AS current_position,
+                SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                    THEN average_position * impressions ELSE 0 END) /
+                    NULLIF(SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                        THEN impressions ELSE 0 END), 0)
+                    AS previous_position
+            FROM search_console_daily_metrics
+            WHERE metric_date BETWEEN ? AND ?
+            GROUP BY website_id
+            """,
+            (
+                current_start.isoformat(), current_end.isoformat(),
+                previous_start.isoformat(), previous_end.isoformat(),
+                current_start.isoformat(), current_end.isoformat(),
+                previous_start.isoformat(), previous_end.isoformat(),
+                current_start.isoformat(), current_end.isoformat(),
+                current_start.isoformat(), current_end.isoformat(),
+                previous_start.isoformat(), previous_end.isoformat(),
+                previous_start.isoformat(), previous_end.isoformat(),
+                current_start.isoformat(), current_end.isoformat(),
+                current_start.isoformat(), current_end.isoformat(),
+                previous_start.isoformat(), previous_end.isoformat(),
+                previous_start.isoformat(), previous_end.isoformat(),
+                previous_start.isoformat(), current_end.isoformat(),
+            ),
+        ).fetchall()
+        return [
+            {
+                **dict(row),
+                "click_change_percent": self._percent_change(
+                    row["current_clicks"], row["previous_clicks"]
+                ),
+                "impression_change_percent": self._percent_change(
+                    row["current_impressions"], row["previous_impressions"]
+                ),
+                "ctr_change_points": self._difference(
+                    row["current_ctr"], row["previous_ctr"]
+                ),
+                "position_difference": self._difference(
+                    row["current_position"], row["previous_position"]
+                ),
+            }
+            for row in rows
+        ]
+
+    def get_click_change(
+        self,
+        website_id: str,
+        reference_date: date | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return click percentage changes for 7, 28, and 90 days."""
+        return self._get_metric_changes(
+            website_id,
+            metric="clicks",
+            change_type="percent",
+            reference_date=reference_date,
+        )
+
+    def get_impression_change(
+        self,
+        website_id: str,
+        reference_date: date | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return impression percentage changes for 7, 28, and 90 days."""
+        return self._get_metric_changes(
+            website_id,
+            metric="impressions",
+            change_type="percent",
+            reference_date=reference_date,
+        )
+
+    def get_position_change(
+        self,
+        website_id: str,
+        reference_date: date | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return weighted average-position differences for all periods."""
+        return self._get_metric_changes(
+            website_id,
+            metric="average_position",
+            change_type="position",
+            reference_date=reference_date,
+        )
+
+    def get_ctr_change(
+        self,
+        website_id: str,
+        reference_date: date | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return CTR changes in percentage points for all periods."""
+        return self._get_metric_changes(
+            website_id,
+            metric="ctr",
+            change_type="ctr",
+            reference_date=reference_date,
+        )
+
+    def _get_metric_changes(
+        self,
+        website_id: str,
+        *,
+        metric: str,
+        change_type: str,
+        reference_date: date | None,
+    ) -> list[dict[str, Any]]:
+        allowed_metrics = {
+            "clicks",
+            "impressions",
+            "average_position",
+            "ctr",
+        }
+        if metric not in allowed_metrics:
+            raise ValueError("Ukendt Search Console-metrik.")
+        today = reference_date or date.today()
+        results: list[dict[str, Any]] = []
+        for days in (7, 28, 90):
+            current_start = today - timedelta(days=days)
+            current_end = today - timedelta(days=1)
+            previous_start = today - timedelta(days=days * 2)
+            previous_end = today - timedelta(days=days + 1)
+            row = self._connection.execute(
+                """
+                SELECT
+                    COUNT(CASE WHEN metric_date BETWEEN ? AND ?
+                        THEN 1 END) AS current_rows,
+                    COUNT(CASE WHEN metric_date BETWEEN ? AND ?
+                        THEN 1 END) AS previous_rows,
+                    SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                        THEN clicks ELSE 0 END) AS current_clicks,
+                    SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                        THEN clicks ELSE 0 END) AS previous_clicks,
+                    SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                        THEN impressions ELSE 0 END) AS current_impressions,
+                    SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                        THEN impressions ELSE 0 END) AS previous_impressions,
+                    SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                        THEN average_position * impressions ELSE 0 END) /
+                        NULLIF(SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                            THEN impressions ELSE 0 END), 0)
+                        AS current_position,
+                    SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                        THEN average_position * impressions ELSE 0 END) /
+                        NULLIF(SUM(CASE WHEN metric_date BETWEEN ? AND ?
+                            THEN impressions ELSE 0 END), 0)
+                        AS previous_position
+                FROM search_console_daily_metrics
+                WHERE website_id = ? AND metric_date BETWEEN ? AND ?
+                """,
+                (
+                    current_start.isoformat(),
+                    current_end.isoformat(),
+                    previous_start.isoformat(),
+                    previous_end.isoformat(),
+                    current_start.isoformat(),
+                    current_end.isoformat(),
+                    previous_start.isoformat(),
+                    previous_end.isoformat(),
+                    current_start.isoformat(),
+                    current_end.isoformat(),
+                    previous_start.isoformat(),
+                    previous_end.isoformat(),
+                    current_start.isoformat(),
+                    current_end.isoformat(),
+                    current_start.isoformat(),
+                    current_end.isoformat(),
+                    previous_start.isoformat(),
+                    previous_end.isoformat(),
+                    previous_start.isoformat(),
+                    previous_end.isoformat(),
+                    website_id,
+                    previous_start.isoformat(),
+                    current_end.isoformat(),
+                ),
+            ).fetchone()
+            current: float | None = None
+            previous: float | None = None
+            if row["current_rows"] and row["previous_rows"]:
+                if metric == "clicks":
+                    current = row["current_clicks"]
+                    previous = row["previous_clicks"]
+                elif metric == "impressions":
+                    current = row["current_impressions"]
+                    previous = row["previous_impressions"]
+                elif metric == "ctr":
+                    current = (
+                        row["current_clicks"] / row["current_impressions"]
+                        if row["current_impressions"]
+                        else None
+                    )
+                    previous = (
+                        row["previous_clicks"] / row["previous_impressions"]
+                        if row["previous_impressions"]
+                        else None
+                    )
+                else:
+                    current = row["current_position"]
+                    previous = row["previous_position"]
+            change: float | None = None
+            if current is not None and previous is not None:
+                if change_type == "percent":
+                    change = self._percent_change(current, previous)
+                elif change_type == "ctr":
+                    change = (current - previous) * 100
+                else:
+                    change = current - previous
+            results.append(
+                {
+                    "period": f"{days}d",
+                    "current": current,
+                    "previous": previous,
+                    "change": change,
+                }
+            )
+        return results
+
+    def get_search_console_website_ids(self) -> list[str]:
+        """Return websites with stored Search Console metrics."""
+        rows = self._connection.execute(
+            """
+            SELECT DISTINCT website_id
+            FROM search_console_daily_metrics
+            ORDER BY website_id
+            """
+        ).fetchall()
+        return [str(row["website_id"]) for row in rows]
+
+    def upsert_seo_health(
+        self,
+        *,
+        website_id: str,
+        analysis_date: str,
+        period: str,
+        score: float,
+        trend: str,
+        click_change: float | None,
+        impression_change: float | None,
+        ctr_change: float | None,
+        position_change: float | None,
+    ) -> str:
+        """Insert or update one SEO health snapshot."""
+        existing = self._connection.execute(
+            """
+            SELECT id FROM seo_health_history
+            WHERE website_id = ? AND date = ? AND period = ?
+            """,
+            (website_id, analysis_date, period),
+        ).fetchone()
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO seo_health_history (
+                    website_id, date, period, score, trend, click_change,
+                    impression_change, ctr_change, position_change,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(website_id, date, period) DO UPDATE SET
+                    score = excluded.score,
+                    trend = excluded.trend,
+                    click_change = excluded.click_change,
+                    impression_change = excluded.impression_change,
+                    ctr_change = excluded.ctr_change,
+                    position_change = excluded.position_change,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    website_id,
+                    analysis_date,
+                    period,
+                    score,
+                    trend,
+                    click_change,
+                    impression_change,
+                    ctr_change,
+                    position_change,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+        return "updated" if existing else "created"
+
+    def get_seo_health_history(
+        self,
+        website_id: str | None = None,
+        period: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return SEO health snapshots with optional filters."""
+        conditions: list[str] = []
+        parameters: list[str] = []
+        if website_id:
+            conditions.append("website_id = ?")
+            parameters.append(website_id)
+        if period:
+            conditions.append("period = ?")
+            parameters.append(period)
+        where_clause = (
+            f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        )
+        rows = self._connection.execute(
+            f"""
+            SELECT *
+            FROM seo_health_history
+            {where_clause}
+            ORDER BY date DESC, website_id, period
+            """,
+            parameters,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_seo_health_summary(self, period: str = "28d") -> dict[str, int]:
+        """Count trends from the latest analyzed date for one period."""
+        rows = self._connection.execute(
+            """
+            SELECT trend, COUNT(*) AS total
+            FROM seo_health_history
+            WHERE period = ?
+              AND date = (
+                  SELECT MAX(date)
+                  FROM seo_health_history
+                  WHERE period = ?
+              )
+            GROUP BY trend
+            """,
+            (period, period),
+        ).fetchall()
+        summary = {
+            "growing": 0,
+            "stable": 0,
+            "declining": 0,
+            "critical": 0,
+        }
+        for row in rows:
+            summary[row["trend"]] = int(row["total"])
+        return summary
+
+    def get_lowest_seo_scores(
+        self,
+        limit: int = 5,
+        period: str = "28d",
+    ) -> list[dict[str, Any]]:
+        """Return the lowest scores from the latest analysis date."""
+        rows = self._connection.execute(
+            """
+            SELECT website_id, date, period, score, trend
+            FROM seo_health_history
+            WHERE period = ?
+              AND date = (
+                  SELECT MAX(date)
+                  FROM seo_health_history
+                  WHERE period = ?
+              )
+            ORDER BY score ASC, website_id
+            LIMIT ?
+            """,
+            (period, period, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def _percent_change(current: float, previous: float) -> float | None:
+        if previous == 0:
+            return 0.0 if current == 0 else None
+        return ((current - previous) / previous) * 100
+
+    @staticmethod
+    def _difference(
+        current: float | None,
+        previous: float | None,
+    ) -> float | None:
+        if current is None or previous is None:
+            return None
+        return current - previous
 
     def _create_orchestrator_tables(self) -> None:
         """Create persistent event and action queues."""

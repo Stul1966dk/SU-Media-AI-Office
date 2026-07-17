@@ -18,6 +18,8 @@ class Dashboard:
         next_task: dict[str, Any] | None,
         knowledge_document_count: int = 0,
         orchestrator_counts: dict[str, int] | None = None,
+        search_console_status: dict[str, Any] | None = None,
+        seo_health_status: dict[str, int] | None = None,
         now: datetime | None = None,
     ) -> str:
         """Return the complete dashboard as terminal-friendly text."""
@@ -30,6 +32,18 @@ class Dashboard:
             "pending_events": 0,
             "pending_actions": 0,
             "registered_agents": 0,
+        }
+        search_status = search_console_status or {
+            "connection_ok": False,
+            "total": 0,
+            "latest_sync": None,
+            "stored_metrics": 0,
+        }
+        seo_status = seo_health_status or {
+            "growing": 0,
+            "stable": 0,
+            "declining": 0,
+            "critical": 0,
         }
         today_commission = self.database.get_today_commission(sale_date)
         month_commission = self.database.get_month_commission(
@@ -61,6 +75,24 @@ class Dashboard:
                 "Registrerede agenter",
                 queue_counts["registered_agents"],
             ),
+            "",
+            "Search Console",
+            self._metric(
+                "Forbindelse",
+                "OK" if search_status["connection_ok"] else "FEJL",
+            ),
+            self._metric("Properties", search_status["total"]),
+            self._metric(
+                "Seneste synkronisering",
+                search_status["latest_sync"] or "Ingen",
+            ),
+            self._metric("Gemte dagspunkter", search_status["stored_metrics"]),
+            "",
+            "SEO Health",
+            self._metric("Growing", seo_status["growing"]),
+            self._metric("Stable", seo_status["stable"]),
+            self._metric("Declining", seo_status["declining"]),
+            self._metric("Critical", seo_status["critical"]),
             "",
             "OVERSIGT",
             self._metric("Websites", website_counts["total"]),

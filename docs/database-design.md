@@ -181,6 +181,62 @@ Indeholder agenthandlinger oprettet fra en hændelse.
 
 Orchestrator-tabellerne bruger statusværdierne `pending`, `routed`, `in_progress`, `blocked`, `completed`, `failed` og `cancelled`.
 
+### `search_console_properties`
+
+Indeholder de Search Console-properties, som den godkendte Google-konto har read-only-adgang til.
+
+| Felt | Beskrivelse |
+| --- | --- |
+| `id` | Intern unik identifikator |
+| `site_url` | Search Console-property URL og unik nøgle |
+| `permission_level` | Kontoens tilladelsesniveau |
+| `website_id` | Eventuelt matchet domæne fra Website Registry |
+| `active` | Om property-posten er aktiv |
+| `created_at` | Første registreringstidspunkt |
+| `updated_at` | Seneste synkroniseringstidspunkt |
+
+Properties uden domænematch bevares med tom `website_id`. Gentagne synkroniseringer opdaterer den eksisterende post ud fra `site_url` og opretter ikke dubletter.
+
+### `search_console_daily_metrics`
+
+Indeholder samlede dagstal fra Search Analytics API for matchede websites.
+
+| Felt | Beskrivelse |
+| --- | --- |
+| `id` | Intern unik identifikator |
+| `website_id` | Matchet domæne fra Website Registry |
+| `site_url` | Den anvendte Search Console-property |
+| `metric_date` | Kalenderdatoen for målingen |
+| `clicks` | Samlet antal klik |
+| `impressions` | Samlet antal visninger |
+| `ctr` | Klikrate som decimaltal |
+| `average_position` | Gennemsnitlig placering |
+| `created_at` | Første importtidspunkt |
+| `updated_at` | Seneste importtidspunkt |
+
+Kombinationen af `website_id` og `metric_date` er unik. En gentagen import opdaterer derfor det eksisterende dagspunkt, også hvis property-URL eller måleværdier er ændret.
+
+### `seo_health_history`
+
+Indeholder deterministiske SEO Health-snapshots for 7, 28 og 90 dage sammenlignet med den foregående periode af samme længde.
+
+| Felt | Beskrivelse |
+| --- | --- |
+| `id` | Intern unik identifikator |
+| `website_id` | Website fra Website Registry |
+| `date` | Analysedato |
+| `period` | Perioden `7d`, `28d` eller `90d` |
+| `score` | SEO-score fra 0 til 100 |
+| `trend` | `growing`, `stable`, `declining` eller `critical` |
+| `click_change` | Procentvis ændring i klik |
+| `impression_change` | Procentvis ændring i visninger |
+| `ctr_change` | Ændring i CTR målt i procentpoint |
+| `position_change` | Forskel i vægtet gennemsnitsplacering |
+| `created_at` | Første analysetidspunkt |
+| `updated_at` | Seneste analysetidspunkt |
+
+Kombinationen af `website_id`, `date` og `period` er unik. Gentagen analyse samme dag opdaterer derfor snapshot-resultatet uden dubletter.
+
 ### `measurements`
 
 Indeholder målinger af effekten før og efter udførte opgaver.

@@ -16,8 +16,17 @@ from core.agent_orchestrator import AgentOrchestrator
 from core.database import Database
 from core.dashboard import Dashboard
 from core.knowledge_engine import KnowledgeEngine
+from core.search_console_service import (
+    SearchConsoleDataSyncResult,
+    SearchConsoleService,
+)
+from core.seo_history import analyze_all_sites
 from core.task_engine import TaskEngine
 from core.website_registry import WebsiteRegistry
+from integrations.search_console import (
+    SearchConsoleAuthenticationError,
+    SearchConsoleConnector,
+)
 from agents.decision_engine import DecisionEngine
 from agents.project_manager import ProjectManager
 
@@ -110,6 +119,96 @@ def run_check(
     return len(sales), len(new_sales)
 
 
+def format_search_console_sync(result: SearchConsoleDataSyncResult) -> str:
+    """Format the required Search Console synchronization summary."""
+    return "\n".join(
+        [
+            "Search Console synkronisering",
+            "",
+            f"Properties behandlet       {result.properties_processed}",
+            f"Properties med fejl        {result.properties_failed}",
+            f"Rækker oprettet             {result.rows_created}",
+            f"Rækker opdateret            {result.rows_updated}",
+            f"Periode                     {result.start_date} til {result.end_date}",
+        ]
+    )
+
+
+def format_click_declines(comparisons: list[dict[str, object]]) -> str:
+    """Format up to five websites with the largest absolute click decline."""
+    declines = sorted(
+        (
+            item
+            for item in comparisons
+            if item["current_clicks"] < item["previous_clicks"]
+        ),
+        key=lambda item: item["current_clicks"] - item["previous_clicks"],
+    )[:5]
+    lines = ["Største klikfald", ""]
+    if not declines:
+        lines.append("Ingen klikfald i perioden.")
+        return "\n".join(lines)
+
+    for item in declines:
+        click_change = _format_percent(item["click_change_percent"])
+        impression_change = _format_percent(
+            item["impression_change_percent"]
+        )
+        ctr_points = _format_points(item["ctr_change_points"], scale=100)
+        position_difference = _format_points(item["position_difference"])
+        lines.extend(
+            [
+                str(item["website_id"]),
+                (
+                    f"  Klik: {item['current_clicks']} "
+                    f"({click_change})"
+                ),
+                (
+                    f"  Visninger: {item['current_impressions']} "
+                    f"({impression_change})"
+                ),
+                (
+                    f"  CTR: {(item['current_ctr'] or 0) * 100:.2f}% "
+                    f"({ctr_points} procentpoint)"
+                ),
+                (
+                    "  Gennemsnitlig placering: "
+                    f"{(item['current_position'] or 0):.2f} "
+                    f"({position_difference})"
+                ),
+            ]
+        )
+    return "\n".join(lines)
+
+
+def format_lowest_seo_scores(
+    websites: list[dict[str, object]],
+) -> str:
+    """Format the five lowest current 28-day SEO scores."""
+    lines = ["Laveste SEO-score", ""]
+    if not websites:
+        lines.append("Ingen SEO-analyser endnu.")
+        return "\n".join(lines)
+    for item in websites:
+        lines.append(
+            f"{item['website_id']:<30}"
+            f"{float(item['score']):>5.1f}  {item['trend']}"
+        )
+    return "\n".join(lines)
+
+
+def _format_percent(value: object) -> str:
+    if value is None:
+        return "ny/ingen tidligere værdi"
+    return f"{float(value):+.1f}%"
+
+
+def _format_points(value: object, scale: int = 1) -> str:
+    if value is None:
+        return "ingen sammenligning"
+    return f"{float(value) * scale:+.2f}"
+
+
 def monitor(config: Config, once: bool = False) -> None:
     """Monitor Partner-ads once or every 30 minutes."""
     project_root = config.sales_file.parent.parent
@@ -123,6 +222,64 @@ def monitor(config: Config, once: bool = False) -> None:
         knowledge_document_count,
     )
     website_registry = synchronize_websites(database, logger)
+    search_console_status = {
+        "connection_ok": False,
+        "total": 0,
+        "latest_sync": None,
+        "stored_metrics": 0,
+    }
+    seo_health_status = {
+        "growing": 0,
+        "stable": 0,
+        "declining": 0,
+        "critical": 0,
+    }
+    search_console = SearchConsoleService(
+        connector=SearchConsoleConnector(
+            credentials_path=project_root / "credentials.json",
+            token_path=project_root / "token.json",
+        ),
+        database=database,
+        website_registry=website_registry,
+        logger=logger,
+    )
+    try:
+        search_result = search_console.synchronize()
+        data_sync_result = search_console.sync_all_properties(days=180)
+    except SearchConsoleAuthenticationError as error:
+        logger.warning("Search Console-forbindelse fejlede: %s", error)
+        print(f"Search Console-forbindelse fejlede: {error}")
+    except Exception as error:
+        logger.error(
+            "Search Console-forbindelse fejlede (%s).",
+            type(error).__name__,
+        )
+        print("Search Console-forbindelse fejlede. Se loggen.")
+    else:
+        summary = database.get_search_console_summary()
+        search_console_status = {
+            "connection_ok": search_result.connection_ok,
+            "total": search_result.total,
+            "latest_sync": summary["latest_sync"],
+            "stored_metrics": summary["stored_metrics"],
+        }
+        logger.info(
+            (
+                "Search Console synkroniseret: %d properties, "
+                "%d matchede, %d property-fejl."
+            ),
+            search_result.total,
+            search_result.matched,
+            data_sync_result.properties_failed,
+        )
+        print(format_search_console_sync(data_sync_result))
+        print()
+        print(format_click_declines(search_console.get_comparisons()))
+        print()
+    analyze_all_sites(database)
+    seo_health_status = database.get_seo_health_summary(period="28d")
+    print(format_lowest_seo_scores(database.get_lowest_seo_scores()))
+    print()
     task_engine = TaskEngine(database)
     project_manager = ProjectManager(
         task_engine,
@@ -163,6 +320,8 @@ def monitor(config: Config, once: bool = False) -> None:
             next_task,
             knowledge_document_count=knowledge_document_count,
             orchestrator_counts=orchestrator_counts,
+            search_console_status=search_console_status,
+            seo_health_status=seo_health_status,
         )
     )
     print()

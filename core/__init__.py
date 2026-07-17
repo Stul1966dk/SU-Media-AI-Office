@@ -3,6 +3,12 @@
 from .database import Database
 from .dashboard import Dashboard
 from .knowledge_engine import KnowledgeDocument, KnowledgeEngine
+from .search_console_service import (
+    SearchConsoleDataSyncResult,
+    SearchConsoleService,
+    SearchConsoleSyncResult,
+)
+from .seo_history import SEOHealth, analyze_all_sites, analyze_site
 from .website_registry import ImportResult, WebsiteRegistry
 
 __all__ = [
@@ -11,5 +17,11 @@ __all__ = [
     "ImportResult",
     "KnowledgeDocument",
     "KnowledgeEngine",
+    "SearchConsoleDataSyncResult",
+    "SearchConsoleService",
+    "SearchConsoleSyncResult",
+    "SEOHealth",
     "WebsiteRegistry",
+    "analyze_all_sites",
+    "analyze_site",
 ]
