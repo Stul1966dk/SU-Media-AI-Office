@@ -58,9 +58,21 @@ class Database:
         self._create_orchestrator_tables()
         self._create_search_console_table()
         self._create_search_console_daily_metrics_table()
+        self._create_search_console_dimension_tables()
         self._create_seo_health_history_table()
         self._create_seo_recommendations_table()
         self._create_website_intelligence_tables()
+        self._create_ai_analysis_table()
+        self._create_executive_briefings_table()
+        self._create_website_discovery_tables()
+        self._create_website_content_table()
+        self._create_feature_runs_table()
+        self._create_decision_and_experiment_tables()
+        self._create_title_optimization_tables()
+        self._create_approved_changes_table()
+        self._create_work_queue_tables()
+        self._create_experiment_monitoring_tables()
+        self._create_experiment_evaluations_table()
         self.connection.execute(
             """
             CREATE TABLE IF NOT EXISTS app_state (
@@ -70,6 +82,1796 @@ class Database:
             """
         )
         self.connection.commit()
+
+    def initialize_read_only(self) -> None:
+        """Open an existing database without schema or data write access."""
+        if self.connection is not None:
+            return
+        uri = "file:" + self.path.resolve().as_posix() + "?mode=ro"
+        self.connection = sqlite3.connect(uri, uri=True)
+        self.connection.row_factory = sqlite3.Row
+
+    def _create_experiment_evaluations_table(self) -> None:
+        """Create the idempotent, structured SEO evaluation store."""
+        self._connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS experiment_evaluations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                experiment_id INTEGER NOT NULL,
+                website_id TEXT NOT NULL,
+                target_url TEXT NOT NULL,
+                implemented_at TEXT NOT NULL,
+                evaluation_due_at TEXT NOT NULL,
+                evaluated_at TEXT NOT NULL,
+                baseline_start TEXT NOT NULL,
+                baseline_end TEXT NOT NULL,
+                comparison_start TEXT NOT NULL,
+                comparison_end TEXT NOT NULL,
+                clicks_before INTEGER NOT NULL,
+                clicks_after INTEGER NOT NULL,
+                clicks_absolute_change INTEGER NOT NULL,
+                clicks_relative_change REAL,
+                impressions_before INTEGER NOT NULL,
+                impressions_after INTEGER NOT NULL,
+                impressions_absolute_change INTEGER NOT NULL,
+                impressions_relative_change REAL,
+                ctr_before REAL NOT NULL,
+                ctr_after REAL NOT NULL,
+                ctr_percentage_point_change REAL NOT NULL,
+                ctr_relative_change REAL,
+                position_before REAL NOT NULL,
+                position_after REAL NOT NULL,
+                position_change REAL NOT NULL,
+                sample_quality TEXT NOT NULL,
+                result_status TEXT NOT NULL,
+                ai_conclusion TEXT,
+                caveats_json TEXT NOT NULL DEFAULT '[]',
+                evaluation_version INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (
+                    experiment_id, evaluation_version,
+                    baseline_start, baseline_end,
+                    comparison_start, comparison_end
+                ),
+                FOREIGN KEY (experiment_id) REFERENCES seo_experiments(id),
+                FOREIGN KEY (website_id) REFERENCES websites(website)
+            );
+            CREATE INDEX IF NOT EXISTS idx_experiment_evaluations_experiment
+                ON experiment_evaluations (experiment_id, evaluated_at DESC);
+            """
+        )
+
+    def save_experiment_evaluation(self, values: dict[str, Any]) -> int:
+        """Upsert one evaluation version and measurement-period pair."""
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        fields = (
+            "experiment_id", "website_id", "target_url", "implemented_at",
+            "evaluation_due_at", "evaluated_at", "baseline_start",
+            "baseline_end", "comparison_start", "comparison_end",
+            "clicks_before", "clicks_after", "clicks_absolute_change",
+            "clicks_relative_change", "impressions_before",
+            "impressions_after", "impressions_absolute_change",
+            "impressions_relative_change", "ctr_before", "ctr_after",
+            "ctr_percentage_point_change", "ctr_relative_change",
+            "position_before", "position_after", "position_change",
+            "sample_quality", "result_status", "ai_conclusion",
+            "caveats_json", "evaluation_version", "created_at", "updated_at",
+        )
+        normalized = dict(values)
+        normalized["caveats_json"] = json.dumps(
+            values.get("caveats", []), ensure_ascii=False
+        )
+        normalized["created_at"] = values.get("created_at") or timestamp
+        normalized["updated_at"] = timestamp
+        updates = [
+            field for field in fields
+            if field not in {
+                "experiment_id", "evaluation_version", "baseline_start",
+                "baseline_end", "comparison_start", "comparison_end",
+                "created_at",
+            }
+        ]
+        with self._connection:
+            self._connection.execute(
+                f"""INSERT INTO experiment_evaluations ({', '.join(fields)})
+                    VALUES ({', '.join('?' for _ in fields)})
+                    ON CONFLICT (
+                        experiment_id, evaluation_version,
+                        baseline_start, baseline_end,
+                        comparison_start, comparison_end
+                    ) DO UPDATE SET
+                        {', '.join(f'{f} = excluded.{f}' for f in updates)}""",
+                tuple(normalized.get(field) for field in fields),
+            )
+        row = self._connection.execute(
+            """SELECT id FROM experiment_evaluations
+               WHERE experiment_id = ? AND evaluation_version = ?
+                 AND baseline_start = ? AND baseline_end = ?
+                 AND comparison_start = ? AND comparison_end = ?""",
+            tuple(normalized[field] for field in (
+                "experiment_id", "evaluation_version", "baseline_start",
+                "baseline_end", "comparison_start", "comparison_end",
+            )),
+        ).fetchone()
+        return int(row["id"])
+
+    def get_experiment_evaluations(
+        self, experiment_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Return structured evaluations, newest first."""
+        where, parameters = "", ()
+        if experiment_id is not None:
+            where, parameters = "WHERE experiment_id = ?", (experiment_id,)
+        rows = self._connection.execute(
+            f"""SELECT * FROM experiment_evaluations {where}
+                ORDER BY evaluated_at DESC, id DESC""", parameters
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["caveats"] = json.loads(item.pop("caveats_json") or "[]")
+            result.append(item)
+        return result
+
+    def _create_approved_changes_table(self) -> None:
+        """Create the authoritative record of user-approved SEO changes."""
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS approved_changes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT NOT NULL,
+                change_type TEXT NOT NULL,
+                target_url TEXT NOT NULL,
+                target_query TEXT NOT NULL DEFAULT '',
+                current_title TEXT NOT NULL DEFAULT '',
+                approved_title TEXT NOT NULL DEFAULT '',
+                current_meta TEXT NOT NULL DEFAULT '',
+                approved_meta TEXT NOT NULL DEFAULT '',
+                hypothesis TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                expected_effect TEXT NOT NULL,
+                project_id INTEGER,
+                task_id INTEGER,
+                experiment_id INTEGER,
+                source_draft_id INTEGER,
+                status TEXT NOT NULL,
+                approved_at TEXT NOT NULL,
+                implemented_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(experiment_id),
+                UNIQUE(source_draft_id)
+            )
+            """
+        )
+
+    def save_approved_change(self, values: dict[str, Any]) -> int:
+        """Persist one selected change; never model output that is not approved."""
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        approved_at = values.get("approved_at") or timestamp
+        fields = (
+            "website_id", "change_type", "target_url", "target_query",
+            "current_title", "approved_title", "current_meta",
+            "approved_meta", "hypothesis", "reason", "expected_effect",
+            "project_id", "task_id", "experiment_id", "source_draft_id",
+            "status", "approved_at", "implemented_at", "created_at",
+            "updated_at",
+        )
+        normalized = {
+            **values,
+            "status": values.get("status", "awaiting_implementation"),
+            "approved_at": approved_at,
+            "implemented_at": values.get("implemented_at"),
+            "created_at": timestamp, "updated_at": timestamp,
+        }
+        parameters = tuple(normalized.get(field) for field in fields)
+        with self._connection:
+            existing = None
+            if values.get("experiment_id"):
+                existing = self._connection.execute(
+                    "SELECT id FROM approved_changes WHERE experiment_id = ?",
+                    (values["experiment_id"],),
+                ).fetchone()
+            if not existing and values.get("source_draft_id"):
+                existing = self._connection.execute(
+                    "SELECT id FROM approved_changes WHERE source_draft_id = ?",
+                    (values["source_draft_id"],),
+                ).fetchone()
+            if existing:
+                assignments = ", ".join(
+                    f"{field} = ?" for field in fields[:-2]
+                )
+                self._connection.execute(
+                    f"""UPDATE approved_changes SET {assignments},
+                        updated_at = ? WHERE id = ?""",
+                    (*parameters[:-2], timestamp, existing["id"]),
+                )
+                return int(existing["id"])
+            cursor = self._connection.execute(
+                f"""INSERT INTO approved_changes ({", ".join(fields)})
+                    VALUES ({", ".join("?" for _ in fields)})""",
+                parameters,
+            )
+        return int(cursor.lastrowid)
+
+    def get_approved_changes(
+        self, *, status: str | None = None,
+        experiment_id: int | None = None, source_draft_id: int | None = None,
+        target_url: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses, parameters = [], []
+        for field, value in (
+            ("status", status), ("experiment_id", experiment_id),
+            ("source_draft_id", source_draft_id), ("target_url", target_url),
+        ):
+            if value is not None:
+                clauses.append(f"{field} = ?")
+                parameters.append(value)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        return [
+            dict(row) for row in self._connection.execute(
+                f"""SELECT * FROM approved_changes {where}
+                    ORDER BY approved_at DESC, id DESC""",
+                parameters,
+            )
+        ]
+
+    def get_approved_change_for_work_item(
+        self, item: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Resolve an approved change only through persisted foreign keys."""
+        rows = []
+        if item.get("experiment_id"):
+            rows = self.get_approved_changes(
+                experiment_id=item["experiment_id"]
+            )
+        if not rows and item.get("draft_id"):
+            rows = self.get_approved_changes(
+                source_draft_id=item["draft_id"]
+            )
+        return rows[0] if rows else None
+
+    def update_approved_change_status(
+        self, change_id: int, status: str,
+        *, implemented_at: str | None = None,
+    ) -> None:
+        allowed = {
+            "awaiting_implementation", "measurement_period",
+            "ready_for_evaluation", "completed", "cancelled",
+        }
+        if status not in allowed:
+            raise ValueError("Ugyldig status for godkendt ændring.")
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            self._connection.execute(
+                """UPDATE approved_changes
+                   SET status = ?, implemented_at = COALESCE(?, implemented_at),
+                       updated_at = ? WHERE id = ?""",
+                (status, implemented_at, timestamp, change_id),
+            )
+
+    def _create_experiment_monitoring_tables(self) -> None:
+        """Create idempotent live observations and measured SEO learning."""
+        self._connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS experiment_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                experiment_id INTEGER NOT NULL,
+                observed_date TEXT NOT NULL,
+                period_start TEXT,
+                period_end TEXT,
+                clicks INTEGER NOT NULL,
+                impressions INTEGER NOT NULL,
+                ctr REAL NOT NULL,
+                average_position REAL NOT NULL,
+                data_quality TEXT NOT NULL,
+                pulse_status TEXT NOT NULL,
+                observation TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(experiment_id, observed_date, period_end)
+            );
+
+            CREATE TABLE IF NOT EXISTS experiment_observations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                experiment_id INTEGER NOT NULL,
+                observation_date TEXT NOT NULL,
+                observation_type TEXT NOT NULL,
+                event_key TEXT NOT NULL,
+                description TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(experiment_id, event_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS seo_learning_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                experiment_id INTEGER NOT NULL UNIQUE,
+                website_id TEXT NOT NULL,
+                target_url TEXT NOT NULL,
+                page_type TEXT NOT NULL,
+                change_type TEXT NOT NULL,
+                target_query TEXT NOT NULL,
+                hypothesis TEXT NOT NULL,
+                original_change_json TEXT NOT NULL,
+                implemented_change_json TEXT NOT NULL,
+                baseline_json TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                effect_size REAL NOT NULL,
+                data_quality TEXT NOT NULL,
+                classification TEXT NOT NULL,
+                conclusion TEXT NOT NULL,
+                pattern_level TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS seo_url_status (
+                target_url TEXT PRIMARY KEY,
+                website_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                observation_until TEXT,
+                failed_same_type_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+
+    def save_experiment_snapshot(self, values: dict[str, Any]) -> bool:
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            cursor = self._connection.execute(
+                """INSERT OR IGNORE INTO experiment_snapshots (
+                    experiment_id, observed_date, period_start, period_end,
+                    clicks, impressions, ctr, average_position, data_quality,
+                    pulse_status, observation, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    values["experiment_id"], values["observed_date"],
+                    values.get("period_start"), values.get("period_end"),
+                    values["clicks"], values["impressions"], values["ctr"],
+                    values["average_position"], values["data_quality"],
+                    values["pulse_status"], values["observation"], timestamp,
+                ),
+            )
+        return bool(cursor.rowcount)
+
+    def get_experiment_snapshots(
+        self, experiment_id: int
+    ) -> list[dict[str, Any]]:
+        return [
+            dict(row) for row in self._connection.execute(
+                """SELECT * FROM experiment_snapshots
+                   WHERE experiment_id = ?
+                   ORDER BY observed_date, id""",
+                (experiment_id,),
+            )
+        ]
+
+    def save_experiment_observation(
+        self, *, experiment_id: int, observation_date: str,
+        observation_type: str, event_key: str, description: str,
+    ) -> bool:
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            cursor = self._connection.execute(
+                """INSERT OR IGNORE INTO experiment_observations (
+                    experiment_id, observation_date, observation_type,
+                    event_key, description, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    experiment_id, observation_date, observation_type,
+                    event_key, description, timestamp,
+                ),
+            )
+        return bool(cursor.rowcount)
+
+    def get_experiment_observations(
+        self, experiment_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        query, parameters = "SELECT * FROM experiment_observations", ()
+        if experiment_id is not None:
+            query += " WHERE experiment_id = ?"
+            parameters = (experiment_id,)
+        query += " ORDER BY observation_date DESC, id DESC"
+        return [
+            dict(row) for row in self._connection.execute(query, parameters)
+        ]
+
+    def save_seo_learning_entry(self, values: dict[str, Any]) -> None:
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        json_fields = (
+            "original_change", "implemented_change", "baseline", "result"
+        )
+        with self._connection:
+            self._connection.execute(
+                """INSERT INTO seo_learning_entries (
+                    experiment_id, website_id, target_url, page_type,
+                    change_type, target_query, hypothesis,
+                    original_change_json, implemented_change_json,
+                    baseline_json, result_json, effect_size, data_quality,
+                    classification, conclusion, pattern_level, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(experiment_id) DO UPDATE SET
+                    result_json = excluded.result_json,
+                    effect_size = excluded.effect_size,
+                    data_quality = excluded.data_quality,
+                    classification = excluded.classification,
+                    conclusion = excluded.conclusion,
+                    pattern_level = excluded.pattern_level""",
+                (
+                    values["experiment_id"], values["website_id"],
+                    values["target_url"], values.get("page_type", "ukendt"),
+                    values["change_type"], values.get("target_query", ""),
+                    values["hypothesis"],
+                    *(json.dumps(values.get(field, {}), ensure_ascii=False)
+                      for field in json_fields),
+                    float(values.get("effect_size", 0)),
+                    values["data_quality"], values["classification"],
+                    values["conclusion"], values["pattern_level"], timestamp,
+                ),
+            )
+
+    def get_seo_learning_entries(self) -> list[dict[str, Any]]:
+        rows = self._connection.execute(
+            "SELECT * FROM seo_learning_entries ORDER BY id DESC"
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            for field in (
+                "original_change_json", "implemented_change_json",
+                "baseline_json", "result_json",
+            ):
+                item[field.removesuffix("_json")] = json.loads(item[field])
+            result.append(item)
+        return result
+
+    def upsert_seo_url_status(
+        self, *, target_url: str, website_id: str, status: str,
+        observation_until: str | None = None,
+        failed_same_type_count: int = 0,
+    ) -> None:
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            self._connection.execute(
+                """INSERT INTO seo_url_status (
+                    target_url, website_id, status, observation_until,
+                    failed_same_type_count, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(target_url) DO UPDATE SET
+                    status = excluded.status,
+                    observation_until = excluded.observation_until,
+                    failed_same_type_count = excluded.failed_same_type_count,
+                    updated_at = excluded.updated_at""",
+                (
+                    target_url, website_id, status, observation_until,
+                    failed_same_type_count, timestamp,
+                ),
+            )
+
+    def get_seo_url_status(
+        self, target_url: str | None = None
+    ) -> list[dict[str, Any]]:
+        query, parameters = "SELECT * FROM seo_url_status", ()
+        if target_url:
+            query += " WHERE target_url = ?"
+            parameters = (target_url,)
+        return [
+            dict(row) for row in self._connection.execute(query, parameters)
+        ]
+
+    def _create_work_queue_tables(self) -> None:
+        """Create the persistent daily work queue and skip audit log."""
+        self._connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS seo_work_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT NOT NULL,
+                target_url TEXT NOT NULL,
+                target_query TEXT NOT NULL DEFAULT '',
+                action TEXT NOT NULL,
+                candidate_json TEXT NOT NULL,
+                implementation_json TEXT NOT NULL DEFAULT '{}',
+                priority_score INTEGER NOT NULL,
+                expected_impact TEXT NOT NULL,
+                confidence INTEGER NOT NULL,
+                estimated_minutes INTEGER NOT NULL,
+                queue_order INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                draft_id INTEGER,
+                decision_id INTEGER,
+                project_id INTEGER,
+                task_id INTEGER,
+                experiment_id INTEGER,
+                edited_title TEXT NOT NULL DEFAULT '',
+                edited_meta TEXT NOT NULL DEFAULT '',
+                implemented_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS seo_work_queue_skips (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                queue_item_id INTEGER NOT NULL,
+                skipped_at TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY (queue_item_id) REFERENCES seo_work_queue(id)
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_active_work_queue_url
+            ON seo_work_queue(target_url)
+            WHERE status IN ('queued', 'skipped', 'awaiting_implementation');
+            """
+        )
+        columns = {
+            row["name"] for row in
+            self._connection.execute("PRAGMA table_info(seo_work_queue)")
+        }
+        if "implementation_json" not in columns:
+            self._connection.execute(
+                """ALTER TABLE seo_work_queue
+                   ADD COLUMN implementation_json TEXT NOT NULL DEFAULT '{}'"""
+            )
+
+    def replace_queued_work(self, candidates: list[dict[str, Any]]) -> int:
+        """Replace only untouched queue items with one newly ranked snapshot."""
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            self._connection.execute(
+                """DELETE FROM seo_work_queue
+                   WHERE status IN ('queued', 'skipped')"""
+            )
+            for index, item in enumerate(candidates, start=1):
+                self._connection.execute(
+                    """INSERT INTO seo_work_queue (
+                        website_id, target_url, target_query, action,
+                        candidate_json, implementation_json, priority_score, expected_impact,
+                        confidence, estimated_minutes, queue_order, status,
+                        draft_id, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)""",
+                    (
+                        item["website"], item["target_url"],
+                        item.get("target_query", ""), item["task_title"],
+                        json.dumps(item, ensure_ascii=False),
+                        json.dumps(
+                            item.get("implementation_content", {}),
+                            ensure_ascii=False,
+                        ),
+                        int(item["priority_score"]), item["expected_effect"],
+                        int(item["confidence"]), int(item["estimated_minutes"]),
+                        index, item.get("draft_id"), timestamp, timestamp,
+                    ),
+                )
+        return len(candidates)
+
+    def enqueue_work_candidate(self, item: dict[str, Any]) -> int:
+        """Append one active queue row without touching historical records."""
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            existing = self._connection.execute(
+                """SELECT id FROM seo_work_queue
+                   WHERE target_url = ?
+                     AND status IN ('queued', 'skipped', 'awaiting_implementation')
+                   ORDER BY id DESC LIMIT 1""",
+                (item["target_url"],),
+            ).fetchone()
+            if existing:
+                return int(existing["id"])
+            order = self._connection.execute(
+                """SELECT COALESCE(MAX(queue_order), 0) AS value
+                   FROM seo_work_queue"""
+            ).fetchone()
+            try:
+                cursor = self._connection.execute(
+                    """INSERT INTO seo_work_queue (
+                        website_id, target_url, target_query, action,
+                        candidate_json, implementation_json, priority_score,
+                        expected_impact, confidence, estimated_minutes,
+                        queue_order, status, draft_id, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)""",
+                    (
+                        item["website"], item["target_url"],
+                        item.get("target_query", ""), item["task_title"],
+                        json.dumps(item, ensure_ascii=False),
+                        json.dumps(
+                            item.get("implementation_content", {}),
+                            ensure_ascii=False,
+                        ),
+                        int(item["priority_score"]), item["expected_effect"],
+                        int(item["confidence"]), int(item["estimated_minutes"]),
+                        int(order["value"]) + 1, item.get("draft_id"),
+                        timestamp, timestamp,
+                    ),
+                )
+                return int(cursor.lastrowid)
+            except sqlite3.IntegrityError:
+                concurrent = self._connection.execute(
+                    """SELECT id FROM seo_work_queue
+                       WHERE target_url = ?
+                         AND status IN (
+                           'queued', 'skipped', 'awaiting_implementation'
+                         ) ORDER BY id DESC LIMIT 1""",
+                    (item["target_url"],),
+                ).fetchone()
+                if concurrent:
+                    return int(concurrent["id"])
+                raise
+
+    def get_work_queue(
+        self, statuses: tuple[str, ...] = ("queued", "skipped")
+    ) -> list[dict[str, Any]]:
+        placeholders = ", ".join("?" for _ in statuses)
+        rows = self._connection.execute(
+            f"""SELECT * FROM seo_work_queue
+                WHERE status IN ({placeholders})
+                ORDER BY
+                    CASE
+                        WHEN status = 'awaiting_implementation' THEN 0
+                        WHEN status = 'queued' THEN 1
+                        WHEN status = 'skipped' THEN 2
+                        ELSE 3
+                    END,
+                    priority_score DESC, queue_order, id""",
+            statuses,
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["candidate"] = json.loads(item["candidate_json"])
+            item["implementation"] = json.loads(
+                item.get("implementation_json") or "{}"
+            )
+            result.append(item)
+        return result
+
+    def get_work_queue_item(self, item_id: int) -> dict[str, Any] | None:
+        return next((
+            item for item in self.get_work_queue((
+                "queued", "skipped", "awaiting_implementation", "implemented",
+                "completed", "cancelled",
+            )) if item["id"] == item_id
+        ), None)
+
+    def update_work_queue_item(
+        self, item_id: int, values: dict[str, Any]
+    ) -> None:
+        allowed = {
+            "status", "queue_order", "decision_id", "project_id", "task_id",
+            "experiment_id", "edited_title", "edited_meta", "implemented_at",
+            "implementation_json", "draft_id",
+        }
+        updates = {key: value for key, value in values.items() if key in allowed}
+        updates["updated_at"] = datetime.now().astimezone().isoformat(
+            timespec="seconds"
+        )
+        with self._connection:
+            self._connection.execute(
+                "UPDATE seo_work_queue SET "
+                + ", ".join(f"{key} = ?" for key in updates)
+                + " WHERE id = ?",
+                (*updates.values(), item_id),
+            )
+
+    def skip_work_queue_item(self, item_id: int, reason: str = "") -> None:
+        """Move one item to the bottom without deleting it."""
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        row = self._connection.execute(
+            "SELECT COALESCE(MAX(queue_order), 0) AS value FROM seo_work_queue"
+        ).fetchone()
+        with self._connection:
+            self._connection.execute(
+                """UPDATE seo_work_queue
+                   SET status = 'skipped', queue_order = ?, updated_at = ?
+                   WHERE id = ?""",
+                (int(row["value"]) + 1, timestamp, item_id),
+            )
+            self._connection.execute(
+                """INSERT INTO seo_work_queue_skips (
+                    queue_item_id, skipped_at, reason
+                ) VALUES (?, ?, ?)""",
+                (item_id, timestamp, reason.strip()),
+            )
+
+    def get_work_queue_skips(
+        self, item_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        query, parameters = "SELECT * FROM seo_work_queue_skips", ()
+        if item_id is not None:
+            query += " WHERE queue_item_id = ?"
+            parameters = (item_id,)
+        query += " ORDER BY id DESC"
+        return [
+            dict(row) for row in self._connection.execute(query, parameters)
+        ]
+
+    def _create_feature_runs_table(self) -> None:
+        """Create the shared operational run history."""
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS feature_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                feature_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                completed_at TEXT NOT NULL,
+                records_processed INTEGER NOT NULL DEFAULT 0,
+                records_created INTEGER NOT NULL DEFAULT 0,
+                records_updated INTEGER NOT NULL DEFAULT 0,
+                error_type TEXT,
+                error_message TEXT
+            )
+            """
+        )
+
+    def _create_decision_and_experiment_tables(self) -> None:
+        """Create decision, experiment, and experiment-learning storage."""
+        self._connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS decision_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT NOT NULL,
+                target_url TEXT NOT NULL,
+                target_query TEXT NOT NULL DEFAULT '',
+                task_title TEXT NOT NULL,
+                decision_json TEXT NOT NULL,
+                priority_score INTEGER NOT NULL,
+                confidence INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                selected_at TEXT NOT NULL,
+                approved_at TEXT,
+                rejected_at TEXT,
+                completed_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (website_id) REFERENCES websites(website)
+            );
+
+            CREATE TABLE IF NOT EXISTS seo_experiments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT NOT NULL,
+                decision_id INTEGER,
+                project_id INTEGER,
+                task_id INTEGER,
+                target_url TEXT NOT NULL,
+                target_query TEXT NOT NULL DEFAULT '',
+                experiment_type TEXT NOT NULL,
+                hypothesis TEXT NOT NULL,
+                change_description TEXT NOT NULL,
+                goal_metric TEXT NOT NULL,
+                goal_direction TEXT NOT NULL,
+                target_change_pct REAL NOT NULL,
+                baseline_start TEXT,
+                baseline_end TEXT,
+                baseline_clicks INTEGER,
+                baseline_impressions INTEGER,
+                baseline_ctr REAL,
+                baseline_position REAL,
+                baseline_commission REAL,
+                started_at TEXT,
+                minimum_evaluation_date TEXT,
+                planned_evaluation_date TEXT,
+                actual_evaluation_date TEXT,
+                waiting_period_days INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                result TEXT,
+                result_summary TEXT,
+                actual_click_change_pct REAL,
+                actual_impression_change_pct REAL,
+                actual_ctr_change REAL,
+                actual_position_change REAL,
+                actual_commission_change REAL,
+                confidence INTEGER NOT NULL,
+                extension_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                FOREIGN KEY (website_id) REFERENCES websites(website),
+                FOREIGN KEY (decision_id) REFERENCES decision_history(id),
+                FOREIGN KEY (project_id) REFERENCES projects(id),
+                FOREIGN KEY (task_id) REFERENCES tasks(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS experiment_learnings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                experiment_id INTEGER NOT NULL UNIQUE,
+                website_id TEXT NOT NULL,
+                target_url TEXT NOT NULL,
+                experiment_type TEXT NOT NULL,
+                outcome TEXT NOT NULL,
+                learning TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (experiment_id) REFERENCES seo_experiments(id),
+                FOREIGN KEY (website_id) REFERENCES websites(website)
+            );
+            """
+        )
+
+    def _create_title_optimization_tables(self) -> None:
+        """Create approval drafts and their optional public SERP evidence."""
+        self._connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS title_optimization_drafts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT NOT NULL,
+                target_url TEXT NOT NULL,
+                target_query TEXT NOT NULL,
+                current_title TEXT NOT NULL,
+                current_meta TEXT NOT NULL,
+                page_analysis_json TEXT NOT NULL,
+                analysis_json TEXT NOT NULL,
+                title_proposals_json TEXT NOT NULL,
+                meta_proposals_json TEXT NOT NULL,
+                reviewer_json TEXT NOT NULL,
+                recommended_title_index INTEGER NOT NULL,
+                recommended_meta_index INTEGER NOT NULL,
+                selected_title TEXT NOT NULL DEFAULT '',
+                selected_meta TEXT NOT NULL DEFAULT '',
+                confidence INTEGER NOT NULL,
+                expected_effect TEXT NOT NULL,
+                measurement_method TEXT NOT NULL,
+                status TEXT NOT NULL,
+                project_id INTEGER,
+                task_id INTEGER,
+                experiment_id INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                approved_at TEXT,
+                rejected_at TEXT,
+                implemented_at TEXT,
+                FOREIGN KEY (website_id) REFERENCES websites(website),
+                FOREIGN KEY (project_id) REFERENCES projects(id),
+                FOREIGN KEY (task_id) REFERENCES tasks(id),
+                FOREIGN KEY (experiment_id) REFERENCES seo_experiments(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS title_serp_competitors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                draft_id INTEGER NOT NULL,
+                position INTEGER NOT NULL,
+                domain TEXT NOT NULL,
+                url TEXT NOT NULL,
+                title TEXT NOT NULL,
+                meta_description TEXT NOT NULL,
+                h1 TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE (draft_id, position, url),
+                FOREIGN KEY (draft_id) REFERENCES title_optimization_drafts(id)
+            );
+            """
+        )
+
+    def create_title_optimization_draft(
+        self, values: dict[str, Any], competitors: list[dict[str, Any]]
+    ) -> int:
+        """Persist one immutable analysis with editable selected proposals."""
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            cursor = self._connection.execute(
+                """INSERT INTO title_optimization_drafts (
+                    website_id, target_url, target_query, current_title,
+                    current_meta, page_analysis_json, analysis_json,
+                    title_proposals_json, meta_proposals_json, reviewer_json,
+                    recommended_title_index, recommended_meta_index,
+                    selected_title, selected_meta, confidence, expected_effect,
+                    measurement_method, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          'awaiting_approval', ?, ?)""",
+                (
+                    values["website"], values["target_url"],
+                    values["target_query"], values["current_title"],
+                    values["current_meta"],
+                    json.dumps(values.get("page_analysis", {}),
+                               ensure_ascii=False),
+                    json.dumps(values["analysis"], ensure_ascii=False),
+                    json.dumps(values["title_proposals"], ensure_ascii=False),
+                    json.dumps(values["meta_proposals"], ensure_ascii=False),
+                    json.dumps(values["reviewer"], ensure_ascii=False),
+                    values["recommended_title_index"],
+                    values["recommended_meta_index"],
+                    values["title_proposals"][
+                        values["recommended_title_index"]
+                    ]["text"],
+                    values["meta_proposals"][
+                        values["recommended_meta_index"]
+                    ]["text"],
+                    values["confidence"], values["expected_effect"],
+                    values["measurement_method"], timestamp, timestamp,
+                ),
+            )
+            draft_id = int(cursor.lastrowid)
+            for item in competitors[:10]:
+                self._connection.execute(
+                    """INSERT OR IGNORE INTO title_serp_competitors (
+                        draft_id, position, domain, url, title,
+                        meta_description, h1, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        draft_id, item["position"], item["domain"], item["url"],
+                        item["title"], item.get("meta_description", ""),
+                        item.get("h1", ""), timestamp,
+                    ),
+                )
+        return draft_id
+
+    def get_title_optimization_drafts(
+        self, website_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        query, parameters = "SELECT * FROM title_optimization_drafts", ()
+        if website_id:
+            query += " WHERE website_id = ?"
+            parameters = (website_id,)
+        query += " ORDER BY id DESC"
+        rows = self._connection.execute(query, parameters).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            for field in (
+                "page_analysis_json", "analysis_json",
+                "title_proposals_json", "meta_proposals_json",
+                "reviewer_json",
+            ):
+                item[field.removesuffix("_json")] = json.loads(item[field])
+            result.append(item)
+        return result
+
+    def get_title_optimization_draft(
+        self, draft_id: int
+    ) -> dict[str, Any] | None:
+        return next((
+            item for item in self.get_title_optimization_drafts()
+            if item["id"] == draft_id
+        ), None)
+
+    def update_title_optimization_draft(
+        self, draft_id: int, values: dict[str, Any]
+    ) -> None:
+        allowed = {
+            "selected_title", "selected_meta", "status", "project_id",
+            "task_id", "experiment_id", "approved_at", "rejected_at",
+            "implemented_at",
+        }
+        updates = {key: value for key, value in values.items() if key in allowed}
+        updates["updated_at"] = datetime.now().astimezone().isoformat(
+            timespec="seconds"
+        )
+        with self._connection:
+            self._connection.execute(
+                "UPDATE title_optimization_drafts SET "
+                + ", ".join(f"{key} = ?" for key in updates)
+                + " WHERE id = ?",
+                (*updates.values(), draft_id),
+            )
+
+    def get_title_serp_competitors(
+        self, draft_id: int
+    ) -> list[dict[str, Any]]:
+        return [
+            dict(row) for row in self._connection.execute(
+                """SELECT * FROM title_serp_competitors
+                   WHERE draft_id = ? ORDER BY position""",
+                (draft_id,),
+            ).fetchall()
+        ]
+
+    def create_decision(self, decision: dict[str, Any]) -> int:
+        """Persist one proposed decision and its sanitized JSON payload."""
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            cursor = self._connection.execute(
+                """INSERT INTO decision_history (
+                    website_id, target_url, target_query, task_title,
+                    decision_json, priority_score, confidence, status,
+                    selected_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?, ?)""",
+                (
+                    decision["website"], decision["target_url"],
+                    decision.get("target_query", ""), decision["task_title"],
+                    json.dumps(decision, ensure_ascii=False),
+                    decision["priority_score"], decision["confidence"],
+                    timestamp, timestamp, timestamp,
+                ),
+            )
+        return int(cursor.lastrowid)
+
+    def get_decisions(
+        self, *, statuses: tuple[str, ...] | None = None,
+        website_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses, parameters = [], []
+        if statuses:
+            clauses.append(
+                "status IN (" + ", ".join("?" for _ in statuses) + ")"
+            )
+            parameters.extend(statuses)
+        if website_id:
+            clauses.append("website_id = ?")
+            parameters.append(website_id)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._connection.execute(
+            f"SELECT * FROM decision_history {where} ORDER BY id DESC",
+            parameters,
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["decision"] = json.loads(item["decision_json"])
+            result.append(item)
+        return result
+
+    def update_decision_status(self, decision_id: int, status: str) -> None:
+        """Update a decision and the matching lifecycle timestamp."""
+        allowed = {
+            "proposed", "approved", "rejected", "converted_to_experiment",
+            "completed", "cancelled",
+        }
+        if status not in allowed:
+            raise ValueError("Ugyldig beslutningsstatus.")
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        timestamp_field = {
+            "approved": "approved_at", "rejected": "rejected_at",
+            "completed": "completed_at",
+        }.get(status)
+        extra = f", {timestamp_field} = ?" if timestamp_field else ""
+        parameters = (
+            (status, timestamp, timestamp, decision_id)
+            if timestamp_field else (status, timestamp, decision_id)
+        )
+        with self._connection:
+            self._connection.execute(
+                f"""UPDATE decision_history SET status = ?, updated_at = ?
+                    {extra} WHERE id = ?""",
+                parameters,
+            )
+
+    def create_seo_experiment(self, values: dict[str, Any]) -> int:
+        """Persist one planned experiment without starting it."""
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        fields = (
+            "website_id", "decision_id", "project_id", "task_id",
+            "target_url", "target_query", "experiment_type", "hypothesis",
+            "change_description", "goal_metric", "goal_direction",
+            "target_change_pct", "waiting_period_days", "status", "confidence",
+            "created_at", "updated_at",
+        )
+        parameters = tuple(values.get(field) for field in fields[:-2]) + (
+            timestamp, timestamp,
+        )
+        with self._connection:
+            cursor = self._connection.execute(
+                f"""INSERT INTO seo_experiments ({", ".join(fields)})
+                    VALUES ({", ".join("?" for _ in fields)})""",
+                parameters,
+            )
+        return int(cursor.lastrowid)
+
+    def get_seo_experiments(
+        self, *, website_id: str | None = None,
+        target_url: str | None = None, statuses: tuple[str, ...] | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses, parameters = [], []
+        if website_id:
+            clauses.append("website_id = ?")
+            parameters.append(website_id)
+        if target_url:
+            clauses.append("target_url = ?")
+            parameters.append(target_url)
+        if statuses:
+            clauses.append(
+                "status IN (" + ", ".join("?" for _ in statuses) + ")"
+            )
+            parameters.extend(statuses)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._connection.execute(
+            f"SELECT * FROM seo_experiments {where} ORDER BY id DESC",
+            parameters,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_seo_experiment(self, experiment_id: int) -> dict[str, Any] | None:
+        row = self._connection.execute(
+            "SELECT * FROM seo_experiments WHERE id = ?", (experiment_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update_seo_experiment(
+        self, experiment_id: int, values: dict[str, Any]
+    ) -> None:
+        """Update explicitly supplied experiment fields."""
+        allowed = {
+            row["name"] for row in
+            self._connection.execute("PRAGMA table_info(seo_experiments)")
+        } - {"id", "created_at"}
+        updates = {key: value for key, value in values.items() if key in allowed}
+        updates["updated_at"] = datetime.now().astimezone().isoformat(
+            timespec="seconds"
+        )
+        assignments = ", ".join(f"{key} = ?" for key in updates)
+        with self._connection:
+            self._connection.execute(
+                f"UPDATE seo_experiments SET {assignments} WHERE id = ?",
+                (*updates.values(), experiment_id),
+            )
+
+    def save_experiment_learning(
+        self, *, experiment_id: int, website_id: str, target_url: str,
+        experiment_type: str, outcome: str, learning: str,
+    ) -> None:
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            self._connection.execute(
+                """INSERT INTO experiment_learnings (
+                    experiment_id, website_id, target_url, experiment_type,
+                    outcome, learning, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(experiment_id) DO UPDATE SET
+                    outcome = excluded.outcome, learning = excluded.learning""",
+                (
+                    experiment_id, website_id, target_url, experiment_type,
+                    outcome, learning, timestamp,
+                ),
+            )
+
+    def get_experiment_learnings(
+        self, website_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        query, parameters = "SELECT * FROM experiment_learnings", ()
+        if website_id:
+            query += " WHERE website_id = ?"
+            parameters = (website_id,)
+        query += " ORDER BY id DESC"
+        return [
+            dict(row) for row in self._connection.execute(
+                query, parameters
+            ).fetchall()
+        ]
+
+    def preview_robotland_redesign_cleanup(self) -> dict[str, Any]:
+        """Return an exact, read-only preview of the known Robotland fixture."""
+        project = self.get_project_by_website_and_title(
+            "robotland.dk", "Redesign af Robotland.dk"
+        )
+        if not project:
+            return {
+                "project_id": None, "subprojects": 0, "tasks": 0,
+                "events": 0, "actions": 0, "recommendations": 0,
+            }
+        project_id = int(project["id"])
+        tasks = self.get_task_records_for_project(project_id)
+        task_ids = [item["id"] for item in tasks]
+        action_row = self._connection.execute(
+            """SELECT COUNT(*) AS total FROM actions
+               WHERE project_id = ?
+                  OR task_id IN (
+                      SELECT t.id FROM tasks t
+                      JOIN subprojects sp ON sp.id = t.subproject_id
+                      WHERE sp.project_id = ?
+                  )""",
+            (project_id, project_id),
+        ).fetchone()
+        event_row = self._connection.execute(
+            """SELECT COUNT(DISTINCT e.id) AS total FROM events e
+               JOIN actions a ON a.event_id = e.id
+               WHERE a.project_id = ?
+                  OR a.task_id IN (
+                      SELECT t.id FROM tasks t
+                      JOIN subprojects sp ON sp.id = t.subproject_id
+                      WHERE sp.project_id = ?
+                  )""",
+            (project_id, project_id),
+        ).fetchone()
+        recommendation_row = self._connection.execute(
+            "SELECT COUNT(*) AS total FROM seo_recommendations WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()
+        return {
+            "project_id": project_id,
+            "subprojects": len(self.get_subprojects_for_project(project_id)),
+            "tasks": len(tasks), "task_ids": task_ids,
+            "events": int(event_row["total"]),
+            "actions": int(action_row["total"]),
+            "recommendations": int(recommendation_row["total"]),
+        }
+
+    def cleanup_robotland_redesign_test_data(self) -> dict[str, Any]:
+        """Delete only the explicitly named Robotland redesign fixture."""
+        preview = self.preview_robotland_redesign_cleanup()
+        project_id = preview["project_id"]
+        if project_id is None:
+            return {**preview, "deleted": False}
+        allowed_subprojects = {
+            "Analyse og plan", "Fælles layout", "Forside", "Kategorisider",
+            "Artikler og produktsider", "Test og lancering",
+        }
+        allowed_tasks = {
+            "Gennemgå den nuværende header og noter problemer",
+            "Lav forslag til ny navigation",
+            "Definér krav til en ny header",
+        }
+        subprojects = self.get_subprojects_for_project(project_id)
+        tasks = self.get_task_records_for_project(project_id)
+        if {item["title"] for item in subprojects} - allowed_subprojects:
+            raise ValueError("Projektet indeholder ukendte delprojekter; afbryder.")
+        if {item["title"] for item in tasks} - allowed_tasks:
+            raise ValueError("Projektet indeholder ukendte opgaver; afbryder.")
+        with self._connection:
+            event_ids = [
+                row["id"] for row in self._connection.execute(
+                    """SELECT DISTINCT e.id FROM events e
+                       JOIN actions a ON a.event_id = e.id
+                       WHERE a.project_id = ?
+                          OR a.task_id IN (
+                              SELECT t.id FROM tasks t
+                              JOIN subprojects sp ON sp.id = t.subproject_id
+                              WHERE sp.project_id = ?
+                          )""",
+                    (project_id, project_id),
+                )
+            ]
+            self._connection.execute(
+                """DELETE FROM actions WHERE project_id = ?
+                   OR task_id IN (
+                       SELECT t.id FROM tasks t
+                       JOIN subprojects sp ON sp.id = t.subproject_id
+                       WHERE sp.project_id = ?
+                   )""",
+                (project_id, project_id),
+            )
+            if event_ids:
+                placeholders = ", ".join("?" for _ in event_ids)
+                self._connection.execute(
+                    f"""DELETE FROM events WHERE id IN ({placeholders})
+                        AND source IN ('test', 'project_manager')""",
+                    event_ids,
+                )
+            self._connection.execute(
+                "DELETE FROM seo_recommendations WHERE project_id = ?",
+                (project_id,),
+            )
+            self._connection.execute(
+                """DELETE FROM tasks WHERE subproject_id IN (
+                    SELECT id FROM subprojects WHERE project_id = ?)""",
+                (project_id,),
+            )
+            self._connection.execute(
+                "DELETE FROM subprojects WHERE project_id = ?", (project_id,)
+            )
+            self._connection.execute(
+                """DELETE FROM projects WHERE id = ? AND website_id = ?
+                   AND title = ?""",
+                (project_id, "robotland.dk", "Redesign af Robotland.dk"),
+            )
+        return {**preview, "deleted": True}
+
+    def _create_website_content_table(self) -> None:
+        """Create idempotent public website content storage."""
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS website_content (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                content_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                url TEXT NOT NULL,
+                status TEXT NOT NULL,
+                published_at TEXT NOT NULL,
+                source_updated_at TEXT NOT NULL,
+                category_json TEXT NOT NULL,
+                tag_json TEXT NOT NULL,
+                word_count INTEGER NOT NULL,
+                featured_image TEXT NOT NULL,
+                internal_link_count INTEGER NOT NULL,
+                external_link_count INTEGER NOT NULL,
+                raw_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (website_id, content_type, content_id),
+                FOREIGN KEY (website_id) REFERENCES websites(website)
+            )
+            """
+        )
+
+    def save_content(self, content: dict[str, Any]) -> str:
+        """Create or update public content only when its stable hash changes."""
+        existing = self._connection.execute(
+            """
+            SELECT id, raw_hash FROM website_content
+            WHERE website_id=? AND content_type=? AND content_id=?
+            """,
+            (
+                content["website_id"], content["content_type"],
+                content["content_id"],
+            ),
+        ).fetchone()
+        if existing and existing["raw_hash"] == content["raw_hash"]:
+            return "unchanged"
+        now = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO website_content (
+                    website_id, content_type, content_id, title, slug, url,
+                    status, published_at, source_updated_at, category_json,
+                    tag_json, word_count, featured_image, internal_link_count,
+                    external_link_count, raw_hash, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(website_id, content_type, content_id) DO UPDATE SET
+                    title=excluded.title, slug=excluded.slug, url=excluded.url,
+                    status=excluded.status, published_at=excluded.published_at,
+                    source_updated_at=excluded.source_updated_at,
+                    category_json=excluded.category_json,
+                    tag_json=excluded.tag_json, word_count=excluded.word_count,
+                    featured_image=excluded.featured_image,
+                    internal_link_count=excluded.internal_link_count,
+                    external_link_count=excluded.external_link_count,
+                    raw_hash=excluded.raw_hash, updated_at=excluded.updated_at
+                """,
+                (
+                    content["website_id"], content["content_type"],
+                    content["content_id"], content.get("title", ""),
+                    content.get("slug", ""), content.get("url", ""),
+                    content.get("status", ""), content.get("published_at", ""),
+                    content.get("updated_at", ""),
+                    json.dumps(content.get("categories", []), ensure_ascii=False),
+                    json.dumps(content.get("tags", []), ensure_ascii=False),
+                    int(content.get("word_count", 0)),
+                    content.get("featured_image", ""),
+                    int(content.get("internal_link_count", 0)),
+                    int(content.get("external_link_count", 0)),
+                    content["raw_hash"], now, now,
+                ),
+            )
+        return "updated" if existing else "created"
+
+    def get_content(
+        self, website_id: str, content_id: str | None = None
+    ) -> list[dict[str, Any]] | dict[str, Any] | None:
+        """Return all website content or one item by its public ID."""
+        if content_id is not None:
+            row = self._connection.execute(
+                """
+                SELECT * FROM website_content
+                WHERE website_id=? AND content_id=?
+                ORDER BY updated_at DESC LIMIT 1
+                """,
+                (website_id, content_id),
+            ).fetchone()
+            return self._content_row(row) if row else None
+        rows = self._connection.execute(
+            """
+            SELECT * FROM website_content
+            WHERE website_id=? ORDER BY published_at DESC, title
+            """,
+            (website_id,),
+        ).fetchall()
+        return [self._content_row(row) for row in rows]
+
+    def get_content_by_type(
+        self, website_id: str, content_type: str
+    ) -> list[dict[str, Any]]:
+        """Return one public content type for a website."""
+        rows = self._connection.execute(
+            """
+            SELECT * FROM website_content
+            WHERE website_id=? AND content_type=?
+            ORDER BY published_at DESC, title
+            """,
+            (website_id, content_type),
+        ).fetchall()
+        return [self._content_row(row) for row in rows]
+
+    def get_recently_updated(
+        self, website_id: str | None = None, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Return recently imported or changed content."""
+        query = "SELECT * FROM website_content"
+        parameters: list[Any] = []
+        if website_id:
+            query += " WHERE website_id=?"
+            parameters.append(website_id)
+        query += " ORDER BY updated_at DESC, id DESC LIMIT ?"
+        parameters.append(max(1, int(limit)))
+        rows = self._connection.execute(query, parameters).fetchall()
+        return [self._content_row(row) for row in rows]
+
+    @staticmethod
+    def _content_row(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        item["categories"] = json.loads(item.pop("category_json"))
+        item["tags"] = json.loads(item.pop("tag_json"))
+        item["content_updated_at"] = item.pop("source_updated_at")
+        return item
+
+    def _create_website_discovery_tables(self) -> None:
+        """Create current and change-only historical website discovery data."""
+        fields = """
+            website_id TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            cms TEXT NOT NULL,
+            cms_confidence INTEGER NOT NULL,
+            theme TEXT NOT NULL,
+            theme_confidence INTEGER NOT NULL,
+            page_builder TEXT NOT NULL,
+            page_builder_confidence INTEGER NOT NULL,
+            http_status INTEGER NOT NULL,
+            https_enabled INTEGER NOT NULL,
+            robots_status TEXT NOT NULL,
+            sitemap_status TEXT NOT NULL,
+            sitemap_url TEXT NOT NULL,
+            sitemap_url_count INTEGER NOT NULL,
+            sitemap_types_json TEXT NOT NULL,
+            canonical_url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            meta_description TEXT NOT NULL,
+            h1 TEXT NOT NULL,
+            schema_types_json TEXT NOT NULL,
+            generator TEXT NOT NULL,
+            wordpress_rest_available INTEGER NOT NULL,
+            detected_signals_json TEXT NOT NULL,
+            scan_status TEXT NOT NULL,
+            error_message TEXT NOT NULL,
+            scanned_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        """
+        self._connection.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS website_discovery_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                {fields},
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (website_id) REFERENCES websites(website)
+            )
+            """
+        )
+        self._connection.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS website_discovery_current (
+                {fields},
+                PRIMARY KEY (website_id),
+                FOREIGN KEY (website_id) REFERENCES websites(website)
+            )
+            """
+        )
+
+    def save_website_discovery_profile(
+        self, profile: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Update current discovery facts and append history only on change."""
+        now = profile.get("scanned_at") or datetime.now().astimezone(
+        ).isoformat(timespec="seconds")
+        current = self.get_website_discovery_profile(profile["website_id"])
+        values = self._discovery_values(profile, now)
+        changed = current is None or any(
+            current.get(key) != profile.get(key)
+            for key in self._discovery_comparison_fields()
+        )
+        columns = self._discovery_columns()
+        placeholders = ", ".join("?" for _ in columns)
+        assignments = ", ".join(
+            f"{column}=excluded.{column}" for column in columns
+            if column != "website_id"
+        )
+        with self._connection:
+            self._connection.execute(
+                f"""
+                INSERT INTO website_discovery_current ({", ".join(columns)})
+                VALUES ({placeholders})
+                ON CONFLICT(website_id) DO UPDATE SET {assignments}
+                """,
+                values,
+            )
+            if changed:
+                history_columns = [*columns, "created_at"]
+                self._connection.execute(
+                    f"""
+                    INSERT INTO website_discovery_profiles
+                        ({", ".join(history_columns)})
+                    VALUES ({", ".join("?" for _ in history_columns)})
+                    """,
+                    (*values, now),
+                )
+        return {"changed": changed, "previous": current}
+
+    def get_website_discovery_profile(
+        self, website_id: str
+    ) -> dict[str, Any] | None:
+        """Return the latest discovery profile for one website."""
+        row = self._connection.execute(
+            "SELECT * FROM website_discovery_current WHERE website_id = ?",
+            (website_id,),
+        ).fetchone()
+        return self._discovery_row(row) if row else None
+
+    def get_website_discovery_profiles(self) -> list[dict[str, Any]]:
+        """Return every current discovery profile."""
+        rows = self._connection.execute(
+            "SELECT * FROM website_discovery_current ORDER BY website_id"
+        ).fetchall()
+        return [self._discovery_row(row) for row in rows]
+
+    def get_website_discovery_changes(
+        self, website_id: str, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Return change-only profile history, newest first."""
+        rows = self._connection.execute(
+            """
+            SELECT * FROM website_discovery_profiles
+            WHERE website_id = ? ORDER BY scanned_at DESC, id DESC LIMIT ?
+            """,
+            (website_id, max(1, int(limit))),
+        ).fetchall()
+        return [self._discovery_row(row) for row in rows]
+
+    def get_website_discovery_summary(self) -> dict[str, Any]:
+        """Return dashboard counters for current discovery profiles."""
+        row = self._connection.execute(
+            """
+            SELECT COUNT(*) AS scanned,
+                SUM(CASE WHEN cms='wordpress' THEN 1 ELSE 0 END) AS wordpress,
+                SUM(CASE WHEN cms='unknown' THEN 1 ELSE 0 END) AS unknown,
+                SUM(CASE WHEN robots_status NOT IN ('ok','allowed')
+                    THEN 1 ELSE 0 END) AS robots_errors,
+                SUM(CASE WHEN sitemap_status!='ok' THEN 1 ELSE 0 END)
+                    AS sitemap_errors,
+                SUM(CASE WHEN https_enabled=0 THEN 1 ELSE 0 END) AS https_errors,
+                MAX(scanned_at) AS latest_scan
+            FROM website_discovery_current
+            """
+        ).fetchone()
+        return {
+            "scanned": int(row["scanned"] or 0),
+            "wordpress": int(row["wordpress"] or 0),
+            "unknown": int(row["unknown"] or 0),
+            "robots_errors": int(row["robots_errors"] or 0),
+            "sitemap_errors": int(row["sitemap_errors"] or 0),
+            "https_errors": int(row["https_errors"] or 0),
+            "latest_scan": row["latest_scan"],
+        }
+
+    @staticmethod
+    def _discovery_columns() -> list[str]:
+        return [
+            "website_id", "domain", "cms", "cms_confidence", "theme",
+            "theme_confidence", "page_builder", "page_builder_confidence",
+            "http_status", "https_enabled", "robots_status", "sitemap_status",
+            "sitemap_url", "sitemap_url_count", "sitemap_types_json",
+            "canonical_url", "title", "meta_description", "h1",
+            "schema_types_json", "generator", "wordpress_rest_available",
+            "detected_signals_json", "scan_status", "error_message",
+            "scanned_at", "updated_at",
+        ]
+
+    @classmethod
+    def _discovery_values(
+        cls, profile: dict[str, Any], timestamp: str
+    ) -> tuple[Any, ...]:
+        encoded = {
+            **profile,
+            "https_enabled": int(bool(profile.get("https_enabled"))),
+            "wordpress_rest_available": int(
+                bool(profile.get("wordpress_rest_available"))
+            ),
+            "sitemap_types_json": json.dumps(
+                profile.get("sitemap_types", []), ensure_ascii=False
+            ),
+            "schema_types_json": json.dumps(
+                profile.get("schema_types", []), ensure_ascii=False
+            ),
+            "detected_signals_json": json.dumps(
+                profile.get("detected_signals", []), ensure_ascii=False
+            ),
+            "scanned_at": timestamp, "updated_at": timestamp,
+        }
+        return tuple(encoded.get(column, "") for column in cls._discovery_columns())
+
+    @staticmethod
+    def _discovery_comparison_fields() -> tuple[str, ...]:
+        return (
+            "cms", "theme", "page_builder", "http_status", "https_enabled",
+            "robots_status", "sitemap_status", "sitemap_url_count",
+            "canonical_url", "title", "meta_description", "h1",
+            "schema_types", "generator", "wordpress_rest_available",
+            "detected_signals", "scan_status", "error_message",
+        )
+
+    @staticmethod
+    def _discovery_row(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        for stored, exposed in (
+            ("sitemap_types_json", "sitemap_types"),
+            ("schema_types_json", "schema_types"),
+            ("detected_signals_json", "detected_signals"),
+        ):
+            item[exposed] = json.loads(item.pop(stored))
+        item["https_enabled"] = bool(item["https_enabled"])
+        item["wordpress_rest_available"] = bool(
+            item["wordpress_rest_available"]
+        )
+        item["suggested_connector"] = (
+            "WordPressConnector" if item["cms"] == "wordpress" else None
+        )
+        return item
+
+    def _create_executive_briefings_table(self) -> None:
+        """Create versioned daily executive briefings without duplicates."""
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS executive_briefings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                briefing_date TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                company_status TEXT NOT NULL,
+                focus_areas_json TEXT NOT NULL,
+                risks_json TEXT NOT NULL,
+                opportunities_json TEXT NOT NULL,
+                total_estimated_minutes INTEGER NOT NULL,
+                model TEXT NOT NULL,
+                prompt_tokens INTEGER NOT NULL,
+                completion_tokens INTEGER NOT NULL,
+                latency_ms INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (briefing_date, status)
+            )
+            """
+        )
+
+    def save_executive_briefing(self, briefing: dict[str, Any]) -> int:
+        """Upsert one briefing by date and status and return its stable ID."""
+        timestamp = briefing.get("updated_at") or datetime.now().astimezone(
+        ).isoformat(timespec="seconds")
+        created_at = briefing.get("created_at") or timestamp
+        values = (
+            briefing["briefing_date"],
+            briefing["summary"],
+            briefing["company_status"],
+            json.dumps(briefing["focus_areas"], ensure_ascii=False),
+            json.dumps(briefing["risks"], ensure_ascii=False),
+            json.dumps(briefing["opportunities"], ensure_ascii=False),
+            int(briefing["total_estimated_minutes"]),
+            briefing["model"],
+            int(briefing.get("prompt_tokens", 0)),
+            int(briefing.get("completion_tokens", 0)),
+            int(briefing.get("latency_ms", 0)),
+            briefing.get("status", "completed"),
+            created_at,
+            timestamp,
+        )
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO executive_briefings (
+                    briefing_date, summary, company_status, focus_areas_json,
+                    risks_json, opportunities_json, total_estimated_minutes,
+                    model, prompt_tokens, completion_tokens, latency_ms,
+                    status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(briefing_date, status) DO UPDATE SET
+                    summary=excluded.summary,
+                    company_status=excluded.company_status,
+                    focus_areas_json=excluded.focus_areas_json,
+                    risks_json=excluded.risks_json,
+                    opportunities_json=excluded.opportunities_json,
+                    total_estimated_minutes=excluded.total_estimated_minutes,
+                    model=excluded.model,
+                    prompt_tokens=excluded.prompt_tokens,
+                    completion_tokens=excluded.completion_tokens,
+                    latency_ms=excluded.latency_ms,
+                    updated_at=excluded.updated_at
+                """,
+                values,
+            )
+        row = self._connection.execute(
+            "SELECT id FROM executive_briefings "
+            "WHERE briefing_date = ? AND status = ?",
+            (briefing["briefing_date"], briefing.get("status", "completed")),
+        ).fetchone()
+        return int(row["id"])
+
+    def get_latest_executive_briefing(self) -> dict[str, Any] | None:
+        """Return the newest completed executive briefing."""
+        row = self._connection.execute(
+            """
+            SELECT * FROM executive_briefings
+            WHERE status = 'completed'
+            ORDER BY briefing_date DESC, updated_at DESC, id DESC LIMIT 1
+            """
+        ).fetchone()
+        return self._executive_briefing_row(row) if row else None
+
+    def get_executive_briefing_history(
+        self, limit: int = 30
+    ) -> list[dict[str, Any]]:
+        """Return recent executive briefings for dashboards and audits."""
+        rows = self._connection.execute(
+            """
+            SELECT * FROM executive_briefings
+            ORDER BY briefing_date DESC, updated_at DESC, id DESC LIMIT ?
+            """,
+            (max(1, int(limit)),),
+        ).fetchall()
+        return [self._executive_briefing_row(row) for row in rows]
+
+    @staticmethod
+    def _executive_briefing_row(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        for stored, exposed in (
+            ("focus_areas_json", "focus_areas"),
+            ("risks_json", "risks"),
+            ("opportunities_json", "opportunities"),
+        ):
+            item[exposed] = json.loads(item.pop(stored))
+        return item
+
+    def get_executive_context(self) -> dict[str, Any]:
+        """Return the persisted, non-secret company context for prioritizing."""
+        projects = self._connection.execute(
+            "SELECT * FROM projects WHERE status NOT IN ('completed','cancelled')"
+        ).fetchall()
+        tasks = self._connection.execute(
+            """
+            SELECT t.*, sp.project_id, p.title AS project_title
+            FROM tasks t JOIN subprojects sp ON sp.id=t.subproject_id
+            JOIN projects p ON p.id=sp.project_id
+            WHERE t.status NOT IN ('completed','cancelled')
+            """
+        ).fetchall()
+        sales = self._connection.execute(
+            """
+            SELECT LOWER(REPLACE(REPLACE(url,'https://',''),'http://',''))
+                AS source, COUNT(*) AS sales_count,
+                COALESCE(SUM(omsaetning),0) AS revenue,
+                COALESCE(SUM(provision),0) AS commission
+            FROM registered_sales GROUP BY source
+            """
+        ).fetchall()
+        return {
+            "websites": self.get_all_websites(),
+            "profiles": self.get_website_profiles(),
+            "seo_health": self.get_lowest_seo_scores(limit=100),
+            "search_console": self.get_search_console_comparisons(),
+            "seo_recommendations": self.get_seo_recommendations(),
+            "projects": [dict(row) for row in projects],
+            "tasks": [dict(row) for row in tasks],
+            "sales": [dict(row) for row in sales],
+            "analyses": self.get_analysis_history(limit=100),
+            "counts": {
+                "active_projects": len(projects),
+                "open_tasks": len(tasks),
+            },
+        }
+
+    def _create_ai_analysis_table(self) -> None:
+        """Create immutable AI Analyst reports and usage metadata."""
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_analysis (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT,
+                project_id INTEGER,
+                task_id INTEGER,
+                analysis_type TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                problem TEXT NOT NULL,
+                root_cause TEXT NOT NULL,
+                recommended_action TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                confidence INTEGER NOT NULL,
+                expected_effect TEXT NOT NULL,
+                reasoning_json TEXT NOT NULL,
+                required_agents_json TEXT NOT NULL,
+                suggested_tasks_json TEXT NOT NULL,
+                model TEXT NOT NULL,
+                prompt_tokens INTEGER NOT NULL,
+                completion_tokens INTEGER NOT NULL,
+                latency_ms INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (website_id) REFERENCES websites(website),
+                FOREIGN KEY (project_id) REFERENCES projects(id),
+                FOREIGN KEY (task_id) REFERENCES tasks(id)
+            )
+            """
+        )
 
     def _create_search_console_table(self) -> None:
         """Create the Google Search Console property registry."""
@@ -108,6 +1910,38 @@ class Database:
             )
             """
         )
+
+    def _create_search_console_dimension_tables(self) -> None:
+        """Create idempotent page/query Search Console period storage."""
+        for table, identity, unique_key in (
+            ("search_console_pages", "page_url TEXT NOT NULL",
+             "website_id, page_url, period_start, period_end"),
+            ("search_console_queries", "query TEXT NOT NULL",
+             "website_id, query, period_start, period_end"),
+            ("search_console_page_queries",
+             "page_url TEXT NOT NULL, query TEXT NOT NULL",
+             "website_id, page_url, query, period_start, period_end"),
+        ):
+            self._connection.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {table} (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    website_id TEXT NOT NULL,
+                    site_url TEXT NOT NULL,
+                    dimension_type TEXT NOT NULL,
+                    {identity},
+                    period_start TEXT NOT NULL,
+                    period_end TEXT NOT NULL,
+                    clicks INTEGER NOT NULL,
+                    impressions INTEGER NOT NULL,
+                    ctr REAL NOT NULL,
+                    average_position REAL NOT NULL,
+                    imported_at TEXT NOT NULL,
+                    UNIQUE ({unique_key}),
+                    FOREIGN KEY (website_id) REFERENCES websites(website)
+                )
+                """
+            )
 
     def _create_seo_health_history_table(self) -> None:
         """Create idempotent SEO health snapshots for every analysis period."""
@@ -361,6 +2195,162 @@ class Database:
             {where_clause}
             ORDER BY website_id, metric_date
             """,
+            parameters,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def upsert_search_console_dimension(
+        self, *, dimension_type: str, website_id: str, site_url: str,
+        period_start: str, period_end: str, clicks: int, impressions: int,
+        ctr: float, average_position: float, page_url: str | None = None,
+        query: str | None = None,
+    ) -> str:
+        """Insert or update one page/query period row without duplicates."""
+        definitions = {
+            "page": ("search_console_pages", ("page_url",), (page_url,)),
+            "query": ("search_console_queries", ("query",), (query,)),
+            "page_query": (
+                "search_console_page_queries", ("page_url", "query"),
+                (page_url, query),
+            ),
+        }
+        if dimension_type not in definitions:
+            raise ValueError("Ukendt Search Console-dimension.")
+        table, columns, values = definitions[dimension_type]
+        if any(value is None or value == "" for value in values):
+            raise ValueError("Dimensionens nøgle mangler.")
+        where = " AND ".join(f"{column} = ?" for column in columns)
+        existing = self._connection.execute(
+            f"""SELECT id FROM {table}
+                WHERE website_id = ? AND {where}
+                AND period_start = ? AND period_end = ?""",
+            (website_id, *values, period_start, period_end),
+        ).fetchone()
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        names = ("website_id", "site_url", "dimension_type", *columns,
+                 "period_start", "period_end", "clicks", "impressions",
+                 "ctr", "average_position", "imported_at")
+        parameters = (
+            website_id, site_url, dimension_type, *values, period_start,
+            period_end, clicks, impressions, ctr, average_position, timestamp,
+        )
+        conflict = ", ".join(("website_id", *columns, "period_start", "period_end"))
+        with self._connection:
+            self._connection.execute(
+                f"""INSERT INTO {table} ({", ".join(names)})
+                    VALUES ({", ".join("?" for _ in names)})
+                    ON CONFLICT({conflict}) DO UPDATE SET
+                        site_url = excluded.site_url,
+                        clicks = excluded.clicks,
+                        impressions = excluded.impressions,
+                        ctr = excluded.ctr,
+                        average_position = excluded.average_position,
+                        imported_at = excluded.imported_at""",
+                parameters,
+            )
+        return "updated" if existing else "created"
+
+    def upsert_search_console_dimensions(
+        self, *, dimension_type: str, website_id: str, site_url: str,
+        period_start: str, period_end: str,
+        rows: list[dict[str, Any]],
+    ) -> dict[str, int]:
+        """Upsert one dimension batch in a single transaction."""
+        definitions = {
+            "page": ("search_console_pages", ("page_url",)),
+            "query": ("search_console_queries", ("query",)),
+            "page_query": (
+                "search_console_page_queries", ("page_url", "query")
+            ),
+        }
+        if dimension_type not in definitions:
+            raise ValueError("Ukendt Search Console-dimension.")
+        table, columns = definitions[dimension_type]
+        valid_rows = [
+            row for row in rows
+            if all(row.get(column) not in (None, "") for column in columns)
+        ]
+        if not valid_rows:
+            return {"rows_created": 0, "rows_updated": 0}
+
+        existing_rows = self._connection.execute(
+            f"""SELECT {", ".join(columns)} FROM {table}
+                WHERE website_id = ? AND period_start = ? AND period_end = ?""",
+            (website_id, period_start, period_end),
+        ).fetchall()
+        existing = {
+            tuple(row[column] for column in columns)
+            for row in existing_rows
+        }
+        keys = [
+            tuple(row[column] for column in columns)
+            for row in valid_rows
+        ]
+        updated = sum(key in existing for key in keys)
+        created = len(keys) - updated
+        timestamp = datetime.now().astimezone().isoformat(
+            timespec="seconds"
+        )
+        names = (
+            "website_id", "site_url", "dimension_type", *columns,
+            "period_start", "period_end", "clicks", "impressions",
+            "ctr", "average_position", "imported_at",
+        )
+        parameters = [
+            (
+                website_id, site_url, dimension_type,
+                *(row[column] for column in columns),
+                period_start, period_end, int(row.get("clicks", 0)),
+                int(row.get("impressions", 0)), float(row.get("ctr", 0)),
+                float(row.get("average_position", 0)), timestamp,
+            )
+            for row in valid_rows
+        ]
+        conflict = ", ".join((
+            "website_id", *columns, "period_start", "period_end"
+        ))
+        with self._connection:
+            self._connection.executemany(
+                f"""INSERT INTO {table} ({", ".join(names)})
+                    VALUES ({", ".join("?" for _ in names)})
+                    ON CONFLICT({conflict}) DO UPDATE SET
+                        site_url = excluded.site_url,
+                        clicks = excluded.clicks,
+                        impressions = excluded.impressions,
+                        ctr = excluded.ctr,
+                        average_position = excluded.average_position,
+                        imported_at = excluded.imported_at""",
+                parameters,
+            )
+        return {"rows_created": created, "rows_updated": updated}
+
+    def get_search_console_dimensions(
+        self, dimension_type: str, *, website_id: str | None = None,
+        period_start: str | None = None, period_end: str | None = None,
+        page_url: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return stored page/query period rows through the database boundary."""
+        tables = {
+            "page": "search_console_pages",
+            "query": "search_console_queries",
+            "page_query": "search_console_page_queries",
+        }
+        if dimension_type not in tables:
+            raise ValueError("Ukendt Search Console-dimension.")
+        conditions, parameters = [], []
+        for column, value in (
+            ("website_id", website_id), ("period_start", period_start),
+            ("period_end", period_end), ("page_url", page_url),
+        ):
+            if value is not None:
+                if column == "page_url" and dimension_type == "query":
+                    continue
+                conditions.append(f"{column} = ?")
+                parameters.append(value)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        rows = self._connection.execute(
+            f"""SELECT * FROM {tables[dimension_type]} {where}
+                ORDER BY clicks DESC, impressions DESC""",
             parameters,
         ).fetchall()
         return [dict(row) for row in rows]
@@ -1348,6 +3338,19 @@ class Database:
         ).fetchone()
         return dict(row) if row else None
 
+    def get_projects(
+        self, website_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return projects, optionally limited to one website."""
+        query = "SELECT * FROM projects"
+        parameters: tuple[Any, ...] = ()
+        if website_id is not None:
+            query += " WHERE website_id = ?"
+            parameters = (website_id,)
+        query += " ORDER BY created_at DESC, id DESC"
+        rows = self._connection.execute(query, parameters).fetchall()
+        return [dict(row) for row in rows]
+
     def get_task_records_for_project(
         self, project_id: int | None = None
     ) -> list[dict[str, Any]]:
@@ -2043,6 +4046,152 @@ class Database:
             "active_tasks": [dict(row) for row in tasks],
         }
 
+    def save_ai_analysis(self, analysis: dict[str, Any]) -> int:
+        """Persist one validated AI analysis or sanitized failure report."""
+        timestamp = analysis.get("created_at") or datetime.now().astimezone(
+        ).isoformat(timespec="seconds")
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                INSERT INTO ai_analysis (
+                    website_id, project_id, task_id, analysis_type,
+                    summary, problem, root_cause, recommended_action,
+                    priority, confidence, expected_effect, reasoning_json,
+                    required_agents_json, suggested_tasks_json, model,
+                    prompt_tokens, completion_tokens, latency_ms, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    analysis.get("website_id"),
+                    analysis.get("project_id"),
+                    analysis.get("task_id"),
+                    analysis["analysis_type"],
+                    analysis["summary"],
+                    analysis["problem"],
+                    analysis["root_cause"],
+                    analysis["recommended_action"],
+                    analysis["priority"],
+                    int(analysis["confidence"]),
+                    analysis["expected_effect"],
+                    json.dumps(
+                        analysis["reasoning"],
+                        ensure_ascii=False,
+                    ),
+                    json.dumps(
+                        analysis["required_agents"],
+                        ensure_ascii=False,
+                    ),
+                    json.dumps(
+                        analysis["suggested_tasks"],
+                        ensure_ascii=False,
+                    ),
+                    analysis["model"],
+                    int(analysis["prompt_tokens"]),
+                    int(analysis["completion_tokens"]),
+                    int(analysis["latency_ms"]),
+                    timestamp,
+                ),
+            )
+        return int(cursor.lastrowid)
+
+    def get_latest_analysis(
+        self,
+        *,
+        website_id: str | None = None,
+        project_id: int | None = None,
+        task_id: int | None = None,
+        analysis_type: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the newest analysis matching the supplied scope."""
+        filters: list[str] = []
+        parameters: list[Any] = []
+        for column, value in (
+            ("website_id", website_id),
+            ("project_id", project_id),
+            ("task_id", task_id),
+            ("analysis_type", analysis_type),
+        ):
+            if value is not None:
+                filters.append(f"{column} = ?")
+                parameters.append(value)
+        where = f"WHERE {' AND '.join(filters)}" if filters else ""
+        row = self._connection.execute(
+            f"""
+            SELECT * FROM ai_analysis
+            {where}
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            parameters,
+        ).fetchone()
+        return self._ai_analysis_row(row) if row else None
+
+    def get_analysis_history(
+        self,
+        *,
+        website_id: str | None = None,
+        project_id: int | None = None,
+        task_id: int | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Return recent analysis reports for dashboard and history views."""
+        filters: list[str] = []
+        parameters: list[Any] = []
+        for column, value in (
+            ("website_id", website_id),
+            ("project_id", project_id),
+            ("task_id", task_id),
+        ):
+            if value is not None:
+                filters.append(f"{column} = ?")
+                parameters.append(value)
+        where = f"WHERE {' AND '.join(filters)}" if filters else ""
+        parameters.append(max(1, int(limit)))
+        rows = self._connection.execute(
+            f"""
+            SELECT * FROM ai_analysis
+            {where}
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            parameters,
+        ).fetchall()
+        return [self._ai_analysis_row(row) for row in rows]
+
+    def get_ai_analysis_status(self) -> dict[str, Any]:
+        """Return aggregate AI Analyst metrics for the main dashboard."""
+        row = self._connection.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                AVG(confidence) AS average_confidence,
+                MAX(created_at) AS latest_analysis
+            FROM ai_analysis
+            """
+        ).fetchone()
+        return {
+            "total": int(row["total"]),
+            "average_confidence": round(
+                float(row["average_confidence"] or 0),
+                1,
+            ),
+            "latest_analysis": row["latest_analysis"],
+        }
+
+    @staticmethod
+    def _ai_analysis_row(row: sqlite3.Row) -> dict[str, Any]:
+        analysis = dict(row)
+        for field in (
+            "reasoning_json",
+            "required_agents_json",
+            "suggested_tasks_json",
+        ):
+            analysis[field.removesuffix("_json")] = json.loads(
+                analysis.pop(field)
+            )
+        return analysis
+
     @staticmethod
     def _normalize_website_from_url(value: str) -> str:
         parsed = urlsplit(value if "://" in value else f"//{value}")
@@ -2056,6 +4205,7 @@ class Database:
             "search_console",
             "agent_orchestrator",
             "knowledge_engine",
+            "openai",
         }
         if component not in allowed:
             raise ValueError(f"Ukendt systemkomponent: {component}")
@@ -2068,6 +4218,135 @@ class Database:
                 """,
                 (f"system_status:{component}", "ok" if is_ok else "error"),
             )
+
+    def save_feature_run(
+        self,
+        *,
+        feature_name: str,
+        status: str,
+        started_at: str,
+        completed_at: str,
+        records_processed: int = 0,
+        records_created: int = 0,
+        records_updated: int = 0,
+        error_type: str | None = None,
+        error_message: str | None = None,
+    ) -> int:
+        """Persist one complete, sanitized operational feature run."""
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                INSERT INTO feature_runs (
+                    feature_name, status, started_at, completed_at,
+                    records_processed, records_created, records_updated,
+                    error_type, error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    feature_name, status, started_at, completed_at,
+                    int(records_processed), int(records_created),
+                    int(records_updated), error_type,
+                    (error_message or "")[:300] or None,
+                ),
+            )
+        return int(cursor.lastrowid)
+
+    def get_feature_runs(self) -> dict[str, dict[str, Any]]:
+        """Return the latest run for each operational feature."""
+        rows = self._connection.execute(
+            """
+            SELECT * FROM feature_runs AS run
+            WHERE id = (
+                SELECT MAX(id) FROM feature_runs
+                WHERE feature_name = run.feature_name
+            )
+            """
+        ).fetchall()
+        return {row["feature_name"]: dict(row) for row in rows}
+
+    def save_data_refresh_result(self, result: dict[str, Any]) -> None:
+        """Persist the latest complete refresh summary across UI restarts."""
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO app_state (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (
+                    "data_refresh:last_result",
+                    json.dumps(result, ensure_ascii=False),
+                ),
+            )
+
+    def get_last_data_refresh_result(self) -> dict[str, Any] | None:
+        """Return the latest complete refresh summary, if available."""
+        row = self._connection.execute(
+            "SELECT value FROM app_state WHERE key = ?",
+            ("data_refresh:last_result",),
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            value = json.loads(row["value"])
+        except (TypeError, json.JSONDecodeError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    def set_system_health(
+        self, component: str, health: dict[str, Any]
+    ) -> None:
+        """Persist a detailed service health result for dashboard display."""
+        if component not in {"knowledge_engine", "openai"}:
+            raise ValueError(f"Ukendt runtime-service: {component}")
+        payload = {
+            "is_ok": bool(health["is_ok"]),
+            "detail": str(health["detail"]),
+            "checked_at": str(health["checked_at"]),
+            "error_type": health.get("error_type"),
+        }
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO app_state (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                """,
+                (
+                    f"system_health:{component}",
+                    json.dumps(payload, ensure_ascii=False),
+                ),
+            )
+        self.set_system_status(component, payload["is_ok"])
+
+    def get_dashboard_system_health(self) -> dict[str, dict[str, Any]]:
+        """Return detailed statuses with timestamp and short explanation."""
+        statuses = self.get_dashboard_system_status()
+        rows = self._connection.execute(
+            """
+            SELECT key, value FROM app_state
+            WHERE key LIKE 'system_health:%'
+            """
+        ).fetchall()
+        details = {}
+        for row in rows:
+            component = row["key"].split(":", 1)[1]
+            try:
+                details[component] = json.loads(row["value"])
+            except (TypeError, json.JSONDecodeError) as error:
+                details[component] = {
+                    "is_ok": False,
+                    "detail": f"{type(error).__name__}: ugyldig gemt status",
+                    "checked_at": "",
+                    "error_type": type(error).__name__,
+                }
+        return {
+            component: details.get(component, {
+                "is_ok": is_ok,
+                "detail": "Ingen detaljeret kontrol er udført",
+                "checked_at": "",
+                "error_type": None,
+            })
+            for component, is_ok in statuses.items()
+        }
 
     def get_dashboard_system_status(self) -> dict[str, bool]:
         """Return database-backed status for dashboard components."""
@@ -2104,6 +4383,7 @@ class Database:
                 self._table_exists("events") and self._table_exists("actions"),
             ),
             "knowledge_engine": stored.get("knowledge_engine", False),
+            "openai": stored.get("openai", False),
         }
 
     def get_dashboard_overview(self) -> dict[str, int]:

@@ -1,5 +1,6 @@
 """Shared core services for SU Media AI Office."""
 
+from .ai_service import AIResponse, AIService, AIServiceError
 from .database import Database
 from .dashboard import Dashboard
 from .knowledge_engine import KnowledgeDocument, KnowledgeEngine
@@ -17,6 +18,9 @@ from .seo_history import (
 from .website_registry import ImportResult, WebsiteRegistry
 
 __all__ = [
+    "AIService",
+    "AIServiceError",
+    "AIResponse",
     "Database",
     "Dashboard",
     "ImportResult",

@@ -35,3 +35,34 @@ SU Media skal udvikles til en stabil fuldtidsforretning. Det langsigtede økonom
 - Brug AI, når fortolkning eller dømmekraft skaber reel værdi.
 - Vælg den mindste løsning, som leverer reel værdi.
 - Følg kritik med et konkret bedre alternativ.
+# AI Executive-principper
+
+Den daglige briefing må højst indeholde tre fokusområder. Høj prioritet kræver
+flere konkrete datapunkter; manuel website-prioritet er aldrig tilstrækkelig
+alene. Aktivt arbejde fortsættes frem for at blive duplikeret, og næste
+foreslåede opgave skal kunne gennemføres på højst 120 minutter.
+
+Confidence under 60 er en observation, 60-79 er en anbefaling, og 80 eller
+derover kan markeres klar til godkendelse. Ingen handling udføres uden
+brugerens godkendelse.
+# Executive Intelligence-regler
+
+- Anbefalinger skal være konkrete, målbare og kunne udføres på højst 120 minutter.
+- Brug aldrig generiske handlinger som "undersøg området", "se nærmere",
+  "overvåg udviklingen" eller "optimér websitet".
+- Forklar prioritet med trafik, indtjening, monetization, tidsforbrug,
+  forventet effekt, risiko og datakvalitet.
+- Foregiv aldrig at kende konkrete sider eller søgeord, når Search Console
+  page- og query-dimensionerne ikke er importeret.
+- Manglende URL- og søgeordsdata skal føre til et konkret dataskridt.
+- Project Manager må kun modtage en kladde efter et eksplicit brugerklik.
+# Beslutninger og eksperimenter
+
+- AI Office skal vælge højst én aktiv beslutning ad gangen.
+- Manuel prioritet kan støtte, men aldrig alene afgøre, en beslutning.
+- Lav datavolumen skal nedjusteres.
+- Projekter, opgaver og eksperimenter skal afvente brugerens godkendelse.
+- Ingen agent må ændre et website automatisk.
+- En URL med et aktivt SEO-eksperiment må ikke få nye ændringsforslag, medmindre
+  der er en kritisk teknisk fejl, et sikkerhedsproblem, et juridisk krav eller
+  en eksplicit manuel overstyring.

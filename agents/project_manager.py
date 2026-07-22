@@ -1,6 +1,7 @@
 """Project Manager agent for turning projects into executable tasks."""
 
 from math import ceil
+from datetime import datetime
 from typing import Any
 
 from core.database import Database
@@ -56,6 +57,40 @@ class ProjectManager:
             priority=priority,
             expected_effect=expected_effect,
         )
+
+    def create_draft_from_focus(self, focus: dict[str, Any]) -> int:
+        """Create an idempotent project draft without starting any work."""
+        website_id = str(focus["website"])
+        if self.website_registry.get(website_id) is None:
+            raise ValueError(f"Website findes ikke: {website_id}")
+        return self.database.create_project_record({
+            "website_id": website_id,
+            "title": str(focus["title"]),
+            "description": (
+                str(focus.get("task_description") or focus["recommended_action"])
+                + "\n\nURL: " + str(focus.get("target_url") or "Ikke angivet")
+                + "\nSøgeord: " + str(focus.get("target_query") or "Ikke angivet")
+                + "\n\nTrin:\n" + "\n".join(
+                    f"{index}. {step}" for index, step in enumerate(
+                        focus.get("exact_steps") or [], start=1
+                    )
+                )
+                + "\n\nEstimeret tid: "
+                + str(focus.get("estimated_minutes", 0)) + " minutter"
+                + "\nFærdigkriterium: "
+                + str(focus.get("completion_criteria") or "Ikke angivet")
+                + "\nDatagrundlag: "
+                + "; ".join(str(item) for item in focus.get("evidence", []))
+                + "\nMålemetode: "
+                + str(focus.get("measurement_method", "Ikke angivet"))
+            ),
+            "status": "draft",
+            "priority": str(focus.get("priority_label", "medium")).lower(),
+            "expected_effect": str(focus["expected_effect"]),
+            "created_at": datetime.now().astimezone().isoformat(
+                timespec="seconds"
+            ),
+        })
 
     def divide_project(
         self,

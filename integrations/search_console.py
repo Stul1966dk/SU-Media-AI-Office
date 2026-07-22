@@ -25,10 +25,26 @@ class SearchConsoleConnector:
         self,
         credentials_path: Path,
         token_path: Path,
+        request_timeout_seconds: int = 60,
     ) -> None:
         self.credentials_path = credentials_path
         self.token_path = token_path
         self.credentials: Credentials | None = None
+        self.request_timeout_seconds = request_timeout_seconds
+
+    def _service(self, credentials: Credentials) -> Any:
+        """Build one client and enforce a finite network timeout."""
+        service = build(
+            "searchconsole",
+            "v1",
+            credentials=credentials,
+            cache_discovery=False,
+        )
+        transport = getattr(service, "_http", None)
+        inner_transport = getattr(transport, "http", transport)
+        if inner_transport is not None and hasattr(inner_transport, "timeout"):
+            inner_transport.timeout = self.request_timeout_seconds
+        return service
 
     def authenticate(self) -> Credentials:
         """Authenticate with read-only OAuth, reusing a local token when valid."""
@@ -100,12 +116,7 @@ class SearchConsoleConnector:
     def list_properties(self) -> list[dict[str, str]]:
         """Return every Search Console property available to the account."""
         credentials = self.credentials or self.authenticate()
-        service = build(
-            "searchconsole",
-            "v1",
-            credentials=credentials,
-            cache_discovery=False,
-        )
+        service = self._service(credentials)
         response: dict[str, Any] = service.sites().list().execute()
         return [
             {
@@ -124,12 +135,7 @@ class SearchConsoleConnector:
     ) -> list[dict[str, Any]]:
         """Return daily aggregate Search Analytics metrics for one property."""
         credentials = self.credentials or self.authenticate()
-        service = build(
-            "searchconsole",
-            "v1",
-            credentials=credentials,
-            cache_discovery=False,
-        )
+        service = self._service(credentials)
         response: dict[str, Any] = (
             service.searchanalytics()
             .query(
@@ -154,3 +160,53 @@ class SearchConsoleConnector:
             for row in response.get("rows", [])
             if row.get("keys")
         ]
+
+    def get_search_analytics_dimensions(
+        self,
+        site_url: str,
+        start_date: str,
+        end_date: str,
+        dimensions: list[str],
+        row_limit: int,
+    ) -> list[dict[str, Any]]:
+        """Return read-only Search Analytics rows for approved dimensions."""
+        allowed = {("page",), ("query",), ("page", "query")}
+        if tuple(dimensions) not in allowed:
+            raise ValueError("Dimensionerne skal være page, query eller page + query.")
+        if row_limit < 1 or row_limit > 25000:
+            raise ValueError("row_limit skal være mellem 1 og 25000.")
+        credentials = self.credentials or self.authenticate()
+        service = self._service(credentials)
+        response: dict[str, Any] = (
+            service.searchanalytics()
+            .query(
+                siteUrl=site_url,
+                body={
+                    "startDate": start_date,
+                    "endDate": end_date,
+                    "dimensions": dimensions,
+                    "rowLimit": row_limit,
+                    "dataState": "final",
+                },
+            )
+            .execute()
+        )
+        rows = []
+        for row in response.get("rows", []):
+            keys = row.get("keys", [])
+            if len(keys) != len(dimensions):
+                continue
+            values = dict(zip(dimensions, keys))
+            rows.append({
+                "page_url": values.get("page"),
+                "query": values.get("query"),
+                "clicks": int(row.get("clicks", 0)),
+                "impressions": int(row.get("impressions", 0)),
+                "ctr": float(row.get("ctr", 0.0)),
+                "average_position": float(row.get("position", 0.0)),
+            })
+        rows.sort(
+            key=lambda item: (item["clicks"], item["impressions"]),
+            reverse=True,
+        )
+        return rows[:row_limit]

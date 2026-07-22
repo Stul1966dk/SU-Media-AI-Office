@@ -1,7 +1,6 @@
 """Read-only Website Intelligence profile page."""
 
 import sys
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +12,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from dashboard.components.database import open_database
+from dashboard.components.help_panel import render_help_panel
+from dashboard.components.formatting import format_currency, format_status
 from dashboard.components.ui import load_styles, render_sidebar, render_table
+from dashboard.components.website_selector import (
+    get_selected_website_id,
+    set_selected_website,
+)
 
 
 def main() -> None:
@@ -26,12 +31,35 @@ def main() -> None:
     load_styles(PROJECT_ROOT / "dashboard" / "assets" / "styles.css")
     render_sidebar()
     st.title("Website Profile")
+    st.write(
+        "Formålet med siden er at samle alle kendte oplysninger om ét "
+        "website, herunder SEO, indtjening, teknisk profil, projekter, "
+        "opgaver og AI-anbefalinger."
+    )
+    render_help_panel(
+        purpose="Saml alle kendte oplysninger om ét website.",
+        requirements="Website Registry og helst Discovery, Search Console og Intelligence.",
+        actions="Vælg et website og gennemgå de enkelte datasektioner.",
+        limitations="Siden er read-only og ændrer ikke websitet.",
+    )
 
     database = open_database()
     try:
-        profiles = database.get_website_profiles()
+        active_ids = {
+            item["website"] for item in database.get_all_websites()
+            if item["active"] and item["status"] not in
+            {"phasing_out", "archived", "cancelled"}
+        }
+        profiles = [
+            item for item in database.get_website_profiles()
+            if item["website_id"] in active_ids
+        ]
         if not profiles:
             st.caption("Ingen data.")
+            st.info(
+                "Der findes ingen websiteprofiler. Registrér websites og kør "
+                "Website Discovery og Website Intelligence først."
+            )
             return
         labels = {
             item["website_id"]: (
@@ -39,22 +67,33 @@ def main() -> None:
             )
             for item in profiles
         }
+        options = list(labels)
+        current = get_selected_website_id()
         website_id = st.selectbox(
             "Vælg website",
-            options=list(labels),
+            options=options,
+            index=options.index(current) if current in options else 0,
             format_func=labels.get,
         )
+        set_selected_website(website_id)
         detail = database.get_website_profile_detail(website_id)
+        if detail:
+            detail["discovery"] = database.get_website_discovery_profile(
+                website_id
+            )
+            detail["content"] = database.get_content(website_id)
     finally:
         database.close()
 
     if detail is None:
-        st.caption("Ingen data.")
+        st.info("Websiteprofilen kunne ikke findes. Kør Website Intelligence.")
         return
+    st.success(f"Du ser nu data for {website_id}")
     _render_profile(detail)
-    _render_seo(detail)
     _render_revenue(detail)
-    _render_history(detail)
+    _render_seo(detail)
+    _render_technical(detail)
+    _render_content(detail)
     _render_projects(detail)
     _render_tasks(detail)
     _render_recommendations(detail)
@@ -62,10 +101,10 @@ def main() -> None:
 
 def _render_profile(detail: dict[str, Any]) -> None:
     profile = detail["profile"]
-    st.subheader("Profil")
+    st.subheader("Overblik")
     health, status, niche = st.columns(3)
     health.metric("Website health", f"{profile['website_health']:.1f}")
-    status.metric("Status", profile["status"])
+    status.metric("Status", format_status(profile["status"]))
     niche.metric("Niche", profile["niche"])
     left, right = st.columns(2)
     with left:
@@ -92,7 +131,9 @@ def _render_seo(detail: dict[str, Any]) -> None:
     st.subheader("SEO")
     statistics = detail["statistics"]
     if not statistics:
-        st.caption("Ingen data.")
+        st.info(
+            "Ingen SEO-data endnu. Hent Search Console-data og kør Website Intelligence."
+        )
         return
     values = (
         ("Klik", statistics["search_clicks"]),
@@ -111,10 +152,13 @@ def _render_seo(detail: dict[str, Any]) -> None:
 
 
 def _render_revenue(detail: dict[str, Any]) -> None:
-    st.subheader("Provision")
+    st.subheader("Indtjening")
     statistics = detail["statistics"]
     if not statistics:
-        st.caption("Ingen data.")
+        st.info(
+            "Ingen indtjeningsdata endnu. Importér Partner Ads-salg og kør "
+            "Website Intelligence."
+        )
         return
     sales, revenue, commission = st.columns(3)
     sales.metric("Antal salg", statistics["sales_count"])
@@ -142,8 +186,40 @@ def _render_history(detail: dict[str, Any]) -> None:
     )
 
 
+def _render_technical(detail: dict[str, Any]) -> None:
+    st.subheader("Teknisk profil")
+    profile = detail.get("discovery")
+    if not profile:
+        st.info(
+            "Ingen teknisk profil endnu. Gå til Website Discovery og scan websitet."
+        )
+        return
+    st.write(f"**CMS:** {profile['cms']}")
+    st.write(f"**Tema:** {profile['theme']}")
+    st.write(f"**HTTPS:** {'Ja' if profile['https_enabled'] else 'Nej'}")
+    st.write(f"**Sitemap:** {format_status(profile['sitemap_status'])}")
+
+
+def _render_content(detail: dict[str, Any]) -> None:
+    st.subheader("Indhold")
+    content = detail.get("content") or []
+    if not content:
+        st.info(
+            "Intet indhold er importeret. Brug Content Explorer til at hente "
+            "offentligt indhold."
+        )
+        return
+    st.metric("Importerede indholdselementer", len(content))
+
+
 def _render_projects(detail: dict[str, Any]) -> None:
     st.subheader("Aktive projekter")
+    if not detail["active_projects"]:
+        st.info(
+            "Der er ingen aktive projekter. Opret først et projekt efter "
+            "godkendelse af en anbefaling."
+        )
+        return
     render_table(
         detail["active_projects"],
         columns={
@@ -156,7 +232,12 @@ def _render_projects(detail: dict[str, Any]) -> None:
 
 
 def _render_tasks(detail: dict[str, Any]) -> None:
-    st.subheader("Aktive opgaver")
+    st.subheader("Åbne opgaver")
+    if not detail["active_tasks"]:
+        st.info(
+            "Der er ingen åbne opgaver. Opgaver oprettes under et godkendt projekt."
+        )
+        return
     render_table(
         detail["active_tasks"],
         columns={
@@ -171,24 +252,20 @@ def _render_tasks(detail: dict[str, Any]) -> None:
 
 
 def _render_recommendations(detail: dict[str, Any]) -> None:
-    st.subheader("AI-anbefalinger")
+    st.subheader("Seneste AI-anbefalinger")
     _render_list(detail["profile"]["ai_recommendations"])
 
 
 def _render_list(items: list[str]) -> None:
     if not items:
-        st.caption("Ingen data.")
+        st.info("Ingen anbefalinger endnu. Kør AI Analyst for websitet.")
         return
     for item in items:
         st.markdown(f"- {item}")
 
 
 def _currency(value: Any) -> str:
-    amount = Decimal(str(value))
-    formatted = f"{amount:,.2f}".translate(
-        str.maketrans({",": ".", ".": ","})
-    )
-    return f"{formatted} kr."
+    return format_currency(value)
 
 
 def _number(value: Any) -> str:

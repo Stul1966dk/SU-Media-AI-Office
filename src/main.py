@@ -13,8 +13,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.agent_orchestrator import AgentOrchestrator
+from core.ai_service import AIService, AIServiceError
 from core.database import Database
 from core.dashboard import Dashboard
+from core.experiment_automation import ExperimentAutomationService
 from core.knowledge_engine import KnowledgeEngine
 from core.search_console_service import (
     SearchConsoleDataSyncResult,
@@ -246,6 +248,13 @@ def monitor(config: Config, once: bool = False) -> None:
         "Knowledge Engine initialiseret med %d dokumenter.",
         knowledge_document_count,
     )
+    try:
+        AIService().test_connection()
+    except AIServiceError as error:
+        database.set_system_status("openai", False)
+        print(error)
+    else:
+        database.set_system_status("openai", True)
     website_registry = synchronize_websites(database, logger)
     search_console_status = {
         "connection_ok": False,
@@ -304,6 +313,17 @@ def monitor(config: Config, once: bool = False) -> None:
         print()
         print(format_click_declines(search_console.get_comparisons()))
         print()
+        experiment_run = ExperimentAutomationService(
+            database
+        ).run_after_search_console_sync()
+        logger.info(
+            (
+                "Eksperimentautomation opdaterede %d aktive eksperimenter "
+                "og evaluerede %d modne eksperimenter."
+            ),
+            len(experiment_run["monitored"]),
+            len(experiment_run["evaluated"]),
+        )
     task_engine = TaskEngine(database)
     project_manager = ProjectManager(
         task_engine,

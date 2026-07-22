@@ -1,5 +1,16 @@
 # Virksomhedsviden
 
+## Knowledge Engine og AI Analyst
+
+Knowledge Engine indekserer Markdown-dokumenterne under `knowledge/` og leverer dem som read-only beslutningsgrundlag. AI Analyst inkluderer kun de fire eksplicit godkendte dokumenter i prompts:
+
+- Company Playbook
+- SEO Rules
+- Tone of Voice
+- Affiliate Rules
+
+Dokumenterne saniteres sammen med de øvrige input før OpenAI-kaldet. Filer med tekniske credentials, lokale miljøvariabler eller personoplysninger må aldrig placeres i Knowledge Engine. Knowledge Engine udfører ingen handlinger og gemmer ikke modelsvar.
+
 ## SU Media
 
 SU Media er en enkeltmandsvirksomhed, der begyndte med tekstproduktion for bureauer. Da AI reducerede efterspørgslen efter dette arbejde, flyttede virksomheden fokus til egne websites og affiliateindhold.

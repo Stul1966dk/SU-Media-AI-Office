@@ -36,6 +36,20 @@ class SearchConsoleDataSyncResult:
     errors: list[dict[str, str]]
 
 
+@dataclass(frozen=True)
+class SearchConsoleDimensionSyncResult:
+    """Aggregate result for two 28-day dimensional imports."""
+
+    properties_processed: int
+    properties_failed: int
+    page_rows: int
+    query_rows: int
+    page_query_rows: int
+    rows_created: int
+    rows_updated: int
+    errors: list[dict[str, str]]
+
+
 class SearchConsoleService:
     """Fetch, match, persist, and compare Search Console data."""
 
@@ -81,6 +95,7 @@ class SearchConsoleService:
     def sync_all_properties(
         self,
         days: int = 35,
+        website_ids: list[str] | None = None,
     ) -> SearchConsoleDataSyncResult:
         """Synchronize daily data for every active, matched property."""
         if days < 1:
@@ -91,6 +106,7 @@ class SearchConsoleService:
             item
             for item in self.database.get_search_console_properties()
             if item["active"] and item["website_id"]
+            and (website_ids is None or item["website_id"] in website_ids)
         ]
         processed = 0
         failed = 0
@@ -132,6 +148,139 @@ class SearchConsoleService:
             start_date=start_date.isoformat(),
             end_date=end_date.isoformat(),
             errors=errors,
+        )
+
+    def sync_dimensions(
+        self, website_ids: list[str] | None = None,
+        reference_date: date | None = None,
+    ) -> SearchConsoleDimensionSyncResult:
+        """Import page, query, and page-query rows for two 28-day periods."""
+        today = reference_date or date.today()
+        current_end = today - timedelta(days=1)
+        current_start = current_end - timedelta(days=27)
+        previous_end = current_start - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=27)
+        periods = (
+            (previous_start, previous_end), (current_start, current_end),
+        )
+        properties = [
+            item for item in self.database.get_search_console_properties()
+            if item["active"] and item["website_id"]
+            and (website_ids is None or item["website_id"] in website_ids)
+        ]
+        totals = {"page": 0, "query": 0, "page_query": 0}
+        created = updated = failed = 0
+        errors: list[dict[str, str]] = []
+        specs = (
+            ("page", ["page"], 1000),
+            ("query", ["query"], 2000),
+            ("page_query", ["page", "query"], 5000),
+        )
+        for prop in properties:
+            property_failed = False
+            for period_start, period_end in periods:
+                for dimension_type, dimensions, limit in specs:
+                    try:
+                        rows = self.connector.get_search_analytics_dimensions(
+                            prop["site_url"], period_start.isoformat(),
+                            period_end.isoformat(), dimensions, limit,
+                        )
+                        actions = (
+                            self.database.upsert_search_console_dimensions(
+                                dimension_type=dimension_type,
+                                website_id=prop["website_id"],
+                                site_url=prop["site_url"],
+                                period_start=period_start.isoformat(),
+                                period_end=period_end.isoformat(),
+                                rows=rows,
+                            )
+                        )
+                        created += actions["rows_created"]
+                        updated += actions["rows_updated"]
+                        totals[dimension_type] += len(rows)
+                    except Exception as error:
+                        property_failed = True
+                        errors.append({
+                            "site_url": prop["site_url"],
+                            "dimension_type": dimension_type,
+                            "error_type": type(error).__name__,
+                        })
+                        self.logger.error(
+                            "Search Console-dimension fejlede: %s %s (%s)",
+                            prop["site_url"], dimension_type,
+                            type(error).__name__,
+                        )
+            failed += property_failed
+        return SearchConsoleDimensionSyncResult(
+            properties_processed=len(properties),
+            properties_failed=failed,
+            page_rows=totals["page"], query_rows=totals["query"],
+            page_query_rows=totals["page_query"],
+            rows_created=created, rows_updated=updated, errors=errors,
+        )
+
+    def get_dimension_comparisons(
+        self, website_id: str, dimension_type: str,
+    ) -> list[dict[str, Any]]:
+        """Compare the latest stored period with its immediate predecessor."""
+        rows = self.database.get_search_console_dimensions(
+            dimension_type, website_id=website_id
+        )
+        periods = sorted(
+            {(row["period_start"], row["period_end"]) for row in rows},
+            reverse=True,
+        )
+        if len(periods) < 2:
+            return []
+        current_period, previous_period = periods[:2]
+        key_fields = {
+            "page": ("page_url",), "query": ("query",),
+            "page_query": ("page_url", "query"),
+        }[dimension_type]
+        def key(row: dict[str, Any]) -> tuple[Any, ...]:
+            return tuple(row.get(field) for field in key_fields)
+        current = {
+            key(row): row for row in rows
+            if (row["period_start"], row["period_end"]) == current_period
+        }
+        previous = {
+            key(row): row for row in rows
+            if (row["period_start"], row["period_end"]) == previous_period
+        }
+        comparisons = []
+        for row_key in current.keys() | previous.keys():
+            now = current.get(row_key, {})
+            before = previous.get(row_key, {})
+            current_clicks = int(now.get("clicks", 0))
+            previous_clicks = int(before.get("clicks", 0))
+            current_ctr = float(now.get("ctr", 0))
+            previous_ctr = float(before.get("ctr", 0))
+            item = {
+                **dict(zip(key_fields, row_key)),
+                "current_clicks": current_clicks,
+                "previous_clicks": previous_clicks,
+                "click_change": current_clicks - previous_clicks,
+                "current_impressions": int(now.get("impressions", 0)),
+                "previous_impressions": int(before.get("impressions", 0)),
+                "current_ctr": current_ctr,
+                "previous_ctr": previous_ctr,
+                "ctr_change": current_ctr - previous_ctr,
+                "current_position": float(now.get("average_position", 0)),
+                "previous_position": float(before.get("average_position", 0)),
+                "trend": (
+                    "Vækst" if current_clicks > previous_clicks else
+                    "Fald" if current_clicks < previous_clicks else "Stabil"
+                ),
+                "period_start": current_period[0],
+                "period_end": current_period[1],
+            }
+            comparisons.append(item)
+        return sorted(
+            comparisons,
+            key=lambda item: (
+                item["current_clicks"], item["current_impressions"]
+            ),
+            reverse=True,
         )
 
     def sync_property(

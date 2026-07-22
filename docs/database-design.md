@@ -278,6 +278,35 @@ Rangerede niche- og monetization-kategorier pr. website. Kombinationen af websit
 
 Versionerede profilsnapshots med listen over ændrede topniveau-felter. Kombinationen af `website_id` og `history_date` er unik, og uændrede gentagelser opretter ingen række.
 
+### `ai_analysis`
+
+Indeholder validerede AI Analyst-rapporter samt saniterede fejlrapporter efter to ugyldige modelsvar.
+
+| Felt | Beskrivelse |
+| --- | --- |
+| `id` | Intern unik identifikator |
+| `website_id` | Valgfri reference til website |
+| `project_id` | Valgfri reference til projekt |
+| `task_id` | Valgfri reference til opgave |
+| `analysis_type` | `website`, `project`, `task` eller fejlvariant |
+| `summary` | Kort konklusion |
+| `problem` | Det dokumenterede problem |
+| `root_cause` | Sandsynlig rodårsag |
+| `recommended_action` | Foreslået næste handling |
+| `priority` | `low`, `medium`, `high` eller `critical` |
+| `confidence` | Heltal fra 0 til 100 |
+| `expected_effect` | Forventet målbar effekt |
+| `reasoning_json` | Liste med begrundelser |
+| `required_agents_json` | Liste med relevante agenter |
+| `suggested_tasks_json` | Liste med foreslåede opgaver |
+| `model` | Anvendt OpenAI-model |
+| `prompt_tokens` | Samlet inputforbrug, inklusive retry |
+| `completion_tokens` | Samlet outputforbrug, inklusive retry |
+| `latency_ms` | Samlet API-svartid i millisekunder |
+| `created_at` | Analysetidspunkt |
+
+Tabellen indeholder ingen prompts, API-nøgler, credentials eller rå modelsvar.
+
 ### `measurements`
 
 Indeholder målinger af effekten før og efter udførte opgaver.
@@ -319,3 +348,54 @@ Migrationen skal bevare unikke ID'er, relationer, datatyper og historiske data. 
 - Hvornår datastrukturen er stabil nok til migration til Supabase.
 - Hvordan backup, gendannelse og opbevaringsperioder skal håndteres.
 - Hvilke adgangsregler og rettigheder de forskellige AI-medarbejdere skal have.
+# Executive briefings
+
+`executive_briefings` gemmer én version pr. kombination af
+`briefing_date` og `status`. JSON-felterne indeholder fokusområder, risici og
+muligheder, mens model-, token- og latencyfelter gør AI-brugen reviderbar.
+`Database.save_executive_briefing` bruger upsert, så gentagen generering samme
+dag ikke skaber utilsigtede dubletter.
+
+## Website discovery
+
+`website_discovery_current` har én aktuel faktaprofil pr. website.
+`website_discovery_profiles` er en change-only historik: en ny række indsættes
+kun, når et væsentligt faktuelt felt ændres. Lister med schema-typer,
+sitemap-typer og dokumenterede signaler gemmes som JSON. Rå HTML,
+credentials, cookies og tokens gemmes ikke.
+
+## Website content
+
+`website_content` har en unik nøgle på website, indholdstype og offentligt
+content-ID. `raw_hash` sammenlignes før update, så uændret indhold ikke får et
+nyt importtidspunkt. Tabellen gemmer normaliseret metadata, kategorier og tags
+som JSON samt ordantal og linktællinger. HTML og API-responser gemmes ikke.
+# Search Console-dimensionstabeller
+
+- `search_console_pages`: unik på website, URL og periode.
+- `search_console_queries`: unik på website, søgeord og periode.
+- `search_console_page_queries`: unik på website, URL, søgeord og periode.
+
+Alle tre gemmer `website_id`, `site_url`, `dimension_type`, periodegrænser,
+klik, visninger, CTR, gennemsnitlig placering og `imported_at`. En gentagen
+import opdaterer den eksisterende unikke række. Databasen beholder ISO-datoer;
+dashboardets formatteringskomponent ejer den danske visning.
+# Beslutninger og eksperimenter
+
+- `decision_history` gemmer det saniterede beslutningsobjekt og dets
+  godkendelseslivscyklus.
+- `seo_experiments` gemmer relationer til beslutning, projekt og opgave,
+  baseline, venteperiode, eftermåling og resultat.
+- `experiment_learnings` gemmer én kort, genbrugelig læring pr. eksperiment.
+
+Website-, Search Console-, Partner Ads-, Discovery- og Intelligence-tabeller
+ændres ikke, når et eksperiment planlægges.
+# Title optimization
+
+- `title_optimization_drafts` gemmer offentlig sideanalyse, validerede forslag,
+  reviewer-resultat, brugerens redigerede valg og approval-/implementeringsspor.
+- `title_serp_competitors` gemmer højst ti lovligt indhentede offentlige
+  konkurrentresultater pr. kladde.
+
+Nuværende title og meta gemmes separat og overskrives aldrig. En godkendt
+kladde relateres til præcis ét projekt, én opgave og ét eksperiment.

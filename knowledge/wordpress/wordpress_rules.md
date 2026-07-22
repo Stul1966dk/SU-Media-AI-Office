@@ -29,3 +29,21 @@
 - Brug ensartet ordlyd og design på tværs af websitet.
 - Undgå vildledende knapper, falsk hastværk og overdreven gentagelse.
 - Mål klik og efterfølgende affiliateeffekt ved større CTA-ændringer.
+# Website Discovery
+
+WordPress må kun identificeres fra dokumenterede offentlige signaler som
+generator-meta, `wp-content`, `wp-includes` eller en tilgængelig offentlig
+REST-rod. Tema og page builder må kun navngives, når navnet fremgår af en
+offentlig asset-URL eller tilsvarende teknisk signal. Udseende alene er aldrig
+evidens.
+
+Discovery må ikke logge ind, bruge credentials, opregne brugere, omgå
+beskyttelse, brute-force endpoints, scanne sårbarheder eller skrive til
+WordPress. Ukendte forhold gemmes som `unknown`.
+
+## Connector-regler
+
+WordPress Connector må kun bruge offentlige GET-forespørgsler. REST API
+foretrækkes; offentlig HTML er fallback. Connectoren må aldrig forsøge login,
+indsende formularer eller kalde endpoints, der opretter, opdaterer eller
+sletter indhold. Uændrede elementer må ikke opdateres i databasen.

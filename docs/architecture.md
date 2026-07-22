@@ -1,5 +1,15 @@
 # Arkitektur
 
+## Autoritativt SEO-workflow
+
+`approved_changes` er den eneste permanente kilde til en godkendt ændring.
+Dagens arbejde læser denne model og må ikke regenerere eller rekonstruere
+title- og metatekster. Statusmaskinerne ligger i `core/workflow_status.py`, og
+tværtabelkontrollen ligger i `core/system_audit.py`.
+
+Det rapporterende audit-script er `scripts/audit_system.py`. Reparationer er
+adskilt fra rapportering og kræver `--repair-safe`.
+
 Status: Godkendt som arkitekturbeslutning 001.
 
 ## Formål
@@ -227,8 +237,161 @@ Website Registry + gemte driftsdata
 
 `website_profiles` holder den aktuelle profil og website health. `website_statistics` gemmer daglige sammenkoblede målinger. `website_categories` gemmer niche- og monetization-kategorier. `website_history` gemmer kun snapshots, når data faktisk ændres. CMS og tema registreres fra eksisterende metadata; ukendte værdier gemmes som `Ukendt` og gættes ikke.
 
+## OpenAI-forbindelse
+
+`core/ai_service.py` isolerer den første OpenAI-integration. `AIService` læser `OPENAI_API_KEY` direkte fra procesmiljøet og bruger den officielle Python-klients Responses API. Forbindelsestesten sender kun en fast instruktion og accepterer kun det forventede tekstsvar.
+
+```text
+OPENAI_API_KEY (miljø)
+  -> AIService
+  -> OpenAI Responses API
+  -> fast testtekst
+  -> boolsk systemstatus i app_state
+  -> read-only Streamlit-dashboard
+```
+
+API-nøglen, API-fejlens rå tekst og svarindhold gemmes ikke i databasen. Fejl oversættes til en kort kategori, før de når terminalen. Dashboardet læser kun den senest gemte boolske status fra `Database` og foretager aldrig OpenAI-kald.
+
 Website Profile-siden åbner et website via en selector og viser profil, SEO, provision, historik, aktive projekter, aktive opgaver og de gemte deterministiske anbefalinger. Siden har ingen SQL og kalder ingen eksterne tjenester.
+
+## AI Analyst
+
+`agents/ai_analyst.py` er det centrale analytiske lag. Agenten bruger `AIService`, `Database`, `KnowledgeEngine`, `WebsiteIntelligenceAgent`, `SEOHistory`, `ProjectManager` og `TaskEngine`, men de operationelle services bruges kun som read-only kontekst. Den eneste persistence er den færdige analyse gennem `Database.save_ai_analysis`.
+
+```text
+Website Profile + SEO/Search Console + Partner Ads
+  + aktive projekter og opgaver
+  + Company Playbook, SEO Rules, Tone of Voice, Affiliate Rules
+  -> sanitiseret automatisk prompt
+  -> AIService / Responses API
+  -> JSON-validering
+  -> højst ét retry
+  -> ai_analysis
+  -> AI Status + AI Analyst-side (Streamlit, read-only)
+```
+
+Promptbyggeren tillader kun udvalgte datafelter. API-nøgler, credentials, secrets, ordrenumre, e-mailadresser og telefonnumre fjernes før afsendelse. Modellen returnerer summary, problem, rodårsag, anbefaling, prioritet, confidence, forventet effekt, begrundelser, nødvendige agenter og foreslåede opgaver.
+
+Confidence under 60 klassificeres som forslag, 60-80 som anbefaling og over 80 som kandidat til SEO Manager-gennemgang. Klassifikationen udfører ingen handling. SEO Manager beslutter fortsat selv, om et recovery-projekt skal oprettes.
 
 ## Sikkerhed
 
 Tokens, API-nøgler, Chat ID'er og andre hemmeligheder må aldrig gemmes i dokumentation eller versionsstyret kode. De skal senere placeres i sikker lokal konfiguration eller et secrets-system.
+# AI Executive
+
+AI Executive ligger over de eksisterende specialistagenter som et read-only
+prioriteringslag. Agenten læser kun gennem `Database` og de eksisterende
+servicefacader, saniterer konteksten, laver en deterministisk evidensscore og
+beder derefter `AIService` formulere et valideret briefing-objekt. Den må ikke
+kalde muterende projekt-, opgave-, website-, orchestrator- eller
+notifikationsmetoder. Dashboardet bruger ligeledes kun Database-metoder.
+
+## Website Discovery
+
+Website Discovery består af en offentlig, read-only `WebsiteScanner` og en
+koordinerende `WebsiteDiscoveryAgent`. Scanneren undersøger kun startside,
+`robots.txt`, annonceret eller standard sitemap og den offentlige WordPress
+REST-rod, når WordPress allerede er dokumenteret. Agenten ejer persistence og
+issue-events. Ingen remote write-, login-, brute-force- eller
+sårbarhedsfunktioner findes i laget.
+
+## Connector Framework
+
+Connectorlaget ligger mellem dokumenterede Website Discovery-profiler og den
+centrale database. Factoryen vælger connector; connectoren normaliserer
+offentlige data; Database ejer idempotens og persistence. Dashboardet kalder
+kun connector- og Database-metoder og indeholder ingen SQL. Orchestrator
+modtager alene et event efter mere end 20 ændrede sider.
+
+## Dashboard usability
+
+`dashboard.components.ui.render_sidebar` er den eneste definition af
+navigationens rækkefølge og danske sidenavne. Streamlits automatiske
+sidenavigation skjules, så filnavne som `app.py` ikke bliver brugernavne.
+`dashboard.components.help_panel` leverer den samme fireleddede vejledning på
+alle sider.
+
+Executive JSON normaliseres før streng sikkerhedsvalidering. Ufarlige
+variationer som camelCase, ekstra felter og numeriske tekstværdier accepteres;
+manglende evidens eller ugyldige handlingstyper afvises fortsat. Kun gyldige
+briefings gemmes, så den seneste gyldige version overlever en efterfølgende
+model- eller servicefejl.
+
+## Websitekontekst og SEO-visning
+
+`dashboard.components.website_selector` ejer den valgte website-id i
+Streamlit session state. Den viser kun aktive websites og er den fælles
+kontekst for profiler, discovery, content, SEO, analyser, projekter og
+opgaver. Dashboardfilerne bruger fortsat kun Database-facaden; filtreret
+projektlæsning ligger derfor i `Database.get_projects`.
+
+SEO-siden adskiller visning fra import. Almindelig navigation læser kun den
+lokale database. Search Console-connectoren oprettes og kaldes først ved den
+eksplicitte importknap. KPI'er sammenligner den valgte periode med den
+foregående periode, og muligheder beregnes deterministisk fra gemte data.
+
+## Central driftsstatus
+
+`dashboard.components.feature_status` bygger funktionsregistret fra
+Database-facaden, lokal konfiguration og kendte implementeringsgrænser.
+Statussiden udfører ingen eksterne kald. Seneste vellykkede interaktive
+Partner Ads-kontrol gemmes som en række i `feature_runs`.
+
+`core.partner_ads_import` forbinder dashboardet med den eksisterende
+`run_check`-cyklus. Den starter præcis én kontrol og ingen permanent løkke.
+AI Analyst genlæser den gemte analyserække efter en vellykket kørsel, så
+tidsstempel og normaliserede databasefelter vises.
+
+## Central dataopdatering
+
+`core.data_refresh_service.DataRefreshService` orkestrerer kun dataarbejde og
+kalder ikke AI Analyst eller Executive Briefing. Hvert trin returnerer et
+struktureret resultat. Fejl stopper ikke uafhængige trin; SEO History
+markeres som ikke kørt, hvis Search Console-opdateringen fejler.
+
+Rækkefølgen er Registry, Partner Ads, Search Console-properties, Search
+Console-dagstal, SEO History, Website Intelligence og systemstatus.
+Discovery og Content Explorer er bevidst udeladt fra automatisk kørsel.
+Websiteafgrænset Executive Briefing filtrerer den indsamlede kontekst før
+prompten opbygges.
+
+## Executive Intelligence Engine
+
+`core.executive_intelligence.ExecutiveIntelligence` beriger valideret
+modeloutput med databasebaseret kontekst, datakildestatus, konkrete
+handlinger, prioritetsforklaring, effektvurdering og målemetode. Laget
+foregiver aldrig at kende sider eller søgeord, når page- og query-dimensioner
+ikke findes.
+
+AI Executive ejer fortsat schema, repair-kald og sikker persistence.
+Project Manager modtager kun eksplicitte brugerklik og opretter status
+`draft`; ingen opgave startes eller udføres automatisk.
+# Search Console-dimensioner
+
+`SearchConsoleConnector` er en read-only API-adapter.
+`SearchConsoleService.sync_dimensions()` styrer to komplette 28-dages
+perioder, dimensionsgrænser og fejlisolering pr. property. `Database` ejer al
+SQL og idempotent lagring i tre dimensionstabeller. Dashboardet læser kun via
+service- og databasegrænserne. `ExecutiveIntelligence` udvælger en konkret
+URL/søgeordskombination fra gemte data og opretter kun anbefalinger eller
+projektkladder; ingen websiteændringer udføres.
+# Decision- og eksperimentloop
+
+`core/decision_engine.py` samler konkrete URL-kandidater, nedjusterer lav
+datavolumen, frasorterer aktive opgaver og låste URL'er og gemmer højst én
+aktiv beslutning i `decision_history`.
+
+`core/seo_experiment_engine.py` ejer baseline, godkendelse, URL-lås,
+venteperioder, evaluering og læring. Kun statusserne `approved`, `running`,
+`waiting_for_data` og `ready_for_evaluation` låser en URL. Planlagte
+eksperimenter udfører intet. Efter afslutning gemmes læring, og låsen frigives.
+# Title Optimization Pipeline
+
+`agents/title_optimizer.py` orkestrerer kandidatvalg, offentlig HTML-analyse,
+valgfri SERP-evidens, valideret OpenAI-JSON, deterministisk review og
+approval draft. Ugyldigt eller afvist output får højst ét reparationsforsøg.
+
+En SERP-kilde bruges kun, når den kan tilgås lovligt og offentligt. Uden en
+konfigureret tilladt kilde fortsætter flowet uden konkurrentdata og gemmer
+begrænsningen. Godkendelse skriver kun til den lokale projekt-, opgave- og
+eksperimentmodel. Publicering ligger uden for systemet.

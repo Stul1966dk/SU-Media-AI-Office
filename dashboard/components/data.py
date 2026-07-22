@@ -15,7 +15,7 @@ T = TypeVar("T")
 class DashboardData:
     """All database results needed for one dashboard render."""
 
-    system_status: dict[str, bool]
+    system_status: dict[str, dict[str, Any]]
     overview: dict[str, int]
     economy: dict[str, Any]
     seo_counts: dict[str, int]
@@ -24,6 +24,7 @@ class DashboardData:
     recovery_projects: list[dict[str, Any]]
     recent_sales: list[dict[str, Any]]
     recent_events: list[dict[str, Any]]
+    ai_status: dict[str, Any]
 
     @property
     def displayed_database_results(self) -> int:
@@ -49,13 +50,16 @@ def load_dashboard_data(
     """Load each section independently through Database methods only."""
     return DashboardData(
         system_status=_safe(
-            database.get_dashboard_system_status,
+            database.get_dashboard_system_health,
             {
-                "database": False,
-                "partner_ads": False,
-                "search_console": False,
-                "agent_orchestrator": False,
-                "knowledge_engine": False,
+                key: {
+                    "is_ok": False, "detail": "Status kunne ikke indlæses",
+                    "checked_at": "", "error_type": "StatusReadError",
+                }
+                for key in (
+                    "database", "partner_ads", "search_console",
+                    "agent_orchestrator", "knowledge_engine", "openai",
+                )
             },
         ),
         overview=_safe(
@@ -98,6 +102,14 @@ def load_dashboard_data(
         ),
         recent_sales=_safe(database.get_recent_sales, []),
         recent_events=_safe(database.get_recent_events, []),
+        ai_status=_safe(
+            database.get_ai_analysis_status,
+            {
+                "total": 0,
+                "average_confidence": 0,
+                "latest_analysis": None,
+            },
+        ),
     )
 
 

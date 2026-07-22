@@ -28,6 +28,20 @@ Dette dokument er den centrale kilde til SU Medias SEO-regler.
 - Mål relevante placeringer, organisk trafik, klik og affiliateprovision.
 - Vurder effekten over en defineret periode og gem konklusionen.
 - Antag ikke, at trafikfald skyldes én årsag uden data.
+- Foretag kun én målelig ændring ad gangen på samme URL.
+- Lås title, meta, H1, brødtekst, interne links, schema, FAQ, billeder og CTA,
+  mens et godkendt eller aktivt eksperiment måles.
+- Kræv mindst 14 dages stabil URL-baseline og mindst én visning.
+- Forlæng kun en utilstrækkelig eftermåling én gang.
+- Opret ikke automatisk en ny ændring efter et negativt eller uklart resultat.
+- Bevar altid den eksisterende title og metabeskrivelse som dokumenteret
+  baseline; AI-forslag må ikke overskrive dem.
+- Title- og metaforslag skal være almindeligt dansk, relevante for
+  søgeintentionen og fri for clickbait, keyword stuffing og udokumenterede
+  superlativer.
+- Et title-eksperiment starter først, når den manuelle implementering er
+  dokumenteret med **Markér som implementeret**.
+
 
 ## SEO Recovery
 

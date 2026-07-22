@@ -50,6 +50,18 @@ class FakeConnector:
             raise RuntimeError("secret-token-must-not-be-logged")
         return self.metrics.get(site_url, [])
 
+    def get_search_analytics_dimensions(
+        self, site_url: str, start_date: str, end_date: str,
+        dimensions: list[str], row_limit: int,
+    ) -> list[dict[str, object]]:
+        row = {
+            "page_url": "https://alpha.dk/test/" if "page" in dimensions else None,
+            "query": "test søgeord" if "query" in dimensions else None,
+            "clicks": 10, "impressions": 100, "ctr": .1,
+            "average_position": 6.0,
+        }
+        return [row]
+
 
 def metric(
     metric_date: date,
@@ -105,6 +117,41 @@ class SearchConsoleTestCase(unittest.TestCase):
             website_registry=self.registry,
             logger=logger,
         )
+
+    def test_dimension_import_is_idempotent_and_comparable(self) -> None:
+        connector = FakeConnector([], {})
+        self.database.upsert_search_console_property(
+            site_url="https://alpha.dk/", permission_level="siteOwner",
+            website_id="alpha.dk", active=True,
+        )
+        service = self.service(connector)
+        first = service.sync_dimensions(reference_date=date(2026, 7, 19))
+        second = service.sync_dimensions(reference_date=date(2026, 7, 19))
+        self.assertEqual(6, first.rows_created)
+        self.assertEqual(0, second.rows_created)
+        self.assertEqual(6, second.rows_updated)
+        self.assertEqual(
+            2, len(self.database.get_search_console_dimensions(
+                "page", website_id="alpha.dk"
+            ))
+        )
+        comparisons = service.get_dimension_comparisons("alpha.dk", "page")
+        self.assertEqual("https://alpha.dk/test/", comparisons[0]["page_url"])
+
+    def test_dimension_scope_only_processes_selected_website(self) -> None:
+        connector = FakeConnector([], {})
+        for website in ("alpha.dk", "beta.dk"):
+            self.database.upsert_search_console_property(
+                site_url=f"https://{website}/", permission_level="siteOwner",
+                website_id=website, active=True,
+            )
+        result = self.service(connector).sync_dimensions(
+            website_ids=["beta.dk"], reference_date=date(2026, 7, 19)
+        )
+        self.assertEqual(1, result.properties_processed)
+        self.assertFalse(self.database.get_search_console_dimensions(
+            "page", website_id="alpha.dk"
+        ))
 
     def test_existing_oauth_token_is_reused(self) -> None:
         token_path = Path(self.temporary_directory.name) / "token.json"

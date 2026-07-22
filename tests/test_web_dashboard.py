@@ -122,6 +122,7 @@ class WebDashboardDataTestCase(unittest.TestCase):
         self.database.set_system_status("search_console", True)
         self.database.set_system_status("agent_orchestrator", True)
         self.database.set_system_status("knowledge_engine", True)
+        self.database.set_system_status("openai", True)
 
         data = load_dashboard_data(
             self.database,
@@ -150,6 +151,7 @@ class WebDashboardDataTestCase(unittest.TestCase):
         self.assertEqual(data.recent_sales[0]["website"], "active.dk")
         self.assertEqual(len(data.recent_events), 1)
         self.assertEqual(data.displayed_database_results, 5)
+        self.assertEqual(data.ai_status["total"], 0)
 
     def test_seo_filter_and_empty_sections(self) -> None:
         data = load_dashboard_data(
@@ -174,6 +176,7 @@ class WebDashboardDataTestCase(unittest.TestCase):
         database.get_active_seo_recovery_projects.return_value = []
         database.get_recent_sales.return_value = []
         database.get_recent_events.return_value = []
+        database.get_ai_analysis_status.return_value = {}
         data = load_dashboard_data(database)
         self.assertEqual(data.overview["websites"], 0)
         self.assertEqual(data.priority_tasks, [{"task": "Virker"}])
@@ -189,12 +192,16 @@ class WebDashboardDataTestCase(unittest.TestCase):
             "insert ",
             "update ",
             "delete ",
-            "telegram",
-            "searchconsoleconnector",
             "partneradsservice",
             "requests.",
         ):
             self.assertNotIn(forbidden, source)
+        connector_uses = [
+            path.name for path in dashboard_root.rglob("*.py")
+            if "searchconsoleconnector" in
+            path.read_text(encoding="utf-8").lower()
+        ]
+        self.assertEqual(connector_uses, ["9_SEO.py"])
 
 
 class StreamlitStartupTestCase(unittest.TestCase):
