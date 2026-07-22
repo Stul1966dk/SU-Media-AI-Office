@@ -313,7 +313,8 @@ Kandidater optages først i en version, når forventet værdi og målemetode er 
 # Sprint 38 - Afsluttet
 
 - Produktionsdato: 22. juli 2026
-- Produktionscommit: dokumenteres i afslutningscommittet efter kodecommittet
+- Produktionscommit: `585e6ec` (`Complete Sprint 38 experiment evaluation and
+  read-only dashboard automation`)
 - Implementeret: automatisk eksperimentmonitorering og evaluering efter en
   vellykket Search Console-synkronisering.
 - Implementeret: regelbaseret resultatklassificering med AI-fortolkning af de
