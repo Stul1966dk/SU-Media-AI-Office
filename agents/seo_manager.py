@@ -89,7 +89,11 @@ class SEOManager:
         updated = 0
         no_action = 0
         for website in self.website_registry.get_all():
-            if website["status"] in IGNORED_WEBSITE_STATUSES:
+            if (
+                not website["active"]
+                or website["status"] in IGNORED_WEBSITE_STATUSES
+                or website["status"] == "inactive"
+            ):
                 continue
             result = self.analyze_site(
                 website["website"],
@@ -127,7 +131,11 @@ class SEOManager:
         website = self.website_registry.get(website_id)
         if website is None:
             raise ValueError(f"Website findes ikke: {website_id}")
-        if website["status"] in IGNORED_WEBSITE_STATUSES:
+        if (
+            not website["active"]
+            or website["status"] in IGNORED_WEBSITE_STATUSES
+            or website["status"] == "inactive"
+        ):
             return SEOManagerSiteResult(
                 website=website_id,
                 action="ignored",

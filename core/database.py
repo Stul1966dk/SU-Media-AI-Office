@@ -59,6 +59,7 @@ class Database:
         self._create_search_console_table()
         self._create_search_console_daily_metrics_table()
         self._create_search_console_dimension_tables()
+        self._create_plausible_daily_metrics_table()
         self._create_seo_health_history_table()
         self._create_seo_recommendations_table()
         self._create_website_intelligence_tables()
@@ -73,6 +74,7 @@ class Database:
         self._create_work_queue_tables()
         self._create_experiment_monitoring_tables()
         self._create_experiment_evaluations_table()
+        self._create_priority_task_scores_table()
         self.connection.execute(
             """
             CREATE TABLE IF NOT EXISTS app_state (
@@ -82,6 +84,34 @@ class Database:
             """
         )
         self.connection.commit()
+
+    def _create_priority_task_scores_table(self) -> None:
+        """Create the refresh-time snapshot of dynamic task scores."""
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS priority_task_scores (
+                task_key TEXT PRIMARY KEY,
+                task_type TEXT NOT NULL,
+                website TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                description TEXT NOT NULL,
+                target TEXT NOT NULL,
+                link_label TEXT NOT NULL,
+                total_score REAL NOT NULL,
+                plausible_score REAL NOT NULL,
+                search_console_click_score REAL NOT NULL,
+                ctr_score REAL NOT NULL,
+                position_score REAL NOT NULL,
+                seo_health_score REAL NOT NULL,
+                experiment_score REAL NOT NULL,
+                missing_data_score REAL NOT NULL,
+                system_score REAL NOT NULL,
+                existing_task_score REAL NOT NULL,
+                payload_json TEXT NOT NULL,
+                calculated_at TEXT NOT NULL
+            )
+            """
+        )
 
     def initialize_read_only(self) -> None:
         """Open an existing database without schema or data write access."""
@@ -1911,6 +1941,23 @@ class Database:
             """
         )
 
+    def _create_plausible_daily_metrics_table(self) -> None:
+        """Create idempotent daily Plausible visitor storage."""
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS plausible_daily_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT NOT NULL,
+                metric_date TEXT NOT NULL,
+                visitors INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (website_id, metric_date),
+                FOREIGN KEY (website_id) REFERENCES websites(website)
+            )
+            """
+        )
+
     def _create_search_console_dimension_tables(self) -> None:
         """Create idempotent page/query Search Console period storage."""
         for table, identity, unique_key in (
@@ -2164,6 +2211,51 @@ class Database:
                 ),
             )
         return "updated" if existing else "created"
+
+    def upsert_plausible_daily_metric(
+        self, *, website_id: str, metric_date: str, visitors: int
+    ) -> bool:
+        """Upsert one Plausible metric and return whether it was inserted."""
+        existing = self._connection.execute(
+            """
+            SELECT id FROM plausible_daily_metrics
+            WHERE website_id = ? AND metric_date = ?
+            """,
+            (website_id, metric_date),
+        ).fetchone()
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO plausible_daily_metrics (
+                    website_id, metric_date, visitors, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(website_id, metric_date) DO UPDATE SET
+                    visitors = excluded.visitors,
+                    updated_at = excluded.updated_at
+                """,
+                (website_id, metric_date, int(visitors), timestamp, timestamp),
+            )
+        return existing is None
+
+    def get_plausible_daily_metrics(
+        self, *, website_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return stored Plausible metrics for verification and later use."""
+        where, parameters = "", ()
+        if website_id:
+            where, parameters = "WHERE website_id = ?", (website_id,)
+        rows = self._connection.execute(
+            f"""
+            SELECT website_id, metric_date, visitors, created_at, updated_at
+            FROM plausible_daily_metrics
+            {where}
+            ORDER BY metric_date DESC, website_id
+            """,
+            parameters,
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     def get_search_console_daily_metrics(
         self,
@@ -2735,15 +2827,20 @@ class Database:
         """Count trends from the latest analyzed date for one period."""
         rows = self._connection.execute(
             """
-            SELECT trend, COUNT(*) AS total
-            FROM seo_health_history
-            WHERE period = ?
-              AND date = (
+            SELECT h.trend, COUNT(*) AS total
+            FROM seo_health_history h
+            JOIN websites w ON w.website = h.website_id
+            WHERE h.period = ?
+              AND w.active = 1
+              AND w.status NOT IN (
+                  'inactive', 'phasing_out', 'archived', 'cancelled'
+              )
+              AND h.date = (
                   SELECT MAX(date)
                   FROM seo_health_history
                   WHERE period = ?
               )
-            GROUP BY trend
+            GROUP BY h.trend
             """,
             (period, period),
         ).fetchall()
@@ -2765,15 +2862,20 @@ class Database:
         """Return the lowest scores from the latest analysis date."""
         rows = self._connection.execute(
             """
-            SELECT website_id, date, period, score, trend
-            FROM seo_health_history
-            WHERE period = ?
-              AND date = (
+            SELECT h.website_id, h.date, h.period, h.score, h.trend
+            FROM seo_health_history h
+            JOIN websites w ON w.website = h.website_id
+            WHERE h.period = ?
+              AND w.active = 1
+              AND w.status NOT IN (
+                  'inactive', 'phasing_out', 'archived', 'cancelled'
+              )
+              AND h.date = (
                   SELECT MAX(date)
                   FROM seo_health_history
                   WHERE period = ?
               )
-            ORDER BY score ASC, website_id
+            ORDER BY h.score ASC, h.website_id
             LIMIT ?
             """,
             (period, period, limit),
@@ -3510,6 +3612,34 @@ class Database:
         ).fetchone()
         return self._website_row(row) if row is not None else None
 
+    def set_website_active(self, website: str, active: bool) -> bool:
+        """Toggle one existing website without changing its identity or history."""
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                UPDATE websites
+                SET active = ?, status = ?
+                WHERE website = ?
+                """,
+                (int(active), "active" if active else "inactive", website),
+            )
+        return cursor.rowcount == 1
+
+    def get_active_website_ids(self) -> list[str]:
+        """Return website IDs eligible for future processing."""
+        rows = self._connection.execute(
+            """
+            SELECT website
+            FROM websites
+            WHERE active = 1
+              AND status NOT IN (
+                  'inactive', 'phasing_out', 'archived', 'cancelled'
+              )
+            ORDER BY website
+            """
+        ).fetchall()
+        return [str(row["website"]) for row in rows]
+
     @staticmethod
     def _website_row(row: sqlite3.Row) -> dict[str, Any]:
         website = dict(row)
@@ -4219,6 +4349,81 @@ class Database:
                 (f"system_status:{component}", "ok" if is_ok else "error"),
             )
 
+    def set_integration_state(
+        self, integration: str, state: dict[str, Any] | None
+    ) -> None:
+        """Persist non-secret metadata for one external integration."""
+        key = f"integration_state:{integration}"
+        with self._connection:
+            if state is None:
+                self._connection.execute(
+                    "DELETE FROM app_state WHERE key = ?", (key,)
+                )
+            else:
+                self._connection.execute(
+                    """
+                    INSERT INTO app_state (key, value) VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                    """,
+                    (key, json.dumps(state, ensure_ascii=False)),
+                )
+
+    def get_integration_state(
+        self, integration: str
+    ) -> dict[str, Any] | None:
+        """Return saved non-secret metadata for one external integration."""
+        row = self._connection.execute(
+            "SELECT value FROM app_state WHERE key = ?",
+            (f"integration_state:{integration}",),
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            state = json.loads(row["value"])
+        except (TypeError, json.JSONDecodeError):
+            return None
+        return state if isinstance(state, dict) else None
+
+    def set_navigation_group_state(self, group: str, is_open: bool) -> None:
+        """Persist the local user's sidebar group preference."""
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO app_state (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (f"navigation_group:{group}", "open" if is_open else "closed"),
+            )
+
+    def get_navigation_group_state(self, group: str) -> bool | None:
+        """Return a saved sidebar preference, if one exists."""
+        row = self._connection.execute(
+            "SELECT value FROM app_state WHERE key = ?",
+            (f"navigation_group:{group}",),
+        ).fetchone()
+        if not row:
+            return None
+        return row["value"] == "open"
+
+    def set_app_setting(self, name: str, value: bool) -> None:
+        """Persist one boolean application setting in app_state."""
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO app_state (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (f"setting:{name}", "1" if value else "0"),
+            )
+
+    def get_app_setting(self, name: str, default: bool = False) -> bool:
+        """Return one boolean application setting."""
+        row = self._connection.execute(
+            "SELECT value FROM app_state WHERE key = ?",
+            (f"setting:{name}",),
+        ).fetchone()
+        return default if not row else row["value"] == "1"
+
     def save_feature_run(
         self,
         *,
@@ -4420,12 +4625,16 @@ class Database:
         current = reference_time or datetime.now().astimezone()
         sale_date = f"{current.day}-{current.month}-{current.year}"
         rows = self._connection.execute(
-            "SELECT dato, provision FROM registered_sales"
+            """
+            SELECT dato, tidspunkt, ordrenr, kombiid, provision, url, valuta
+            FROM registered_sales
+            """
         ).fetchall()
         today_count = 0
         month_count = 0
         today_commission = Decimal("0")
         month_commission = Decimal("0")
+        month_sales_rows = []
         for row in rows:
             try:
                 day, month, year = (
@@ -4433,6 +4642,8 @@ class Database:
                 )
                 provision = Decimal(str(row["provision"]))
             except (AttributeError, TypeError, ValueError, InvalidOperation):
+                continue
+            if str(row["valuta"]).upper() != "DKK":
                 continue
             if (day, month, year) == (
                 current.day,
@@ -4444,11 +4655,26 @@ class Database:
             if (month, year) == (current.month, current.year):
                 month_count += 1
                 month_commission += provision
+                website = urlsplit(str(row["url"] or "")).netloc.lower()
+                if website.startswith("www."):
+                    website = website[4:]
+                month_sales_rows.append({
+                    "dato": date(year, month, day),
+                    "tidspunkt": row["tidspunkt"],
+                    "website": website or "Ukendt",
+                    "reference": row["ordrenr"] or row["kombiid"] or "—",
+                    "provision": provision,
+                })
+        month_sales_rows.sort(
+            key=lambda item: (item["dato"], item["tidspunkt"]),
+            reverse=True,
+        )
         return {
             "today_commission": today_commission,
             "month_commission": month_commission,
             "today_sales": today_count,
             "month_sales": month_count,
+            "month_sales_rows": month_sales_rows,
         }
 
     def get_priority_tasks(self, limit: int = 5) -> list[dict[str, Any]]:
@@ -4474,6 +4700,173 @@ class Database:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def replace_priority_task_scores(
+        self, items: list[dict[str, Any]]
+    ) -> int:
+        """Replace the current priority snapshot in one transaction."""
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        score_fields = (
+            "plausible_score",
+            "search_console_click_score",
+            "ctr_score",
+            "position_score",
+            "seo_health_score",
+            "experiment_score",
+            "missing_data_score",
+            "system_score",
+            "existing_task_score",
+        )
+        with self._connection:
+            self._connection.execute("DELETE FROM priority_task_scores")
+            self._connection.executemany(
+                """
+                INSERT INTO priority_task_scores (
+                    task_key, task_type, website, priority, description,
+                    target, link_label, total_score, plausible_score,
+                    search_console_click_score, ctr_score, position_score,
+                    seo_health_score, experiment_score, missing_data_score,
+                    system_score, existing_task_score, payload_json,
+                    calculated_at
+                )
+                VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                """,
+                [
+                    (
+                        item["task_key"],
+                        item["task_type"],
+                        item["website"],
+                        item["priority"],
+                        item["description"],
+                        item["target"],
+                        item["link_label"],
+                        float(item["total_score"]),
+                        *(float(item.get(field, 0)) for field in score_fields),
+                        json.dumps(item, ensure_ascii=False, default=str),
+                        timestamp,
+                    )
+                    for item in items
+                ],
+            )
+        return len(items)
+
+    def get_priority_task_scores(
+        self, limit: int | None = 5
+    ) -> list[dict[str, Any]]:
+        """Return the persisted priority snapshot without writing data."""
+        query = """
+            SELECT payload_json, calculated_at
+            FROM priority_task_scores
+            ORDER BY
+                total_score DESC, task_type, website, description, task_key
+        """
+        parameters: tuple[Any, ...] = ()
+        if limit is not None:
+            query += " LIMIT ?"
+            parameters = (limit,)
+        rows = self._connection.execute(query, parameters).fetchall()
+        result = []
+        for row in rows:
+            item = json.loads(row["payload_json"])
+            item["calculated_at"] = row["calculated_at"]
+            result.append(item)
+        return result
+
+    def get_dashboard_action_context(self) -> dict[str, list[dict[str, Any]]]:
+        """Return existing records needed for the dashboard action list."""
+        experiments = self._connection.execute(
+            """
+            SELECT
+                e.id, e.website_id AS website, e.target_url, e.status
+            FROM seo_experiments e
+            JOIN websites w ON w.website = e.website_id
+            WHERE e.status = 'ready_for_evaluation'
+              AND w.active = 1
+              AND w.status NOT IN (
+                  'inactive', 'phasing_out', 'archived', 'cancelled'
+              )
+            ORDER BY e.id
+            """
+        ).fetchall()
+        active_experiments = self._connection.execute(
+            """
+            SELECT
+                e.id, e.website_id AS website, e.target_url, e.status
+            FROM seo_experiments e
+            JOIN websites w ON w.website = e.website_id
+            WHERE e.status IN ('waiting_for_data', 'ready_for_evaluation')
+              AND w.active = 1
+              AND w.status NOT IN (
+                  'inactive', 'phasing_out', 'archived', 'cancelled'
+              )
+            ORDER BY e.id
+            """
+        ).fetchall()
+        coverage = self._connection.execute(
+            """
+            SELECT
+                w.website,
+                MAX(sc.metric_date) AS latest_search_console,
+                MAX(pm.metric_date) AS latest_plausible
+            FROM websites w
+            LEFT JOIN search_console_daily_metrics sc
+                ON sc.website_id = w.website
+            LEFT JOIN plausible_daily_metrics pm
+                ON pm.website_id = w.website
+            WHERE w.active = 1
+              AND w.status NOT IN (
+                  'inactive', 'phasing_out', 'archived', 'cancelled'
+              )
+            GROUP BY w.website
+            ORDER BY w.website
+            """
+        ).fetchall()
+        seo_health = self._connection.execute(
+            """
+            SELECT
+                h.website_id AS website,
+                h.score,
+                h.trend,
+                h.click_change,
+                h.ctr_change,
+                h.position_change
+            FROM seo_health_history h
+            JOIN websites w ON w.website = h.website_id
+            WHERE h.period = '28d'
+              AND w.active = 1
+              AND w.status NOT IN (
+                  'inactive', 'phasing_out', 'archived', 'cancelled'
+              )
+              AND h.date = (
+                  SELECT MAX(h2.date)
+                  FROM seo_health_history h2
+                  WHERE h2.website_id = h.website_id
+                    AND h2.period = h.period
+              )
+            ORDER BY h.score, h.website_id
+            """
+        ).fetchall()
+        plausible_daily = self._connection.execute(
+            """
+            SELECT pm.website_id AS website, pm.metric_date, pm.visitors
+            FROM plausible_daily_metrics pm
+            JOIN websites w ON w.website = pm.website_id
+            WHERE w.active = 1
+              AND w.status NOT IN (
+                  'inactive', 'phasing_out', 'archived', 'cancelled'
+              )
+            ORDER BY pm.website_id, pm.metric_date
+            """
+        ).fetchall()
+        return {
+            "experiments": [dict(row) for row in experiments],
+            "active_experiments": [dict(row) for row in active_experiments],
+            "coverage": [dict(row) for row in coverage],
+            "seo_health": [dict(row) for row in seo_health],
+            "plausible_daily": [dict(row) for row in plausible_daily],
+        }
+
     def get_latest_seo_health_sites(
         self,
         trend: str | None = None,
@@ -4496,7 +4889,12 @@ class Database:
                 h.ctr_change,
                 h.position_change
             FROM seo_health_history h
+            JOIN websites w ON w.website = h.website_id
             WHERE h.period = ?
+              AND w.active = 1
+              AND w.status NOT IN (
+                  'inactive', 'phasing_out', 'archived', 'cancelled'
+              )
               AND h.date = (
                   SELECT MAX(date)
                   FROM seo_health_history

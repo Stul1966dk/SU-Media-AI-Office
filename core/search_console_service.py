@@ -102,10 +102,12 @@ class SearchConsoleService:
             raise ValueError("days skal være mindst 1.")
         end_date = date.today()
         start_date = end_date - timedelta(days=days - 1)
+        active_websites = set(self.database.get_active_website_ids())
         properties = [
             item
             for item in self.database.get_search_console_properties()
             if item["active"] and item["website_id"]
+            and item["website_id"] in active_websites
             and (website_ids is None or item["website_id"] in website_ids)
         ]
         processed = 0
@@ -163,9 +165,11 @@ class SearchConsoleService:
         periods = (
             (previous_start, previous_end), (current_start, current_end),
         )
+        active_websites = set(self.database.get_active_website_ids())
         properties = [
             item for item in self.database.get_search_console_properties()
             if item["active"] and item["website_id"]
+            and item["website_id"] in active_websites
             and (website_ids is None or item["website_id"] in website_ids)
         ]
         totals = {"page": 0, "query": 0, "page_query": 0}

@@ -52,6 +52,12 @@ class DataRefreshServiceTests(unittest.TestCase):
             websites_analyzed=2, profiles_created=0, profiles_updated=2,
             profiles_unchanged=0, history_changes=2,
         )
+        plausible = Mock()
+        plausible.import_active_websites.return_value = {
+            "websites_attempted": 2, "websites_updated": 2,
+            "datapoints_saved": 60, "rows_created": 60,
+            "rows_updated": 0, "errors": [], "websites_failed": 0,
+        }
         service = DataRefreshService(
             database, registry=registry,
             partner_refresh=Mock(return_value={
@@ -60,28 +66,31 @@ class DataRefreshServiceTests(unittest.TestCase):
             }),
             search_console=search, seo_history=seo,
             intelligence=intelligence,
+            plausible_import=plausible,
             health_check=Mock(return_value={}),
         )
-        service._test_parts = (registry, search, seo, intelligence)
+        service._test_parts = (registry, search, seo, intelligence, plausible)
         return service
 
     def test_refresh_all_runs_in_required_order(self) -> None:
         events = []
-        result = self._service().refresh_all(
+        service = self._service()
+        result = service.refresh_all(
             lambda step, status, _result: events.append((step, status))
         )
         completed = [
             step for step, status in events if status == "completed"
         ]
         self.assertEqual(list(DataRefreshService.STEPS), completed)
-        self.assertEqual(8, result["completed_steps"])
+        self.assertEqual(len(DataRefreshService.STEPS), result["completed_steps"])
         self.assertEqual(0, result["failed_steps"])
+        service.database.replace_priority_task_scores.assert_called_once()
 
     def test_independent_steps_continue_and_seo_is_skipped_after_search_error(
         self,
     ) -> None:
         service = self._service(search_failure=True)
-        _registry, search, seo, intelligence = service._test_parts
+        _registry, search, seo, intelligence, plausible = service._test_parts
         result = service.refresh_all()
         statuses = {item["step"]: item["status"] for item in result["steps"]}
         self.assertEqual("error", statuses["Search Console-properties"])
@@ -90,6 +99,7 @@ class DataRefreshServiceTests(unittest.TestCase):
         search.sync_all_properties.assert_not_called()
         seo.analyze_all_sites.assert_not_called()
         intelligence.analyze_all_sites.assert_called_once()
+        plausible.import_active_websites.assert_called_once()
 
 
 class BriefingReadinessTests(unittest.TestCase):

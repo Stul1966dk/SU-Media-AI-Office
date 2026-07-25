@@ -1,6 +1,6 @@
 """Partner-ads XML integration."""
 
-from datetime import date, timedelta
+from datetime import date
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from xml.etree import ElementTree
 
@@ -25,16 +25,22 @@ class PartnerAdsService:
         self.base_url = base_url
         self.key = key
 
-    def build_url(self, today: date | None = None) -> str:
-        """Build a URL for the period from yesterday through today."""
-        current_date = today or date.today()
-        yesterday = current_date - timedelta(days=1)
+    def build_url(
+        self,
+        today: date | None = None,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> str:
+        """Build a URL for an explicit period or the current month."""
+        current_date = end_date or today or date.today()
+        period_start = start_date or current_date.replace(day=1)
         parts = urlsplit(self.base_url)
         query = dict(parse_qsl(parts.query, keep_blank_values=True))
         query.update(
             {
                 "key": self.key,
-                "fra": yesterday.strftime("%y-%m-%d"),
+                "fra": period_start.strftime("%y-%m-%d"),
                 "til": current_date.strftime("%y-%m-%d"),
             }
         )
@@ -60,9 +66,14 @@ class PartnerAdsService:
             )
         )
 
-    def fetch_sales(self) -> tuple[str, list[dict[str, str]]]:
+    def fetch_sales(
+        self,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> tuple[str, list[dict[str, str]]]:
         """Fetch Partner-ads XML and return the request URL and parsed sales."""
-        url = self.build_url()
+        url = self.build_url(start_date=start_date, end_date=end_date)
         try:
             response = requests.get(url, timeout=20)
             response.raise_for_status()

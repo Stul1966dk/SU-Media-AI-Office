@@ -106,7 +106,10 @@ def analyze_all_sites(
 ) -> list[SEOHealth]:
     """Analyze every website that has stored Search Console metrics."""
     results: list[SEOHealth] = []
+    active_websites = set(database.get_active_website_ids())
     for website in database.get_search_console_website_ids():
+        if website not in active_websites:
+            continue
         results.extend(analyze_site(database, website, analysis_date))
     return results
 

@@ -27,6 +27,7 @@ from dashboard.components.ui import (
     render_table,
 )
 from dashboard.components.website_selector import get_selected_website_id
+from dashboard.components.startup_sync import render_startup_sync_status
 from core.system_health import check_runtime_services
 from core.data_refresh_service import DataRefreshService
 
@@ -81,6 +82,8 @@ def main() -> None:
         limitations="Forsiden starter ikke scanninger eller analyser automatisk.",
     )
     st.caption(format_datetime(now))
+    st.subheader("Synkronisering ved app-start")
+    render_startup_sync_status()
     _render_data_refresh()
     _render_system_status(data)
     _render_ai_status(data)
@@ -89,8 +92,6 @@ def main() -> None:
     _render_economy(data)
     _render_seo_health(data, selected_trend)
     _render_priority_tasks(data)
-    _render_recovery(data)
-    _render_sales(data)
     _render_events(data)
 
 
@@ -180,6 +181,7 @@ def _render_data_refresh() -> None:
     )
     seo = _refresh_step(result, "SEO History")
     intelligence = _refresh_step(result, "Website Intelligence")
+    plausible = _refresh_step(result, "Plausible")
     for column, (label, value) in zip(st.columns(5), (
         ("Nye Partner Ads-salg", partner.get("new", 0)),
         ("Properties behandlet", properties.get("total", 0)),
@@ -192,6 +194,29 @@ def _render_data_refresh() -> None:
          + intelligence.get("profiles_created", 0)),
     )):
         column.metric(label, value)
+    if plausible:
+        st.write(
+            f"**Plausible:** "
+            f"{_refresh_status_label(plausible.get('status', ''))}"
+        )
+        attempted, updated, datapoints = st.columns(3)
+        attempted.metric(
+            "Websites forsøgt", plausible.get("websites_attempted", 0)
+        )
+        updated.metric(
+            "Websites opdateret", plausible.get("websites_updated", 0)
+        )
+        datapoints.metric(
+            "Datapunkter gemt", plausible.get("datapoints_saved", 0)
+        )
+        errors = plausible.get("errors") or []
+        if errors:
+            with st.expander("Plausible-fejl pr. website"):
+                for error in errors:
+                    st.write(
+                        f"- **{error.get('website', 'Ukendt')}:** "
+                        f"{error.get('message', 'Ukendt fejl')}"
+                    )
     selected = st.session_state.get("selected_website_id")
     if selected:
         database = open_database()
@@ -299,6 +324,33 @@ def _render_economy(data: DashboardData) -> None:
     )
     for column, (label, value) in zip(st.columns(4), values):
         column.metric(label, value)
+    rows = data.economy.get("month_sales_rows", [])
+    with st.expander("Vis beregning"):
+        if not rows:
+            st.info("Ingen Partner Ads-salg i den aktuelle måned.")
+            return
+        render_table(
+            [
+                {
+                    "dato": row["dato"].strftime("%d.%m.%Y"),
+                    "website": row["website"],
+                    "reference": row["reference"],
+                    "provision": row["provision"],
+                }
+                for row in rows
+            ],
+            columns={
+                "dato": "Dato",
+                "website": "Website",
+                "reference": "Ordre/reference",
+                "provision": "Provision i DKK",
+            },
+        )
+        st.write(f"**Antal salg:** {len(rows)}")
+        st.write(
+            "**Samlet provision:** "
+            f"{_currency(data.economy['month_commission'])}"
+        )
 
 
 def _render_seo_health(
@@ -321,59 +373,76 @@ def _render_seo_health(
             st.rerun()
     if selected_trend:
         st.caption(f"Filter: {selected_trend.capitalize()}")
-    render_table(
-        data.seo_sites,
-        columns={
-            "website": "Website",
-            "score": "SEO-score",
-            "trend": "Trend",
-            "click_change": "Klikændring %",
-            "position_change": "Placeringsændring",
+    st.dataframe(
+        [
+            {
+                "Website": row["website"],
+                "SEO-score": round(float(row["score"]), 1),
+                "Trend": str(row["trend"]).capitalize(),
+                "Klikændring": (
+                    round(float(row["click_change"]), 1)
+                    if row.get("click_change") is not None else None
+                ),
+                "Placeringsændring": (
+                    round(float(row["position_change"]), 1)
+                    if row.get("position_change") is not None else None
+                ),
+            }
+            for row in data.seo_sites
+        ],
+        column_config={
+            "SEO-score": st.column_config.NumberColumn(
+                "SEO-score",
+                help=(
+                    "Samlet 0–100-score baseret på ændringer i klik, "
+                    "visninger, CTR og gennemsnitlig placering."
+                ),
+                format="%.1f",
+            ),
+            "Trend": st.column_config.TextColumn(
+                "Trend",
+                help=(
+                    "Growing: mindst 70. Stable: 45–69,9. "
+                    "Declining: 25–44,9. Critical: under 25."
+                ),
+            ),
+            "Klikændring": st.column_config.NumberColumn(
+                "Klikændring %",
+                help=(
+                    "Procentvis ændring i klik i de seneste 28 dage "
+                    "sammenlignet med de foregående 28 dage."
+                ),
+                format="%.1f",
+            ),
+            "Placeringsændring": st.column_config.NumberColumn(
+                "Placeringsændring",
+                help=(
+                    "Forskel i vægtet gennemsnitsplacering. Negativ er "
+                    "en forbedring; positiv er en forværring."
+                ),
+                format="%.1f",
+            ),
         },
+        use_container_width=True,
+        hide_index=True,
     )
 
 
 def _render_priority_tasks(data: DashboardData) -> None:
     st.subheader("Vigtigste opgaver")
-    render_table(
-        data.priority_tasks,
-        columns={
-            "website": "Website",
-            "project": "Projekt",
-            "task": "Opgave",
-            "assigned_agent": "Ansvarlig agent",
-            "priority_score": "Prioritet",
-            "estimated_minutes": "Estimeret tid",
-            "status": "Status",
-        },
-    )
-
-
-def _render_recovery(data: DashboardData) -> None:
-    st.subheader("SEO Recovery")
-    render_table(
-        data.recovery_projects,
-        columns={
-            "website": "Website",
-            "seo_score": "SEO-score",
-            "trend": "Trend",
-            "project": "Projekt",
-            "status": "Status",
-        },
-    )
-
-
-def _render_sales(data: DashboardData) -> None:
-    st.subheader("Partner Ads")
-    render_table(
-        data.recent_sales,
-        columns={
-            "dato": "Dato",
-            "website": "Website",
-            "omsaetning": "Omsætning",
-            "provision": "Provision",
-        },
-    )
+    if not data.priority_tasks:
+        st.info("Ingen højprioriterede opgaver fundet.")
+        return
+    for item in data.priority_tasks:
+        priority, description, website, change, link = st.columns(
+            [1.4, 3.4, 1.8, 1.3, 2.1], vertical_alignment="center"
+        )
+        priority.markdown(f"**{item['priority']}**")
+        description.write(item["description"])
+        website.write(item["website"])
+        change.write(item.get("change", "—"))
+        with link:
+            render_page_link(item["target"], item["link_label"])
 
 
 def _render_events(data: DashboardData) -> None:

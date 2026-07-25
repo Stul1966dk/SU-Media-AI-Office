@@ -1,6 +1,7 @@
 """Reusable Streamlit presentation helpers."""
 
 from html import escape
+import inspect
 from pathlib import Path
 from typing import Any
 
@@ -19,48 +20,194 @@ def load_styles(path: Path) -> None:
 
 
 def render_sidebar(*, show_website_selector: bool = True) -> None:
-    """Render the one fixed, Danish navigation menu on every page."""
-    pages = (
+    """Render the persistent, grouped Danish navigation menu."""
+    from dashboard.components.startup_sync import ensure_startup_sync
+    ensure_startup_sync()
+    primary_pages = (
         ("pages/15_Dagens_Arbejde.py", "Aktuel opgave", ":material/today:"),
         ("app.py", "Dashboard", ":material/dashboard:"),
         ("pages/3_Executive_Briefing.py", "Executive Briefing", ":material/strategy:"),
-        ("pages/6_AI_Analyst.py", "AI Analyst", ":material/psychology:"),
-        ("pages/11_Websites.py", "Websites", ":material/public:"),
+    )
+    groups = (
         (
-            "pages/1_Website_Profile.py",
-            "Website Profile",
-            ":material/language:",
+            "Websites", "websites", ":material/public:",
+            (
+                ("pages/11_Websites.py", "Oversigt", ":material/public:"),
+                (
+                    "pages/1_Website_Profile.py", "Website Profile",
+                    ":material/language:",
+                ),
+            ),
         ),
-        ("pages/4_Website_Discovery.py", "Website Discovery", ":material/travel_explore:"),
-        ("pages/5_Content_Explorer.py", "Content Explorer", ":material/article:"),
-        ("pages/9_SEO.py", "SEO", ":material/query_stats:"),
-        ("pages/13_Eksperimenter.py", "Eksperimenter", ":material/science:"),
-        ("pages/16_SEO_Laering.py", "SEO-læring", ":material/school:"),
-        ("pages/14_Title_Optimering.py", "Title optimering", ":material/title:"),
-        ("pages/2_Projekter.py", "Projekter", ":material/folder:"),
-        ("pages/8_Opgaver.py", "Opgaver", ":material/checklist:"),
-        ("pages/10_Partner_Ads.py", "Partner Ads", ":material/payments:"),
-        ("pages/0_Kom_godt_i_gang.py", "Kom godt i gang", ":material/route:"),
-        ("pages/12_Systemstatus.py", "Systemstatus", ":material/monitor_heart:"),
         (
-            "pages/7_Indstillinger.py",
-            "Indstillinger",
-            ":material/settings:",
+            "Research", "research", ":material/travel_explore:",
+            (
+                (
+                    "pages/4_Website_Discovery.py", "Website Discovery",
+                    ":material/travel_explore:",
+                ),
+                (
+                    "pages/5_Content_Explorer.py", "Content Explorer",
+                    ":material/article:",
+                ),
+            ),
+        ),
+        (
+            "SEO", "seo", ":material/query_stats:",
+            (
+                ("pages/9_SEO.py", "SEO-overblik", ":material/query_stats:"),
+                (
+                    "pages/17_SEO_Insights.py", "SEO Insights",
+                    ":material/insights:",
+                ),
+                (
+                    "pages/14_Title_Optimering.py", "Title optimering",
+                    ":material/title:",
+                ),
+                (
+                    "pages/13_Eksperimenter.py", "Eksperimenter",
+                    ":material/science:",
+                ),
+            ),
+        ),
+        (
+            "Arbejde", "work", ":material/work:",
+            (
+                ("pages/2_Projekter.py", "Projekter", ":material/folder:"),
+                ("pages/8_Opgaver.py", "Opgaver", ":material/checklist:"),
+            ),
+        ),
+        (
+            "Indstillinger", "settings", ":material/settings:",
+            (
+                (
+                    "pages/7_Indstillinger.py", "Oversigt",
+                    ":material/settings:",
+                ),
+                (
+                    "pages/18_Integrationer.py", "Integrationer",
+                    ":material/cable:",
+                ),
+                (
+                    "pages/10_Partner_Ads.py", "Partner Ads",
+                    ":material/payments:",
+                ),
+                (
+                    "pages/12_Systemstatus.py", "Systemstatus",
+                    ":material/monitor_heart:",
+                ),
+            ),
         ),
     )
+    help_pages = (
+        (
+            "pages/0_Kom_godt_i_gang.py", "Kom godt i gang",
+            ":material/route:",
+        ),
+        (
+            "pages/16_SEO_Laering.py", "SEO-læring",
+            ":material/school:",
+        ),
+    )
+    active_page = _active_page_filename()
     try:
         if show_website_selector:
             from dashboard.components.website_selector import render_website_selector
             render_website_selector()
             st.sidebar.divider()
-        for path, label, icon in pages:
+        for path, label, icon in primary_pages:
+            st.sidebar.page_link(path, label=label, icon=icon)
+
+        for index, (label, key, icon, pages) in enumerate(groups):
+            if index == 3:
+                st.sidebar.page_link(
+                    "pages/6_AI_Analyst.py",
+                    label="AI Analyst",
+                    icon=":material/psychology:",
+                )
+            state_key = f"nav_group_open:{key}"
+            is_active = active_page in {
+                Path(path).name for path, _label, _icon in pages
+            }
+            if state_key not in st.session_state:
+                saved_state = _load_navigation_group_state(key)
+                st.session_state[state_key] = (
+                    is_active if saved_state is None else saved_state
+                )
+            elif is_active:
+                st.session_state[state_key] = True
+            is_open = st.sidebar.toggle(
+                label,
+                key=state_key,
+                on_change=_save_navigation_group_state,
+                args=(key, state_key),
+            )
+            if is_open:
+                for path, sublabel, subicon in pages:
+                    st.sidebar.page_link(
+                        path, label=sublabel, icon=subicon
+                    )
+
+        st.sidebar.divider()
+        st.sidebar.caption("Hjælp")
+        for path, label, icon in help_pages:
             st.sidebar.page_link(path, label=label, icon=icon)
     except KeyError:
+        all_pages = [
+            *primary_pages,
+            ("pages/6_AI_Analyst.py", "AI Analyst", ":material/psychology:"),
+            *[
+                page
+                for _label, _key, _icon, pages in groups
+                for page in pages
+            ],
+            *help_pages,
+        ]
         st.sidebar.markdown(
             "\n".join(
-                f"- [{label}]({path})" for path, label, _ in pages
+                f"- [{label}]({path})" for path, label, _ in all_pages
             )
         )
+
+
+def _active_page_filename() -> str:
+    """Identify the Streamlit entrypoint currently rendering the sidebar."""
+    dashboard_root = Path(__file__).resolve().parents[1]
+    for frame in inspect.stack():
+        candidate = Path(frame.filename).resolve()
+        if candidate.parent == dashboard_root / "pages":
+            return candidate.name
+        if candidate == dashboard_root / "app.py":
+            return "app.py"
+    return ""
+
+
+def _load_navigation_group_state(group: str) -> bool | None:
+    """Load a durable group preference for the local single-user app."""
+    try:
+        from dashboard.components.database import open_database
+        database = open_database()
+        try:
+            return database.get_navigation_group_state(group)
+        finally:
+            database.close()
+    except Exception:
+        return None
+
+
+def _save_navigation_group_state(group: str, state_key: str) -> None:
+    """Persist a changed group preference across browser visits."""
+    try:
+        from dashboard.components.database import open_database
+        database = open_database()
+        try:
+            database.set_navigation_group_state(
+                group, bool(st.session_state.get(state_key))
+            )
+        finally:
+            database.close()
+    except Exception:
+        return
 
 
 def render_status(

@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 logs/
 data/*.db
+data/*.log
+data/backups/
+artifacts/
 credentials.json
 token.json
 client_secret_*.json

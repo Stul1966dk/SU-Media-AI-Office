@@ -1,6 +1,7 @@
 """Read-only Website Intelligence profile page."""
 
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -82,6 +83,9 @@ def main() -> None:
                 website_id
             )
             detail["content"] = database.get_content(website_id)
+            detail["plausible"] = database.get_plausible_daily_metrics(
+                website_id=website_id
+            )
     finally:
         database.close()
 
@@ -91,6 +95,7 @@ def main() -> None:
     st.success(f"Du ser nu data for {website_id}")
     _render_profile(detail)
     _render_revenue(detail)
+    _render_plausible(detail)
     _render_seo(detail)
     _render_technical(detail)
     _render_content(detail)
@@ -164,6 +169,96 @@ def _render_revenue(detail: dict[str, Any]) -> None:
     sales.metric("Antal salg", statistics["sales_count"])
     revenue.metric("Omsætning", _currency(statistics["revenue"]))
     commission.metric("Provision", _currency(statistics["commission"]))
+
+
+def _render_plausible(detail: dict[str, Any]) -> None:
+    st.subheader("Trafik (Plausible)")
+    metrics = summarize_plausible_visitors(detail.get("plausible") or [])
+    if metrics is None:
+        st.info("Ingen Plausible-data fundet.")
+        return
+    yesterday, seven_days, thirty_days = st.columns(3)
+    yesterday.metric("Besøgende i går", metrics["yesterday"])
+    seven_days.metric("Besøgende seneste 7 dage", metrics["last_7_days"])
+    thirty_days.metric("Besøgende seneste 30 dage", metrics["last_30_days"])
+    change_7, change_30 = st.columns(2)
+    change_7.metric(
+        "Ændring mod foregående 7 dage",
+        format_plausible_change(metrics["change_7_days"]),
+    )
+    change_30.metric(
+        "Ændring mod foregående 30 dage",
+        format_plausible_change(metrics["change_30_days"]),
+    )
+
+
+def summarize_plausible_visitors(
+    rows: list[dict[str, Any]],
+    *,
+    today: date | None = None,
+) -> dict[str, int | float | None] | None:
+    """Summarize stored daily visitors through yesterday."""
+    if not rows:
+        return None
+    reference = today or date.today()
+    yesterday = reference - timedelta(days=1)
+    visitors_by_date: dict[date, int] = {}
+    for row in rows:
+        try:
+            metric_date = date.fromisoformat(str(row["metric_date"])[:10])
+            visitors_by_date[metric_date] = int(row["visitors"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return {
+        "yesterday": visitors_by_date.get(yesterday, 0),
+        "last_7_days": sum(
+            visitors_by_date.get(yesterday - timedelta(days=offset), 0)
+            for offset in range(7)
+        ),
+        "last_30_days": sum(
+            visitors_by_date.get(yesterday - timedelta(days=offset), 0)
+            for offset in range(30)
+        ),
+        "change_7_days": _plausible_period_change(
+            visitors_by_date, yesterday, 7
+        ),
+        "change_30_days": _plausible_period_change(
+            visitors_by_date, yesterday, 30
+        ),
+    }
+
+
+def _plausible_period_change(
+    visitors_by_date: dict[date, int],
+    period_end: date,
+    days: int,
+) -> float | None:
+    """Compare two complete, adjacent periods without overlap."""
+    current_dates = {
+        period_end - timedelta(days=offset) for offset in range(days)
+    }
+    previous_dates = {
+        period_end - timedelta(days=offset)
+        for offset in range(days, days * 2)
+    }
+    if not current_dates.issubset(visitors_by_date):
+        return None
+    if not previous_dates.issubset(visitors_by_date):
+        return None
+    current = sum(visitors_by_date[item] for item in current_dates)
+    previous = sum(visitors_by_date[item] for item in previous_dates)
+    if previous == 0:
+        return None
+    return (current - previous) / previous * 100
+
+
+def format_plausible_change(value: float | None) -> str:
+    """Format a period change with one decimal and a neutral zero label."""
+    if value is None:
+        return "Ikke nok data"
+    if round(value, 1) == 0:
+        return "0,0 % · Uændret"
+    return f"{value:+.1f} %".replace(".", ",")
 
 
 def _render_history(detail: dict[str, Any]) -> None:

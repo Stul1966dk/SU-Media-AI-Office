@@ -12,6 +12,11 @@ from googleapiclient.discovery import build
 SEARCH_CONSOLE_READONLY_SCOPE = (
     "https://www.googleapis.com/auth/webmasters.readonly"
 )
+SEARCH_CONSOLE_SCOPES = (
+    SEARCH_CONSOLE_READONLY_SCOPE,
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+)
 
 
 class SearchConsoleAuthenticationError(RuntimeError):
@@ -57,7 +62,7 @@ class SearchConsoleConnector:
         try:
             credentials = Credentials.from_authorized_user_file(
                 self.token_path,
-                [SEARCH_CONSOLE_READONLY_SCOPE],
+                list(SEARCH_CONSOLE_SCOPES),
             )
         except (OSError, ValueError) as error:
             raise SearchConsoleAuthenticationError(
@@ -99,9 +104,13 @@ class SearchConsoleConnector:
         try:
             flow = InstalledAppFlow.from_client_secrets_file(
                 self.credentials_path,
-                scopes=[SEARCH_CONSOLE_READONLY_SCOPE],
+                scopes=list(SEARCH_CONSOLE_SCOPES),
             )
-            credentials = flow.run_local_server(port=0, open_browser=True)
+            credentials = flow.run_local_server(
+                port=0,
+                open_browser=True,
+                prompt="consent",
+            )
             self.token_path.write_text(
                 credentials.to_json(),
                 encoding="utf-8",

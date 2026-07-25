@@ -61,6 +61,12 @@ class WebsiteRegistry:
                 self.database.upsert_website(website)
                 created += 1
                 continue
+            if (
+                existing["status"] in {"active", "inactive"}
+                and website["status"] != "phasing_out"
+            ):
+                website["active"] = existing["active"]
+                website["status"] = existing["status"]
 
             if existing != website:
                 if (

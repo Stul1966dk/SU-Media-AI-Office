@@ -24,6 +24,7 @@ from core.seo_experiment_engine import SEOExperimentEngine
 from core.website_registry import WebsiteRegistry
 from core.work_queue_service import WorkQueueService
 from dashboard.components.database import open_database
+from dashboard.components.data import build_combined_traffic_tasks
 from dashboard.components.ui import load_styles, render_sidebar
 
 
@@ -56,6 +57,28 @@ def main() -> None:
         websites = _active_websites(registry)
         selected = _render_website_filter(websites)
         website_id = None if selected == ALL_WEBSITES else selected
+        priority_tasks = database.get_priority_task_scores(limit=None)
+        if website_id:
+            priority_tasks = [
+                item for item in priority_tasks
+                if item["website"] in {website_id, "—"}
+            ]
+        if priority_tasks:
+            _render_priority_task(priority_tasks[0])
+            return
+        context = database.get_dashboard_action_context()
+        combined_tasks = build_combined_traffic_tasks(
+            seo_sites=context["seo_health"],
+            plausible_rows=context["plausible_daily"],
+        )
+        if website_id:
+            combined_tasks = [
+                item for item in combined_tasks
+                if item["website"] == website_id
+            ]
+        if combined_tasks:
+            _render_combined_traffic_task(combined_tasks[0])
+            return
         optimizer = _optimizer(database)
         preparation = DailyWorkPreparationService(
             database=database, queue=queue, title_optimizer=optimizer
@@ -75,6 +98,162 @@ def main() -> None:
             _render_recommendation(database, queue, current)
     finally:
         database.close()
+
+
+def _render_combined_traffic_task(item: dict[str, Any]) -> None:
+    with st.container(border=True):
+        st.subheader(item["description"])
+        st.write(f"**Prioritet:** {item['priority']}")
+        st.write(f"**Website:** {item['website']}")
+        st.write(
+            "**Plausible-ændring:** "
+            f"{float(item['plausible_change']):.1f} %".replace(".", ",")
+        )
+        st.write(
+            f"**Search Console-ændring:** {item['search_console_change']}"
+        )
+        st.write(item["explanation"])
+        st.page_link(
+            item["target"],
+            label=f"Åbn Website Profile for {item['website']}",
+        )
+    _render_priority_explanation(item)
+
+
+def _render_priority_task(item: dict[str, Any]) -> None:
+    """Render the highest persisted task without exposing internal scores."""
+    if item.get("task_type") == "combined_traffic_decline":
+        _render_combined_traffic_task(item)
+        return
+    with st.container(border=True):
+        st.subheader(item["description"])
+        st.write(f"**Prioritet:** {item['priority']}")
+        if item.get("website") and item["website"] != "—":
+            st.write(f"**Website:** {item['website']}")
+        if item.get("change"):
+            st.write(f"**Ændring:** {item['change']}")
+        st.page_link(item["target"], label=item["link_label"])
+    _render_priority_explanation(item)
+
+
+def _render_priority_explanation(item: dict[str, Any]) -> None:
+    """Show only persisted signals that contributed to the total score."""
+    explanations = _priority_explanations(item)
+    if not explanations:
+        return
+    with st.container(border=True):
+        st.subheader("Hvorfor denne opgave?")
+        for signal, explanation, score in explanations:
+            st.markdown(f"**{signal}**")
+            st.write(explanation)
+            st.write(f"Score: +{_format_score(score)}")
+        st.markdown(
+            "**Samlet prioritetsscore: "
+            f"{_format_score(float(item['total_score']))}**"
+        )
+
+
+def _priority_explanations(
+    item: dict[str, Any],
+) -> list[tuple[str, str, float]]:
+    """Map positive persisted subscores to deterministic Danish copy."""
+    signals = (
+        (
+            "plausible_score",
+            "Plausible",
+            (
+                "Den samlede trafik er faldet "
+                f"{_format_number(abs(float(item.get('plausible_change') or 0)))} %."
+            ),
+        ),
+        (
+            "search_console_click_score",
+            "Search Console",
+            (
+                "Organiske klik er faldet "
+                f"{_format_number(abs(float(item.get('click_change') or 0)))} %."
+            ),
+        ),
+        (
+            "ctr_score",
+            "CTR",
+            (
+                "CTR er faldet "
+                f"{_format_number(abs(float(item.get('ctr_change') or 0)))} "
+                "procentpoint."
+            ),
+        ),
+        (
+            "position_score",
+            "Placering",
+            (
+                "Den gennemsnitlige placering er blevet "
+                f"{_format_number(abs(float(item.get('position_change') or 0)))} "
+                "dårligere."
+            ),
+        ),
+        (
+            "seo_health_score",
+            "SEO Health",
+            (
+                "SEO Health-status er "
+                f"{_trend_label(item.get('seo_health_trend'))}."
+            ),
+        ),
+        (
+            "experiment_score",
+            "SEO-eksperiment",
+            (
+                "Et SEO-eksperiment er klar til evaluering."
+                if item.get("task_type") == "experiment_ready"
+                else "Websitet har et aktivt SEO-eksperiment."
+            ),
+        ),
+        (
+            "missing_data_score",
+            "Manglende data",
+            (
+                "Search Console-data mangler."
+                if item.get("task_type") == "missing_search_console"
+                else "Plausible-data mangler."
+            ),
+        ),
+        (
+            "system_score",
+            "Systemstatus",
+            "Systemstatus viser en fejl, der kræver handling.",
+        ),
+        (
+            "existing_task_score",
+            "Eksisterende opgave",
+            "Opgaven har allerede en registreret prioritet.",
+        ),
+    )
+    return [
+        (name, explanation, score)
+        for field, name, explanation in signals
+        if (score := float(item.get(field) or 0)) > 0
+    ]
+
+
+def _trend_label(value: Any) -> str:
+    return {
+        "critical": "kritisk",
+        "declining": "faldende",
+        "stable": "stabil",
+        "growing": "stigende",
+    }.get(str(value or "").lower(), "ukendt")
+
+
+def _format_score(value: float) -> str:
+    rounded = round(float(value), 1)
+    if rounded.is_integer():
+        return str(int(rounded))
+    return f"{rounded:.1f}".replace(".", ",")
+
+
+def _format_number(value: float) -> str:
+    return f"{float(value):.1f}".replace(".", ",")
 
 
 def _render_recommendation(

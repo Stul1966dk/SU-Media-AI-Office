@@ -14,7 +14,10 @@ from dashboard.components.database import open_database
 from dashboard.components.help_panel import render_help_panel
 from dashboard.components.formatting import format_rows
 from dashboard.components.ui import load_styles, render_sidebar
-from dashboard.components.website_selector import set_selected_website
+from dashboard.components.website_selector import (
+    get_selected_website_id,
+    set_selected_website,
+)
 
 
 def _year_commission(sales: list[dict]) -> float:
@@ -33,8 +36,13 @@ def main() -> None:
     render_help_panel(
         purpose="Giv et samlet drifts- og resultatblik på alle registrerede websites.",
         requirements="Websites skal være registreret; øvrige kolonner udfyldes af importer.",
-        actions="Klik på en række for at vælge websitet og åbne Website Profile.",
-        limitations="Oversigten ændrer ikke websites eller eksterne systemer.",
+        actions=(
+            "Vælg et website for at aktivere eller deaktivere det, eller klik "
+            "på en række for at åbne Website Profile."
+        ),
+        limitations=(
+            "Statusændringer kræver bekræftelse og sletter ingen historiske data."
+        ),
     )
     database = open_database()
     try:
@@ -56,7 +64,7 @@ def main() -> None:
             partner = source.get("partner_ads") or {}
             rows.append({
                 "Website": website_id,
-                "Status": website.get("status", ""),
+                "Status": "active" if website["active"] else "inactive",
                 "Monetiseret": "Ja" if website.get("monetized") else "Nej",
                 "Prioritet": website.get("priority", ""),
                 "Niche": website.get("niche", ""),
@@ -79,6 +87,60 @@ def main() -> None:
     if not rows:
         st.info("Ingen websites er registreret. Tilføj først et website i registry.")
         return
+    options = [website["website"] for website in websites]
+    current = get_selected_website_id()
+    managed_id = st.selectbox(
+        "Administrér website",
+        options,
+        index=options.index(current) if current in options else 0,
+    )
+    managed = next(
+        website for website in websites if website["website"] == managed_id
+    )
+    is_active = bool(managed["active"])
+    st.write(f"**Aktuel status:** {'Aktiv' if is_active else 'Inaktiv'}")
+    pending = st.session_state.get("website_status_confirmation")
+    if pending and pending["website"] == managed_id:
+        target_active = bool(pending["active"])
+        target_label = "aktivere" if target_active else "deaktivere"
+        st.warning(
+            f"Bekræft, at du vil {target_label} {managed_id}. "
+            "Historiske data bliver bevaret."
+        )
+        confirm, cancel = st.columns(2)
+        if confirm.button(
+            "Bekræft aktivering" if target_active
+            else "Bekræft deaktivering",
+            type="primary",
+        ):
+            database = open_database()
+            try:
+                changed = database.set_website_active(
+                    managed_id, target_active
+                )
+            finally:
+                database.close()
+            st.session_state.pop("website_status_confirmation", None)
+            if not changed:
+                st.error("Websitet kunne ikke findes.")
+            else:
+                st.success(
+                    f"{managed_id} er nu "
+                    f"{'aktivt' if target_active else 'inaktivt'}."
+                )
+                st.rerun()
+        if cancel.button("Annuller"):
+            st.session_state.pop("website_status_confirmation", None)
+            st.rerun()
+    elif st.button(
+        "Deaktivér website" if is_active else "Aktivér website",
+        type="secondary",
+    ):
+        st.session_state["website_status_confirmation"] = {
+            "website": managed_id,
+            "active": not is_active,
+        }
+        st.rerun()
     event = st.dataframe(
         format_rows(rows), use_container_width=True, hide_index=True,
         on_select="rerun", selection_mode="single-row",

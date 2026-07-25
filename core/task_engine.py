@@ -130,6 +130,13 @@ class TaskEngine:
         for task in tasks:
             if task["status"] != "ready":
                 continue
+            website = self.database.get_website(task["website_id"])
+            if (
+                website is None
+                or not website["active"]
+                or website["status"] != "active"
+            ):
+                continue
             dependency_id = task["depends_on_task_id"]
             if dependency_id is not None:
                 dependency = by_id.get(dependency_id)

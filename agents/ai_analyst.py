@@ -110,7 +110,13 @@ class AIAnalyst:
         """Analyze every active persisted website profile once."""
         reports = []
         for profile in self.database.get_website_profiles():
-            if profile["status"] == "active":
+            website = self.database.get_website(profile["website_id"])
+            if (
+                profile["status"] == "active"
+                and website is not None
+                and website["active"]
+                and website["status"] == "active"
+            ):
                 reports.append(self.analyze_site(profile["website_id"]))
         return reports
 
@@ -233,6 +239,13 @@ class AIAnalyst:
         return analysis
 
     def _website_context(self, website_id: str) -> dict[str, Any]:
+        website = self.database.get_website(website_id)
+        if (
+            website is None
+            or not website["active"]
+            or website["status"] != "active"
+        ):
+            raise ValueError(f"Website er ikke aktivt: {website_id}")
         profile = self.database.get_website_profile_detail(website_id)
         source = self.database.get_website_intelligence_source(website_id)
         if profile is None or source is None:

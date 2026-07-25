@@ -27,8 +27,8 @@ from core.task_engine import TaskEngine
 from core.website_registry import WebsiteRegistry
 from integrations.search_console import (
     SearchConsoleAuthenticationError,
-    SearchConsoleConnector,
 )
+from integrations.search_console_integration import SearchConsoleIntegration
 from agents.decision_engine import DecisionEngine
 from agents.project_manager import ProjectManager
 from agents.seo_manager import SEOManager, SEOManagerResult
@@ -268,20 +268,15 @@ def monitor(config: Config, once: bool = False) -> None:
         "declining": 0,
         "critical": 0,
     }
-    search_console = SearchConsoleService(
-        connector=SearchConsoleConnector(
-            credentials_path=project_root / "credentials.json",
-            token_path=project_root / "token.json",
-        ),
-        database=database,
-        website_registry=website_registry,
-        logger=logger,
+    search_console_integration = SearchConsoleIntegration(
+        project_root, database
     )
+    search_console = search_console_integration.search_service()
     try:
         search_result = search_console.synchronize()
         data_sync_result = search_console.sync_all_properties(days=180)
     except SearchConsoleAuthenticationError as error:
-        database.set_system_status("search_console", False)
+        search_console_integration.record_authentication_error(error)
         logger.warning("Search Console-forbindelse fejlede: %s", error)
         print(f"Search Console-forbindelse fejlede: {error}")
     except Exception as error:

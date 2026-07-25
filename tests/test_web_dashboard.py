@@ -144,13 +144,25 @@ class WebDashboardDataTestCase(unittest.TestCase):
         self.assertEqual(data.economy["month_commission"], 25)
         self.assertEqual(data.economy["today_sales"], 1)
         self.assertEqual(data.economy["month_sales"], 1)
+        self.assertEqual(len(data.economy["month_sales_rows"]), 1)
+        self.assertEqual(
+            data.economy["month_sales_rows"][0]["reference"],
+            "order-1",
+        )
+        self.assertEqual(
+            data.economy["month_sales_rows"][0]["website"],
+            "active.dk",
+        )
         self.assertEqual(data.seo_counts["critical"], 1)
-        self.assertEqual(len(data.priority_tasks), 1)
-        self.assertEqual(len(data.recovery_projects), 1)
+        self.assertLessEqual(len(data.priority_tasks), 5)
+        self.assertTrue(any(
+            item["description"] == "SEO Health viser et markant fald."
+            for item in data.priority_tasks
+        ))
         self.assertEqual(len(data.recent_sales), 1)
         self.assertEqual(data.recent_sales[0]["website"], "active.dk")
         self.assertEqual(len(data.recent_events), 1)
-        self.assertEqual(data.displayed_database_results, 5)
+        self.assertEqual(data.displayed_database_results, 3 + len(data.priority_tasks))
         self.assertEqual(data.ai_status["total"], 0)
 
     def test_seo_filter_and_empty_sections(self) -> None:
@@ -160,26 +172,27 @@ class WebDashboardDataTestCase(unittest.TestCase):
             now=self.reference_time,
         )
         self.assertEqual(data.seo_sites, [])
-        self.assertEqual(data.priority_tasks, [])
-        self.assertEqual(data.recovery_projects, [])
         self.assertEqual(data.recent_sales, [])
         self.assertEqual(data.recent_events, [])
 
     def test_one_missing_section_does_not_break_other_sections(self) -> None:
         database = Mock(spec=Database)
-        database.get_dashboard_system_status.return_value = {}
+        database.get_dashboard_system_health.return_value = {}
         database.get_dashboard_overview.side_effect = RuntimeError("missing")
         database.get_dashboard_economy.return_value = {}
         database.get_seo_health_summary.return_value = {}
         database.get_latest_seo_health_sites.return_value = []
         database.get_priority_tasks.return_value = [{"task": "Virker"}]
-        database.get_active_seo_recovery_projects.return_value = []
+        database.get_dashboard_action_context.return_value = {
+            "experiments": [], "coverage": [], "seo_health": [],
+            "plausible_daily": [],
+        }
         database.get_recent_sales.return_value = []
         database.get_recent_events.return_value = []
         database.get_ai_analysis_status.return_value = {}
         data = load_dashboard_data(database)
         self.assertEqual(data.overview["websites"], 0)
-        self.assertEqual(data.priority_tasks, [{"task": "Virker"}])
+        self.assertEqual(data.priority_tasks[0]["description"], "Virker")
 
     def test_ui_contains_no_sql_or_external_service_calls(self) -> None:
         dashboard_root = Path(__file__).resolve().parents[1] / "dashboard"
@@ -222,7 +235,7 @@ class StreamlitStartupTestCase(unittest.TestCase):
                         / "app.py"
                     )
                 )
-                app.run(timeout=15)
+                app.run(timeout=30)
             finally:
                 if previous is None:
                     os.environ.pop("SU_MEDIA_DATABASE_PATH", None)

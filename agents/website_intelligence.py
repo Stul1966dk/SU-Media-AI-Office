@@ -55,7 +55,11 @@ class WebsiteIntelligenceAgent:
         updated = 0
         unchanged = 0
         history_changes = 0
-        websites = self.website_registry.get_all()
+        websites = [
+            website for website in self.website_registry.get_all()
+            if website["active"] and website["status"] not in
+            {"inactive", "phasing_out", "archived", "cancelled"}
+        ]
         for website in websites:
             result = self.analyze_site(
                 website["website"],

@@ -176,6 +176,13 @@ class WorkQueueService:
         items = self.ensure_queue()
         ready = []
         for item in items:
+            website = self.database.get_website(item["website_id"])
+            if (
+                website is None
+                or not website["active"]
+                or website["status"] != "active"
+            ):
+                continue
             if website_id is not None and item["website_id"] != website_id:
                 continue
             if item["status"] == "awaiting_implementation":
@@ -218,6 +225,13 @@ class WorkQueueService:
     ) -> dict[str, int]:
         """Create exactly one project, task, experiment, and baseline."""
         item = self._required(item_id)
+        website = self.database.get_website(item["website_id"])
+        if (
+            website is None
+            or not website["active"]
+            or website["status"] != "active"
+        ):
+            raise ValueError("Et inaktivt website kan ikke få et nyt eksperiment.")
         if item["status"] == "awaiting_implementation":
             return {
                 "project_id": item["project_id"],
@@ -350,9 +364,11 @@ class WorkQueueService:
             item["draft_id"] for item in active if item.get("draft_id")
         }
         active_urls = {item["target_url"] for item in active}
+        active_websites = set(self.database.get_active_website_ids())
         drafts = [
             item for item in self.database.get_title_optimization_drafts()
             if item["status"] == "awaiting_approval"
+            and item["website_id"] in active_websites
             and (item.get("reviewer") or {}).get("approved") is True
             and str(item.get("selected_title") or "").strip()
             and str(item.get("selected_meta") or "").strip()

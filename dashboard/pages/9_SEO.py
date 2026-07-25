@@ -13,7 +13,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.search_console_service import SearchConsoleService
-from core.website_registry import WebsiteRegistry
 from dashboard.components.database import open_database
 from dashboard.components.errors import safe_error_detail
 from dashboard.components.formatting import format_date
@@ -27,22 +26,15 @@ from dashboard.components.website_selector import (
 )
 from integrations.search_console import (
     SearchConsoleAuthenticationError,
-    SearchConsoleConnector,
 )
+from integrations.search_console_integration import SearchConsoleIntegration
 
 
 PERIODS = {"7 dage": 7, "28 dage": 28, "90 dage": 90, "12 måneder": 365}
 
 
 def build_service(database: Any) -> SearchConsoleService:
-    return SearchConsoleService(
-        connector=SearchConsoleConnector(
-            credentials_path=PROJECT_ROOT / "credentials.json",
-            token_path=PROJECT_ROOT / "token.json",
-        ),
-        database=database,
-        website_registry=WebsiteRegistry(database),
-    )
+    return SearchConsoleIntegration(PROJECT_ROOT, database).search_service()
 
 
 def run_search_console_import(
@@ -205,6 +197,8 @@ def main() -> None:
 
 
 def _render_import(database: Any, website_id: str | None) -> None:
+    integration = SearchConsoleIntegration(PROJECT_ROOT, database)
+    connection = integration.status(validate=False)
     previous = st.session_state.pop("search_console_import_result", None)
     error = st.session_state.pop("search_console_import_error", None)
     if previous:
@@ -217,9 +211,26 @@ def _render_import(database: Any, website_id: str | None) -> None:
             f"Fejl: {previous['properties_failed']}."
         )
     if error:
-        st.error(error["message"])
+        if error["type"] == "SearchConsoleAuthenticationError":
+            st.error(
+                "Google Search Console-forbindelsen mangler eller er udløbet."
+            )
+            render_page_link(
+                "pages/18_Integrationer.py",
+                "Åbn Indstillinger → Integrationer",
+            )
+        else:
+            st.error(error["message"])
         with st.expander("Tekniske detaljer"):
             st.code(error["type"])
+    elif not connection["connected"] or connection["last_error"]:
+        st.error(
+            "Google Search Console-forbindelsen mangler eller er udløbet."
+        )
+        render_page_link(
+            "pages/18_Integrationer.py",
+            "Åbn Indstillinger → Integrationer",
+        )
     scope = st.radio(
         "Omfang", ["Kun aktivt website", "Alle aktive websites"],
         horizontal=True, key="search_console_scope",
@@ -237,9 +248,10 @@ def _render_import(database: Any, website_id: str | None) -> None:
             database.set_system_status("search_console", True)
             st.session_state["search_console_import_result"] = result
         except SearchConsoleAuthenticationError as exc:
-            database.set_system_status("search_console", False)
+            integration.record_authentication_error(exc)
             st.session_state["search_console_import_error"] = {
-                "message": safe_error_detail(exc), "type": type(exc).__name__,
+                "message": "Google Search Console-forbindelsen skal fornyes.",
+                "type": type(exc).__name__,
             }
         except Exception as exc:
             database.set_system_status("search_console", False)
