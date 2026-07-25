@@ -79,7 +79,11 @@ def main() -> None:
         purpose="Giv et samlet overblik over AI Office og de vigtigste datakilder.",
         requirements="Den lokale database og de services, du ønsker at bruge.",
         actions="Se systemstatus og fortsæt til det anbefalede næste trin.",
-        limitations="Forsiden starter ikke scanninger eller analyser automatisk.",
+        limitations=(
+            "Når automatisk synkronisering er aktiveret under Indstillinger, "
+            "opdaterer forsiden data én gang ved starten af app-sessionen. "
+            "Scanninger og analyser startes fortsat kun manuelt."
+        ),
     )
     st.caption(format_datetime(now))
     st.subheader("Synkronisering ved app-start")

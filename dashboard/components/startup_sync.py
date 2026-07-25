@@ -14,6 +14,7 @@ from dashboard.components.formatting import format_datetime
 
 
 SETTING_NAME = "sync_automatically_on_app_start"
+POLL_INTERVAL_SECONDS = 3
 SESSION_KEYS = {
     "checked": "startup_sync_check_completed",
     "started": "startup_sync_started",
@@ -114,10 +115,11 @@ def run_startup_sync(
     }
 
 
-def _poll_future(state: MutableMapping[str, Any]) -> None:
+def _poll_future(state: MutableMapping[str, Any]) -> bool:
+    """Transfer a completed Future to session state exactly once."""
     future = state.get(SESSION_KEYS["future"])
     if not isinstance(future, Future) or not future.done():
-        return
+        return False
     try:
         result = future.result()
     except Exception as error:
@@ -133,12 +135,24 @@ def _poll_future(state: MutableMapping[str, Any]) -> None:
     state[SESSION_KEYS["failed"]] = bool(result["failed"])
     state[SESSION_KEYS["completed_at"]] = result["completed_at"]
     state[SESSION_KEYS["error_type"]] = result.get("error_type")
+    state.pop(SESSION_KEYS["future"], None)
+    # A manual refresh result may predate this startup refresh. Make the
+    # Dashboard reload the result persisted by DataRefreshService.
+    state.pop("data_refresh_result", None)
+    return True
 
 
-def render_startup_sync_status() -> None:
-    """Render the concise startup synchronization state on Dashboard."""
-    _poll_future(st.session_state)
-    state = st.session_state
+def _is_running(state: MutableMapping[str, Any]) -> bool:
+    return bool(
+        state.get(SESSION_KEYS["enabled"], False)
+        and state.get(SESSION_KEYS["started"], False)
+        and not state.get(SESSION_KEYS["completed"], False)
+        and not state.get(SESSION_KEYS["failed"], False)
+    )
+
+
+def _render_status_content(state: MutableMapping[str, Any]) -> None:
+    """Render status text without controlling the polling lifecycle."""
     if not state.get(SESSION_KEYS["enabled"], False):
         st.info("Automatisk synkronisering er slået fra")
     elif state.get(SESSION_KEYS["failed"]):
@@ -164,3 +178,24 @@ def render_startup_sync_status() -> None:
         st.caption(
             "Seneste opstartssynkronisering: " + format_datetime(timestamp)
         )
+
+
+@st.fragment(run_every=POLL_INTERVAL_SECONDS)
+def _render_polling_status() -> None:
+    """Poll only the startup status area while its Future is active."""
+    completed_now = _poll_future(st.session_state)
+    _render_status_content(st.session_state)
+    if completed_now:
+        # Re-render the full Dashboard once so "Opdater alle data" reloads
+        # app_state[data_refresh:last_result]. The next full run selects the
+        # non-polling renderer, which stops the fragment timer.
+        st.rerun()
+
+
+def render_startup_sync_status() -> None:
+    """Render and, only while running, automatically poll startup sync."""
+    _poll_future(st.session_state)
+    if _is_running(st.session_state):
+        _render_polling_status()
+    else:
+        _render_status_content(st.session_state)
