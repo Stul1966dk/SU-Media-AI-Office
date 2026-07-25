@@ -1,8 +1,8 @@
 """Search Console property and daily metric synchronization service."""
 
 import logging
-from dataclasses import dataclass
-from datetime import date, timedelta
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from integrations.search_console import SearchConsoleConnector
@@ -41,6 +41,7 @@ class SearchConsoleDataSyncResult:
     latest_fetched_date: str
     import_mode: str
     errors: list[dict[str, str]]
+    property_results: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,13 @@ class SearchConsoleDimensionSyncResult:
     rows_created: int
     rows_updated: int
     errors: list[dict[str, str]]
+    properties_evaluated: int = 0
+    properties_skipped: int = 0
+    api_calls_executed: int = 0
+    api_calls_avoided: int = 0
+    property_results: list[dict[str, Any]] = field(default_factory=list)
+    refresh_mode: str = "normal"
+    overall_status: str = "completed"
 
 
 class SearchConsoleService:
@@ -127,6 +135,7 @@ class SearchConsoleService:
         errors: list[dict[str, str]] = []
         fetched_start_dates: list[date] = []
         property_modes: list[str] = []
+        property_results: list[dict[str, Any]] = []
 
         for item in properties:
             processed += 1
@@ -172,6 +181,12 @@ class SearchConsoleService:
                 continue
             created += result["rows_created"]
             updated += result["rows_updated"]
+            property_results.append({
+                "site_url": item["site_url"],
+                "website_id": item["website_id"],
+                "rows_created": result["rows_created"],
+                "rows_updated": result["rows_updated"],
+            })
 
         import_mode = (
             property_modes[0]
@@ -192,14 +207,23 @@ class SearchConsoleService:
             latest_fetched_date=end_date.isoformat(),
             import_mode=import_mode,
             errors=errors,
+            property_results=property_results,
         )
 
     def sync_dimensions(
         self, website_ids: list[str] | None = None,
         reference_date: date | None = None,
+        *,
+        force_dimensions_refresh: bool = False,
+        new_daily_website_ids: set[str] | None = None,
+        reference_time: datetime | None = None,
     ) -> SearchConsoleDimensionSyncResult:
         """Import page, query, and page-query rows for two 28-day periods."""
         today = reference_date or date.today()
+        now = reference_time or datetime.now().astimezone()
+        if now.tzinfo is None:
+            now = now.astimezone()
+        new_daily = new_daily_website_ids or set()
         current_end = today - timedelta(days=1)
         current_start = current_end - timedelta(days=27)
         previous_end = current_start - timedelta(days=1)
@@ -215,18 +239,52 @@ class SearchConsoleService:
             and (website_ids is None or item["website_id"] in website_ids)
         ]
         totals = {"page": 0, "query": 0, "page_query": 0}
-        created = updated = failed = 0
+        created = updated = failed = skipped = api_calls = 0
         errors: list[dict[str, str]] = []
+        property_results: list[dict[str, Any]] = []
+        experiment_websites = self._dimension_experiment_websites()
         specs = (
             ("page", ["page"], 1000),
             ("query", ["query"], 2000),
             ("page_query", ["page", "query"], 5000),
         )
         for prop in properties:
+            state = self.database.get_search_console_dimension_state(
+                prop["site_url"]
+            )
+            last_success = state.get("last_success")
+            reason = self._dimension_run_reason(
+                force=force_dimensions_refresh,
+                website_id=prop["website_id"],
+                last_success=last_success,
+                now=now,
+                new_daily=new_daily,
+                experiment_websites=experiment_websites,
+            )
+            if reason is None:
+                skipped += 1
+                property_results.append({
+                    "site_url": prop["site_url"],
+                    "website_id": prop["website_id"],
+                    "status": "skipped",
+                    "reason": (
+                        "Search Console-dimensioner er allerede opdateret "
+                        "inden for de seneste 24 timer"
+                    ),
+                    "last_success_before": last_success,
+                    "last_success_after": last_success,
+                    "api_calls_executed": 0,
+                    "api_calls_avoided": 6,
+                })
+                continue
             property_failed = False
+            property_calls = 0
+            attempted_at = now.isoformat(timespec="seconds")
             for period_start, period_end in periods:
                 for dimension_type, dimensions, limit in specs:
                     try:
+                        property_calls += 1
+                        api_calls += 1
                         rows = self.connector.get_search_analytics_dimensions(
                             prop["site_url"], period_start.isoformat(),
                             period_end.isoformat(), dimensions, limit,
@@ -257,13 +315,93 @@ class SearchConsoleService:
                             type(error).__name__,
                         )
             failed += property_failed
+            new_state = dict(state)
+            new_state["last_attempt"] = attempted_at
+            if property_failed:
+                new_state["last_error"] = attempted_at
+                status = "error"
+                success_after = last_success
+            else:
+                new_state["last_success"] = attempted_at
+                status = "completed"
+                success_after = attempted_at
+            self.database.set_search_console_dimension_state(
+                prop["site_url"], new_state
+            )
+            property_results.append({
+                "site_url": prop["site_url"],
+                "website_id": prop["website_id"],
+                "status": status,
+                "reason": reason,
+                "last_success_before": last_success,
+                "last_success_after": success_after,
+                "api_calls_executed": property_calls,
+                "api_calls_avoided": 6 - property_calls,
+            })
+        processed = len(properties) - skipped
+        if not properties or skipped == len(properties):
+            overall_status = "skipped"
+        elif failed == processed and processed:
+            overall_status = "failed"
+        elif failed:
+            overall_status = "completed_with_warnings"
+        else:
+            overall_status = "completed"
         return SearchConsoleDimensionSyncResult(
-            properties_processed=len(properties),
+            properties_processed=processed,
             properties_failed=failed,
             page_rows=totals["page"], query_rows=totals["query"],
             page_query_rows=totals["page_query"],
             rows_created=created, rows_updated=updated, errors=errors,
+            properties_evaluated=len(properties),
+            properties_skipped=skipped,
+            api_calls_executed=api_calls,
+            api_calls_avoided=(len(properties) * 6) - api_calls,
+            property_results=property_results,
+            refresh_mode=(
+                "forced" if force_dimensions_refresh else "normal"
+            ),
+            overall_status=overall_status,
         )
+
+    def _dimension_experiment_websites(self) -> set[str]:
+        """Return websites whose active SEO experiment needs fresh dimensions."""
+        try:
+            experiments = self.database.get_seo_experiments(
+                statuses=("waiting_for_data", "ready_for_evaluation")
+            )
+        except (AttributeError, TypeError):
+            return set()
+        if not isinstance(experiments, list):
+            return set()
+        return {
+            str(item["website_id"])
+            for item in experiments
+            if item.get("website_id")
+        }
+
+    @staticmethod
+    def _dimension_run_reason(
+        *, force: bool, website_id: str, last_success: str | None,
+        now: datetime, new_daily: set[str], experiment_websites: set[str],
+    ) -> str | None:
+        if force:
+            return "tvungen opdatering"
+        if website_id in new_daily:
+            return "nye Search Console-dagstal"
+        if website_id in experiment_websites:
+            return "aktivt SEO-eksperiment"
+        if not last_success:
+            return "ingen tidligere dimensionsimport"
+        try:
+            previous = datetime.fromisoformat(last_success)
+            if previous.tzinfo is None:
+                previous = previous.astimezone()
+        except (TypeError, ValueError):
+            return "ingen tidligere dimensionsimport"
+        if now - previous >= timedelta(hours=24):
+            return "mere end 24 timer siden seneste succes"
+        return None
 
     def get_dimension_comparisons(
         self, website_id: str, dimension_type: str,

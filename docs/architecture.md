@@ -421,3 +421,30 @@ fra den første dag i den aktuelle måned til og med i dag.
 beløb og metadata opdateres uden en ny række. Telegram forsøges kun for et helt
 nyt salg efter baseline-importen. Udfaldet gemmes på salgsrækken som `sent`,
 `failed` eller `skipped`, så genimport og app-genstart ikke sender igen.
+
+# Sprint 6 – intelligent Search Console-dimensionsimport
+
+De eksisterende seks dimensionskald pr. property bevares uændret: `page`,
+`query` og `page + query` for både den aktuelle og den foregående
+28-dagesperiode. Normal synkronisering vurderer hver property separat og kører
+kun, når mindst én af disse regler gælder:
+
+- ingen tidligere vellykket dimensionsimport
+- seneste succes er mindst 24 timer gammel
+- dagstalsimporten oprettede mindst én ny dato for propertyens website
+- websitet har et aktivt eksperiment med status `waiting_for_data` eller
+  `ready_for_evaluation`
+- kaldet er eksplicit tvunget
+
+Rene opdateringer af dagstallenes overlapdage tilsidesætter ikke
+24-timersgrænsen. `website_ids=None` bevarer globalt scope, mens et konkret
+websitefilter også gælder dimensionsimporten.
+
+## Registrerede opfølgningspunkter
+
+Disse eksisterende testfejl er registreret til senere behandling og er ikke
+rettet som en del af Sprint 6:
+
+- [ ] Tilføj manglende hjælpepanel i `dashboard/pages/17_SEO_Insights.py`.
+- [ ] Opdater den forældede connectorforventning i
+  `tests/test_web_dashboard.py`.

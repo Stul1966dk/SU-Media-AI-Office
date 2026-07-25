@@ -95,6 +95,11 @@ class DataRefreshServiceTests(unittest.TestCase):
         search.sync_all_properties.assert_called_once_with(
             days=35, website_ids=None, force_full_refresh=False
         )
+        search.sync_dimensions.assert_called_once_with(
+            website_ids=None,
+            new_daily_website_ids=set(),
+            force_dimensions_refresh=False,
+        )
         plausible = service._test_parts[4]
         plausible.import_active_websites.assert_called_once_with(
             website_ids=None, force_full_refresh=False
@@ -111,9 +116,35 @@ class DataRefreshServiceTests(unittest.TestCase):
             website_ids=["alpha.dk"],
             force_full_refresh=False,
         )
+        search.sync_dimensions.assert_called_once_with(
+            website_ids=["alpha.dk"],
+            new_daily_website_ids=set(),
+            force_dimensions_refresh=False,
+        )
         plausible = service._test_parts[4]
         plausible.import_active_websites.assert_called_once_with(
             website_ids=["alpha.dk"], force_full_refresh=False
+        )
+
+    def test_new_daily_rows_and_force_are_forwarded_to_dimensions(self) -> None:
+        service = self._service()
+        search = service._test_parts[1]
+        search.sync_all_properties.return_value = SearchConsoleDataSyncResult(
+            properties_processed=2, properties_failed=0,
+            rows_created=1, rows_updated=4, start_date="2026-01-01",
+            end_date="2026-02-01", earliest_fetched_date="2026-01-01",
+            latest_fetched_date="2026-02-01", import_mode="incremental",
+            errors=[],
+            property_results=[
+                {"website_id": "alpha.dk", "rows_created": 1},
+                {"website_id": "beta.dk", "rows_created": 0},
+            ],
+        )
+        service.refresh_all(force_dimensions_refresh=True)
+        search.sync_dimensions.assert_called_once_with(
+            website_ids=None,
+            new_daily_website_ids={"alpha.dk"},
+            force_dimensions_refresh=True,
         )
 
     def test_independent_steps_continue_and_seo_is_skipped_after_search_error(

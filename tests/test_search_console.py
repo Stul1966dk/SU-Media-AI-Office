@@ -128,7 +128,10 @@ class SearchConsoleTestCase(unittest.TestCase):
         )
         service = self.service(connector)
         first = service.sync_dimensions(reference_date=date(2026, 7, 19))
-        second = service.sync_dimensions(reference_date=date(2026, 7, 19))
+        second = service.sync_dimensions(
+            reference_date=date(2026, 7, 19),
+            force_dimensions_refresh=True,
+        )
         self.assertEqual(6, first.rows_created)
         self.assertEqual(0, second.rows_created)
         self.assertEqual(6, second.rows_updated)

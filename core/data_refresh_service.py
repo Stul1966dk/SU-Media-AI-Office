@@ -62,6 +62,7 @@ class DataRefreshService:
     def refresh_all(
         self, progress: Progress | None = None,
         website_ids: list[str] | None = None,
+        *, force_dimensions_refresh: bool = False,
     ) -> dict[str, Any]:
         """Run all refresh steps in order and skip only direct dependencies."""
         external_notify = progress or (
@@ -132,7 +133,15 @@ class DataRefreshService:
         else:
             dimensions = self._run(
                 "Search Console-sider og søgeord",
-                lambda: self.refresh_search_console_dimensions(website_ids),
+                lambda: self.refresh_search_console_dimensions(
+                    website_ids,
+                    new_daily_website_ids={
+                        str(item["website_id"])
+                        for item in daily.get("property_results", [])
+                        if int(item.get("rows_created", 0)) > 0
+                    },
+                    force_dimensions_refresh=force_dimensions_refresh,
+                ),
                 notify, steps,
             )
         self._run(
@@ -219,10 +228,14 @@ class DataRefreshService:
         ))
 
     def refresh_search_console_dimensions(
-        self, website_ids: list[str] | None = None
+        self, website_ids: list[str] | None = None, *,
+        new_daily_website_ids: set[str] | None = None,
+        force_dimensions_refresh: bool = False,
     ) -> dict[str, Any]:
         result = asdict(self.search_console.sync_dimensions(
-            website_ids=website_ids
+            website_ids=website_ids,
+            new_daily_website_ids=new_daily_website_ids,
+            force_dimensions_refresh=force_dimensions_refresh,
         ))
         try:
             updates = ExperimentMonitoringService(

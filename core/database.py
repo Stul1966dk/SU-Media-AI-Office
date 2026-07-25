@@ -4522,6 +4522,36 @@ class Database:
             return None
         return state if isinstance(state, dict) else None
 
+    def set_search_console_dimension_state(
+        self, site_url: str, state: dict[str, Any]
+    ) -> None:
+        """Persist non-secret dimensions import timestamps for one property."""
+        key = f"search_console_dimensions:{site_url}"
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO app_state (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, json.dumps(state, ensure_ascii=False)),
+            )
+
+    def get_search_console_dimension_state(
+        self, site_url: str
+    ) -> dict[str, Any]:
+        """Return persisted attempt, success, and failure metadata."""
+        row = self._connection.execute(
+            "SELECT value FROM app_state WHERE key = ?",
+            (f"search_console_dimensions:{site_url}",),
+        ).fetchone()
+        if not row:
+            return {}
+        try:
+            state = json.loads(row["value"])
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        return state if isinstance(state, dict) else {}
+
     def set_navigation_group_state(self, group: str, is_open: bool) -> None:
         """Persist the local user's sidebar group preference."""
         with self._connection:

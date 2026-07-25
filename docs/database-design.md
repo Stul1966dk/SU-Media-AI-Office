@@ -434,3 +434,16 @@ Ads-salg. Tabellen udvides kompatibelt med:
 
 Den seneste importdato beregnes fra Partner Ads-feltet `dato`; `created_at`
 bruges ikke til periodeberegningen.
+
+# Sprint 6 – Search Console-dimensionsstatus
+
+Property-specifik status gemmes uden en ny tabel i `app_state` under nøglen
+`search_console_dimensions:<site_url>`. JSON-værdien kan indeholde:
+
+- `last_attempt`
+- `last_success`
+- `last_error`
+
+`last_success` opdateres kun, hvis samtlige seks dimensionskald for propertyen
+lykkes. En delvist eller helt fejlet property gemmer forsøg og fejl, men
+bevarer en eventuel tidligere succes.
