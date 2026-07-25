@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from dashboard.components.database import open_database
 from dashboard.components.formatting import format_date, format_status
+from dashboard.components.help_panel import render_help_panel
 from dashboard.components.ui import load_styles, render_sidebar
 
 
@@ -233,6 +234,12 @@ def main() -> None:
     load_styles(PROJECT_ROOT / "dashboard" / "assets" / "styles.css")
     render_sidebar()
     st.title("SEO Insights")
+    render_help_panel(
+        purpose="Se resultater og læring fra afsluttede SEO-eksperimenter.",
+        requirements="Der skal være registrerede eksperimenter og evalueringer.",
+        actions="Brug overblikket til at vurdere resultater og næste handling.",
+        limitations="Siden er skrivebeskyttet og starter ingen analyser.",
+    )
     st.write(
         "Her samles resultater og læring fra afsluttede SEO-eksperimenter."
     )

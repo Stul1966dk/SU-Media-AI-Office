@@ -214,7 +214,7 @@ class WebDashboardDataTestCase(unittest.TestCase):
             if "searchconsoleconnector" in
             path.read_text(encoding="utf-8").lower()
         ]
-        self.assertEqual(connector_uses, ["9_SEO.py"])
+        self.assertEqual(connector_uses, [])
 
 
 class StreamlitStartupTestCase(unittest.TestCase):

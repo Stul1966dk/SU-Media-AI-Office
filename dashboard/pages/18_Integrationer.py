@@ -17,6 +17,7 @@ from dashboard.components.database import open_database
 from dashboard.components.formatting import format_datetime
 from dashboard.components.help_panel import render_help_panel
 from dashboard.components.ui import load_styles, render_sidebar
+from core.sync_status import load_sync_status
 from integrations.search_console import SearchConsoleAuthenticationError
 from integrations.plausible_integration import PlausibleIntegration
 from integrations.search_console_integration import SearchConsoleIntegration
@@ -44,6 +45,7 @@ def main() -> None:
     try:
         _render_search_console(SearchConsoleIntegration(PROJECT_ROOT, database))
         _render_plausible(PlausibleIntegration(database))
+        _render_sync_status(load_sync_status(database))
     finally:
         database.close()
 
@@ -112,7 +114,7 @@ def _render_plausible(integration: PlausibleIntegration) -> None:
 
 def _render_search_console(integration: SearchConsoleIntegration) -> None:
     st.subheader("Google Search Console")
-    status = integration.status(validate=True)
+    status = integration.status(validate=False)
     if status["connected"] and status["last_error"]:
         state_label = "Kræver ny forbindelse"
     elif status["connected"]:
@@ -200,6 +202,81 @@ def _render_search_console(integration: SearchConsoleIntegration) -> None:
             hide_index=True,
         )
     st.divider()
+
+
+def _render_sync_status(model: dict) -> None:
+    st.header("Synkroniseringsstatus")
+    overall = model["overall_status"]
+    if overall == "Alle integrationer fungerer":
+        st.success(overall)
+    elif overall == "Ingen synkronisering er kørt endnu":
+        st.info(overall)
+    elif overall == "Synkronisering gennemført med advarsler":
+        st.warning(overall)
+    else:
+        st.error(overall)
+    st.caption(
+        "Status læses fra seneste gemte synkronisering. Manuel opdatering "
+        "foretages fra Dashboard under Opdater alle data."
+    )
+    for item in model["items"]:
+        with st.container(border=True):
+            st.subheader(item["label"])
+            st.write(f"Status: **{item['status']}**")
+            fields = (
+                ("Seneste forsøg", item.get("last_attempt")),
+                ("Seneste succes", item.get("last_success")),
+                ("Importtype", item.get("import_type")),
+                ("Startdato", item.get("start_date")),
+                ("Slutdato", item.get("end_date")),
+                ("Behandlede websites/properties", item.get("processed")),
+                ("Websites/properties med fejl", item.get("failed")),
+                ("Oprettede rækker", item.get("rows_created")),
+                ("Opdaterede rækker", item.get("rows_updated")),
+                ("Oversprungne elementer", item.get("skipped")),
+                ("Næste nødvendige opdatering", item.get("next_update")),
+            )
+            columns = st.columns(3)
+            for index, (label, value) in enumerate(fields):
+                if value is not None:
+                    columns[index % 3].metric(label, value)
+            if item.get("message"):
+                st.warning(str(item["message"]))
+            details = item.get("details") or []
+            if details and item["key"] in {
+                "search_console_daily",
+                "search_console_dimensions",
+                "plausible",
+            }:
+                with st.expander(
+                    f"Detaljer pr. "
+                    f"{'website' if item['key'] == 'plausible' else 'property'}"
+                ):
+                    st.dataframe(
+                        [_detail_row(detail) for detail in details],
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+
+def _detail_row(detail: dict) -> dict:
+    return {
+        "Website/property": (
+            detail.get("website_id") or detail.get("website")
+            or detail.get("property") or "Ikke registreret"
+        ),
+        "Status": detail.get("status") or "Ikke registreret",
+        "Startdato": (
+            detail.get("start_date") or "Ikke registreret"
+        ),
+        "Slutdato": detail.get("end_date") or "Ikke registreret",
+        "Oprettede rækker": detail.get("rows_created", "Ikke registreret"),
+        "Opdaterede rækker": detail.get("rows_updated", "Ikke registreret"),
+        "Fejl/årsag": (
+            detail.get("error") or detail.get("reason")
+            or "Ikke registreret"
+        ),
+    }
 
 
 def _run_connection_action(action: Callable[[], object]) -> None:
