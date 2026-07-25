@@ -32,9 +32,10 @@ class Sprint26Tests(unittest.TestCase):
         self.temp.cleanup()
 
     @patch("core.partner_ads_import.load_config")
-    @patch("core.partner_ads_import.run_check", return_value=(8, 2))
+    @patch("core.partner_ads_import.TelegramService")
+    @patch("core.partner_ads_import.PartnerAdsService")
     def test_partner_ads_dashboard_import_runs_one_check(
-        self, run_check: Mock, load_config: Mock
+        self, partner_class: Mock, telegram_class: Mock, load_config: Mock
     ) -> None:
         load_config.return_value = Mock(
             partner_ads_base_url="https://example.invalid",
@@ -42,16 +43,28 @@ class Sprint26Tests(unittest.TestCase):
             telegram_bot_token="secret",
             telegram_chat_id="1",
         )
+        self.database.initialize_sales_baseline([])
+        partner_class.return_value.fetch_sales.return_value = (
+            "safe",
+            [
+                {
+                    "kombiid": f"sale-{number}",
+                    "dato": "25-07-2026",
+                    "provision": "1",
+                }
+                for number in range(2)
+            ],
+        )
         result = execute_partner_ads_check(self.database)
-        self.assertEqual(8, result["fetched"])
+        self.assertEqual(2, result["fetched"])
         self.assertEqual(2, result["new"])
-        self.assertEqual(6, result["duplicates"])
+        self.assertEqual(0, result["duplicates"])
         self.assertEqual(2, result["telegram_sent"])
         self.assertTrue(result["completed_at"])
-        run_check.assert_called_once()
+        self.assertEqual(2, telegram_class.return_value.send_sale.call_count)
         stored = self.database.get_feature_runs()["partner_ads_import"]
         self.assertEqual("success", stored["status"])
-        self.assertEqual(8, stored["records_processed"])
+        self.assertEqual(2, stored["records_processed"])
         self.assertEqual(2, stored["records_created"])
 
     def test_run_check_new_sale_is_sent_and_saved_once(self) -> None:
@@ -99,17 +112,17 @@ class Sprint26Tests(unittest.TestCase):
         database.save_sale.assert_not_called()
 
     @patch("core.partner_ads_import.load_config")
-    @patch(
-        "core.partner_ads_import.run_check",
-        side_effect=RuntimeError("Partner Ads svarer ikke"),
-    )
+    @patch("core.partner_ads_import.PartnerAdsService")
     def test_partner_ads_failure_is_recorded_and_raised(
-        self, _run_check: Mock, load_config: Mock
+        self, partner_class: Mock, load_config: Mock
     ) -> None:
         load_config.return_value = Mock(
             partner_ads_base_url="https://example.invalid",
             partner_ads_key="secret", telegram_bot_token="secret",
             telegram_chat_id="1",
+        )
+        partner_class.return_value.fetch_sales.side_effect = RuntimeError(
+            "Partner Ads svarer ikke"
         )
         with self.assertRaisesRegex(RuntimeError, "svarer ikke"):
             execute_partner_ads_check(self.database)
@@ -119,9 +132,10 @@ class Sprint26Tests(unittest.TestCase):
         )
 
     @patch("core.partner_ads_import.load_config")
-    @patch("core.partner_ads_import.run_check", return_value=(4, 1))
+    @patch("core.partner_ads_import.TelegramService")
+    @patch("core.partner_ads_import.PartnerAdsService")
     def test_status_registration_failure_does_not_fail_import(
-        self, _run_check: Mock, load_config: Mock
+        self, partner_class: Mock, _telegram_class: Mock, load_config: Mock
     ) -> None:
         load_config.return_value = Mock(
             partner_ads_base_url="https://example.invalid",
@@ -129,12 +143,15 @@ class Sprint26Tests(unittest.TestCase):
             telegram_chat_id="1",
         )
         database = Mock()
+        database.get_latest_partner_ads_sale_date.return_value = None
+        database.is_baseline_initialized.return_value = False
         database.save_feature_run.side_effect = AttributeError(
             "save_feature_run mangler"
         )
+        partner_class.return_value.fetch_sales.return_value = ("safe", [])
         result = execute_partner_ads_check(database)
-        self.assertEqual(4, result["fetched"])
-        self.assertEqual(1, result["new"])
+        self.assertEqual(0, result["fetched"])
+        self.assertEqual(0, result["new"])
 
     def test_danish_dashboard_formatting(self) -> None:
         value = "2026-07-19T04:46:31+02:00"

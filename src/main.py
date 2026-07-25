@@ -18,6 +18,7 @@ from core.database import Database
 from core.dashboard import Dashboard
 from core.experiment_automation import ExperimentAutomationService
 from core.knowledge_engine import KnowledgeEngine
+from core.partner_ads_import import execute_partner_ads_check
 from core.search_console_service import (
     SearchConsoleDataSyncResult,
     SearchConsoleService,
@@ -412,7 +413,12 @@ def monitor(config: Config, once: bool = False) -> None:
     try:
         while True:
             try:
-                run_check(partner_ads, telegram, database, logger)
+                execute_partner_ads_check(
+                    database,
+                    force_full_refresh=False,
+                    partner_ads=partner_ads,
+                    telegram=telegram,
+                )
             except Exception as error:
                 database.set_system_status("partner_ads", False)
                 # Service exceptions are deliberately sanitized before reaching here.

@@ -204,7 +204,9 @@ class DataRefreshService:
         return asdict(self.registry.sync())
 
     def refresh_partner_ads(self) -> dict[str, Any]:
-        return self.partner_refresh(self.database)
+        return self.partner_refresh(
+            self.database, force_full_refresh=False
+        )
 
     def refresh_search_console_properties(self) -> dict[str, Any]:
         return asdict(self.search_console.synchronize())
@@ -325,7 +327,13 @@ class DataRefreshService:
                 "error_message": str(error)[:300],
             }
         else:
-            result = {"step": name, "status": "completed", **values}
+            outcome = values.get("overall_status")
+            status = {
+                "completed_with_warnings": "warning",
+                "skipped": "skipped",
+                "failed": "error",
+            }.get(outcome, "completed")
+            result = {"step": name, "status": status, **values}
         steps.append(result)
         notify(name, result["status"], result)
         return result

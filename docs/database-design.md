@@ -423,3 +423,14 @@ Website-, Search Console-, Partner Ads-, Discovery- og Intelligence-tabeller
 
 Nuværende title og meta gemmes separat og overskrives aldrig. En godkendt
 kladde relateres til præcis ét projekt, én opgave og ét eksperiment.
+# Sprint 5 – Partner Ads-salg
+
+`registered_sales.kombiid` er fortsat primærnøglen og deduplikerer Partner
+Ads-salg. Tabellen udvides kompatibelt med:
+
+- `status` og `approval_status` for ændringer fra Partner Ads
+- `telegram_status` med den vedvarende værdi `sent`, `failed` eller `skipped`
+- `telegram_attempted_at` for tidspunktet for notifikationsforsøget
+
+Den seneste importdato beregnes fra Partner Ads-feltet `dato`; `created_at`
+bruges ikke til periodeberegningen.

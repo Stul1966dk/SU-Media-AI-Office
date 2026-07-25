@@ -53,6 +53,7 @@ class Database:
         self.connection = sqlite3.connect(self.path)
         self.connection.row_factory = sqlite3.Row
         self._create_or_migrate_sales_table()
+        self._ensure_sales_sync_columns()
         self._create_or_migrate_websites_table()
         self._create_work_tables()
         self._create_orchestrator_tables()
@@ -3689,6 +3690,115 @@ class Database:
         ).fetchone()
         return row is not None
 
+    def get_latest_partner_ads_sale_date(self) -> date | None:
+        """Return the latest valid Partner Ads sale date, never local creation time."""
+        rows = self._connection.execute(
+            "SELECT dato FROM registered_sales WHERE dato <> ''"
+        ).fetchall()
+        parsed = [
+            value
+            for row in rows
+            if (value := self._parse_partner_ads_date(row["dato"])) is not None
+        ]
+        return max(parsed) if parsed else None
+
+    def upsert_partner_ads_sale(
+        self, sale: dict[str, str], created_at: str | None = None
+    ) -> str:
+        """Insert or update a sale by Partner Ads' stable ``kombiid``."""
+        kombiid = self._get_kombiid(sale)
+        existing = self._connection.execute(
+            "SELECT * FROM registered_sales WHERE kombiid = ?", (kombiid,)
+        ).fetchone()
+        timestamp = created_at or datetime.now().astimezone().isoformat(
+            timespec="seconds"
+        )
+        values = {
+            "programid": sale.get("programid", ""),
+            "program": sale.get("program", ""),
+            "dato": sale.get("dato", ""),
+            "tidspunkt": sale.get("tidspunkt", ""),
+            "ordrenr": sale.get("ordrenr", ""),
+            "omsaetning": self._as_number(sale.get("omsaetning", "0")),
+            "provision": self._as_number(sale.get("provision", "0")),
+            "url": sale.get("url", ""),
+            "valuta": sale.get("valuta", ""),
+            "status": sale.get("status", ""),
+            "approval_status": sale.get(
+                "approval_status", sale.get("godkendelsesstatus", "")
+            ),
+        }
+        if existing is None:
+            with self._connection:
+                self._connection.execute(
+                    """
+                    INSERT INTO registered_sales (
+                        kombiid, programid, program, dato, tidspunkt, ordrenr,
+                        omsaetning, provision, url, valuta, created_at,
+                        status, approval_status, telegram_status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                    """,
+                    (
+                        kombiid,
+                        values["programid"], values["program"], values["dato"],
+                        values["tidspunkt"], values["ordrenr"],
+                        values["omsaetning"], values["provision"], values["url"],
+                        values["valuta"], timestamp, values["status"],
+                        values["approval_status"],
+                    ),
+                )
+            return "created"
+        changed = any(
+            (
+                float(existing[key] or 0) != float(value)
+                if key in {"omsaetning", "provision"}
+                else str(existing[key] if existing[key] is not None else "")
+                != str(value)
+            )
+            for key, value in values.items()
+        )
+        if not changed:
+            return "unchanged"
+        with self._connection:
+            self._connection.execute(
+                """
+                UPDATE registered_sales SET
+                    programid = ?, program = ?, dato = ?, tidspunkt = ?,
+                    ordrenr = ?, omsaetning = ?, provision = ?, url = ?,
+                    valuta = ?, status = ?, approval_status = ?
+                WHERE kombiid = ?
+                """,
+                (*values.values(), kombiid),
+            )
+        return "updated"
+
+    def get_partner_ads_notification_status(self, kombiid: str) -> str | None:
+        row = self._connection.execute(
+            "SELECT telegram_status FROM registered_sales WHERE kombiid = ?",
+            (kombiid,),
+        ).fetchone()
+        return None if row is None else str(row["telegram_status"])
+
+    def set_partner_ads_notification_status(
+        self, kombiid: str, status: str
+    ) -> None:
+        """Persist the terminal Telegram outcome for one registered sale."""
+        if status not in {"sent", "failed", "skipped"}:
+            raise ValueError("Ugyldig Telegram-status.")
+        with self._connection:
+            self._connection.execute(
+                """
+                UPDATE registered_sales
+                SET telegram_status = ?, telegram_attempted_at = ?
+                WHERE kombiid = ?
+                """,
+                (
+                    status,
+                    datetime.now().astimezone().isoformat(timespec="seconds"),
+                    kombiid,
+                ),
+            )
+
     def save_sale(
         self,
         sale: dict[str, str],
@@ -5101,6 +5211,35 @@ class Database:
                 sale = self._sale_from_legacy_row(row)
                 self._insert_sale(sale, sale["created_at"])
             self._connection.execute("DROP TABLE registered_sales_legacy")
+
+    def _ensure_sales_sync_columns(self) -> None:
+        columns = {
+            row["name"]
+            for row in self._connection.execute(
+                "PRAGMA table_info(registered_sales)"
+            )
+        }
+        additions = {
+            "status": "TEXT NOT NULL DEFAULT ''",
+            "approval_status": "TEXT NOT NULL DEFAULT ''",
+            "telegram_status": "TEXT NOT NULL DEFAULT 'skipped'",
+            "telegram_attempted_at": "TEXT",
+        }
+        with self._connection:
+            for name, definition in additions.items():
+                if name not in columns:
+                    self._connection.execute(
+                        f"ALTER TABLE registered_sales ADD COLUMN {name} {definition}"
+                    )
+
+    @staticmethod
+    def _parse_partner_ads_date(value: str) -> date | None:
+        for pattern in ("%d-%m-%Y", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(str(value), pattern).date()
+            except (TypeError, ValueError):
+                continue
+        return None
 
     @staticmethod
     def _sale_from_legacy_row(row: sqlite3.Row) -> dict[str, str]:

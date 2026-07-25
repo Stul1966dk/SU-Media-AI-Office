@@ -409,3 +409,15 @@ En SERP-kilde bruges kun, når den kan tilgås lovligt og offentligt. Uden en
 konfigureret tilladt kilde fortsætter flowet uden konkurrentdata og gemmer
 begrænsningen. Godkendelse skriver kun til den lokale projekt-, opgave- og
 eksperimentmodel. Publicering ligger uden for systemet.
+# Sprint 5 – trinvis Partner Ads-import
+
+Partner Ads er fortsat en global integration i `DataRefreshService`; et
+websitefilter påvirker ikke importen. Normal import finder den seneste gyldige
+salgsdato (`dato`) og henter igen fra to kalenderdage før denne dato til og med
+i dag. Første import og eksplicit fuld import bruger den eksisterende periode
+fra den første dag i den aktuelle måned til og med i dag.
+
+`kombiid` er den stabile eksterne salgsidentifikator. Salg upsertes, så ændrede
+beløb og metadata opdateres uden en ny række. Telegram forsøges kun for et helt
+nyt salg efter baseline-importen. Udfaldet gemmes på salgsrækken som `sent`,
+`failed` eller `skipped`, så genimport og app-genstart ikke sender igen.
