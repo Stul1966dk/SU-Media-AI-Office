@@ -448,3 +448,35 @@ rettet som en del af Sprint 6:
 - [ ] Tilføj manglende hjælpepanel i `dashboard/pages/17_SEO_Insights.py`.
 - [ ] Opdater den forældede connectorforventning i
   `tests/test_web_dashboard.py`.
+
+# Sprint 7 – ændringsstyrede afledte beregninger
+
+`DataRefreshService` klassificerer importresultater fra samme kørsel centralt
+som `data_changed`, `no_data_changed` eller `unknown_due_to_error`. At et
+importtrin blot er gennemført, er ikke et ændringssignal. Nye rækker og rækker,
+hvor værdier reelt er ændret, er ændringer; identiske overlapdata er ikke.
+
+De faktiske afhængigheder og kørselsregler er:
+
+- SEO History vurderes pr. website og udløses af ændrede Search
+  Console-dagstal, dimensioner eller Plausible-tal. Partner Ads udløser ikke
+  SEO History.
+- Website Intelligence vurderes pr. website. Den bruger registrydata, Search
+  Console-dagstal, SEO Health, Partner Ads, projekter og opgaver. Plausible og
+  Search Console-dimensioner bruges ikke direkte. Registry- og Partner
+  Ads-resultater er globale i den nuværende arkitektur og kan derfor udløse
+  alle valgte websites.
+- Eksperimentovervågning bruger Search Console-dimensioner og kører kun ved
+  relevante nye Search Console-data, nået evalueringsdato eller tvang.
+- Prioriteringsscore bruger SEO Health, Search Console, Plausible,
+  eksperimentstatus, systemstatus og eksisterende opgaver. Partner Ads og
+  Website Intelligence bruges ikke direkte som scoreinput.
+
+Ved en ukendt ændringsstatus på grund af integrationsfejl springes afledte trin
+forsigtigt over med advarselsstatus, medmindre en anden kilde dokumenterer en
+relevant ændring. `force_derived_refresh=True` tilsidesætter ændringskontrollen
+og respekterer websitefilteret for websitebaserede trin.
+
+Opfølgning, ikke implementeret: Partner Ads- og Website Registry-resultater bør
+senere kunne knyttes sikkert til de enkelte websites, så globale ændringer ikke
+unødvendigt udløser Website Intelligence for alle valgte websites.

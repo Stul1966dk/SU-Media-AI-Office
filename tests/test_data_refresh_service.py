@@ -13,6 +13,8 @@ from core.search_console_service import (
 )
 from core.website_registry import ImportResult
 from agents.website_intelligence import WebsiteIntelligenceBatchResult
+from agents.website_intelligence import WebsiteIntelligenceResult
+from core.seo_history import SEOHealth
 from dashboard.components.briefing_readiness import (
     get_website_briefing_readiness,
 )
@@ -21,6 +23,9 @@ from dashboard.components.briefing_readiness import (
 class DataRefreshServiceTests(unittest.TestCase):
     def _service(self, *, search_failure: bool = False) -> DataRefreshService:
         database = Mock()
+        database.get_active_website_ids.return_value = ["a.dk", "b.dk"]
+        database.get_seo_experiments.return_value = []
+        database.get_priority_task_scores.return_value = []
         registry = Mock()
         registry.sync.return_value = ImportResult(
             total=2, created=0, updated=2, phased_out=0
@@ -50,10 +55,24 @@ class DataRefreshServiceTests(unittest.TestCase):
         seo.analyze_all_sites.return_value = [
             Mock(website="a.dk"), Mock(website="a.dk"), Mock(website="b.dk")
         ]
+        seo.analyze_site.return_value = [
+            SEOHealth(
+                website="a.dk", period="28d", click_change_pct=0,
+                impression_change_pct=0, ctr_change=0, position_change=0,
+                trend="stable", score=50, action="unchanged",
+            )
+        ]
         intelligence = Mock()
         intelligence.analyze_all_sites.return_value = WebsiteIntelligenceBatchResult(
             websites_analyzed=2, profiles_created=0, profiles_updated=2,
             profiles_unchanged=0, history_changes=2,
+        )
+        intelligence.analyze_site.side_effect = lambda website: (
+            WebsiteIntelligenceResult(
+                website=website, profile_action="unchanged",
+                statistics_action="unchanged", history_action="unchanged",
+                health_score=50,
+            )
         )
         plausible = Mock()
         plausible.import_active_websites.return_value = {
@@ -82,15 +101,25 @@ class DataRefreshServiceTests(unittest.TestCase):
         events = []
         service = self._service()
         result = service.refresh_all(
-            lambda step, status, _result: events.append((step, status))
+            lambda step, status, _result: events.append((step, status)),
+            force_derived_refresh=True,
         )
         completed = [
             step for step, status in events if status == "completed"
         ]
-        self.assertEqual(list(DataRefreshService.STEPS), completed)
-        self.assertEqual(len(DataRefreshService.STEPS), result["completed_steps"])
+        self.assertEqual(
+            [
+                step for step in DataRefreshService.STEPS
+                if step != "SEO-eksperimentovervågning"
+            ],
+            completed,
+        )
+        self.assertEqual(
+            len(DataRefreshService.STEPS) - 1, result["completed_steps"]
+        )
+        self.assertEqual(1, result["skipped_steps"])
         self.assertEqual(0, result["failed_steps"])
-        service.database.replace_priority_task_scores.assert_called_once()
+        service.database.replace_priority_task_scores.assert_not_called()
         search = service._test_parts[1]
         search.sync_all_properties.assert_called_once_with(
             days=35, website_ids=None, force_full_refresh=False
@@ -159,7 +188,7 @@ class DataRefreshServiceTests(unittest.TestCase):
         self.assertEqual("skipped", statuses["SEO History"])
         search.sync_all_properties.assert_not_called()
         seo.analyze_all_sites.assert_not_called()
-        intelligence.analyze_all_sites.assert_called_once()
+        self.assertEqual(2, intelligence.analyze_site.call_count)
         plausible.import_active_websites.assert_called_once_with(
             website_ids=None, force_full_refresh=False
         )

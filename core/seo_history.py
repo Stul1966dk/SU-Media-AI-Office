@@ -21,6 +21,7 @@ class SEOHealth:
     position_change: float | None
     trend: str
     score: float
+    action: str = "unchanged"
 
 
 class SEOHistory:
@@ -85,7 +86,7 @@ def analyze_site(
             trend=_trend_from_score(score),
             score=score,
         )
-        database.upsert_seo_health(
+        action = database.upsert_seo_health(
             website_id=website,
             analysis_date=reference_date.isoformat(),
             period=period,
@@ -95,6 +96,17 @@ def analyze_site(
             impression_change=health.impression_change_pct,
             ctr_change=health.ctr_change,
             position_change=health.position_change,
+        )
+        health = SEOHealth(
+            **{
+                field: getattr(health, field)
+                for field in (
+                    "website", "period", "click_change_pct",
+                    "impression_change_pct", "ctr_change",
+                    "position_change", "trend", "score",
+                )
+            },
+            action=action,
         )
         results.append(health)
     return results

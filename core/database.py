@@ -2176,12 +2176,21 @@ class Database:
         """Insert or update one daily metric and return the write action."""
         existing = self._connection.execute(
             """
-            SELECT id
+            SELECT site_url, clicks, impressions, ctr, average_position
             FROM search_console_daily_metrics
             WHERE website_id = ? AND metric_date = ?
             """,
             (website_id, metric_date),
         ).fetchone()
+        unchanged = bool(existing) and (
+            str(existing["site_url"]) == str(site_url)
+            and int(existing["clicks"]) == int(clicks)
+            and int(existing["impressions"]) == int(impressions)
+            and float(existing["ctr"]) == float(ctr)
+            and float(existing["average_position"]) == float(average_position)
+        )
+        if unchanged:
+            return "unchanged"
         timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
         with self._connection:
             self._connection.execute(
@@ -2213,32 +2222,41 @@ class Database:
             )
         return "updated" if existing else "created"
 
-    def upsert_plausible_daily_metric(
+    def upsert_plausible_daily_metric_action(
         self, *, website_id: str, metric_date: str, visitors: int
-    ) -> bool:
-        """Upsert one Plausible metric and return whether it was inserted."""
+    ) -> str:
+        """Upsert a Plausible metric and distinguish identical values."""
         existing = self._connection.execute(
             """
-            SELECT id FROM plausible_daily_metrics
+            SELECT visitors FROM plausible_daily_metrics
             WHERE website_id = ? AND metric_date = ?
             """,
             (website_id, metric_date),
         ).fetchone()
+        if existing and int(existing["visitors"]) == int(visitors):
+            return "unchanged"
         timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
         with self._connection:
             self._connection.execute(
                 """
                 INSERT INTO plausible_daily_metrics (
                     website_id, metric_date, visitors, created_at, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(website_id, metric_date) DO UPDATE SET
                     visitors = excluded.visitors,
                     updated_at = excluded.updated_at
                 """,
                 (website_id, metric_date, int(visitors), timestamp, timestamp),
             )
-        return existing is None
+        return "updated" if existing else "created"
+
+    def upsert_plausible_daily_metric(
+        self, *, website_id: str, metric_date: str, visitors: int
+    ) -> bool:
+        """Upsert one Plausible metric and return whether it was inserted."""
+        return self.upsert_plausible_daily_metric_action(
+            website_id=website_id, metric_date=metric_date, visitors=visitors
+        ) == "created"
 
     def get_plausible_daily_metrics(
         self, *, website_id: str | None = None
@@ -2395,12 +2413,13 @@ class Database:
             return {"rows_created": 0, "rows_updated": 0}
 
         existing_rows = self._connection.execute(
-            f"""SELECT {", ".join(columns)} FROM {table}
+            f"""SELECT {", ".join(columns)}, site_url, clicks, impressions,
+                       ctr, average_position FROM {table}
                 WHERE website_id = ? AND period_start = ? AND period_end = ?""",
             (website_id, period_start, period_end),
         ).fetchall()
         existing = {
-            tuple(row[column] for column in columns)
+            tuple(row[column] for column in columns): row
             for row in existing_rows
         }
         keys = [
@@ -2409,6 +2428,18 @@ class Database:
         ]
         updated = sum(key in existing for key in keys)
         created = len(keys) - updated
+        changed = created + sum(
+            key in existing and any((
+                str(existing[key]["site_url"]) != str(site_url),
+                int(existing[key]["clicks"]) != int(row.get("clicks", 0)),
+                int(existing[key]["impressions"])
+                != int(row.get("impressions", 0)),
+                float(existing[key]["ctr"]) != float(row.get("ctr", 0)),
+                float(existing[key]["average_position"])
+                != float(row.get("average_position", 0)),
+            ))
+            for key, row in zip(keys, valid_rows)
+        )
         timestamp = datetime.now().astimezone().isoformat(
             timespec="seconds"
         )
@@ -2443,7 +2474,12 @@ class Database:
                         imported_at = excluded.imported_at""",
                 parameters,
             )
-        return {"rows_created": created, "rows_updated": updated}
+        return {
+            "rows_created": created,
+            "rows_updated": updated,
+            "rows_changed": changed,
+            "rows_unchanged": len(valid_rows) - changed,
+        }
 
     def get_search_console_dimensions(
         self, dimension_type: str, *, website_id: str | None = None,
@@ -2784,11 +2820,23 @@ class Database:
         """Insert or update one SEO health snapshot."""
         existing = self._connection.execute(
             """
-            SELECT id FROM seo_health_history
+            SELECT score, trend, click_change, impression_change,
+                   ctr_change, position_change
+            FROM seo_health_history
             WHERE website_id = ? AND date = ? AND period = ?
             """,
             (website_id, analysis_date, period),
         ).fetchone()
+        values = (
+            float(score), str(trend), click_change, impression_change,
+            ctr_change, position_change,
+        )
+        if existing and (
+            float(existing["score"]), str(existing["trend"]),
+            existing["click_change"], existing["impression_change"],
+            existing["ctr_change"], existing["position_change"],
+        ) == values:
+            return "unchanged"
         timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
         with self._connection:
             self._connection.execute(
@@ -4067,11 +4115,21 @@ class Database:
         """Insert or update one daily website intelligence snapshot."""
         existing = self._connection.execute(
             """
-            SELECT id FROM website_statistics
+            SELECT * FROM website_statistics
             WHERE website_id = ? AND statistic_date = ?
             """,
             (statistics["website_id"], statistics["statistic_date"]),
         ).fetchone()
+        comparable = (
+            "search_clicks", "search_impressions", "search_ctr",
+            "average_position", "sales_count", "revenue", "commission",
+            "seo_score", "seo_trend", "active_projects", "active_tasks",
+            "website_health",
+        )
+        if existing and all(
+            existing[field] == statistics[field] for field in comparable
+        ):
+            return "unchanged"
         timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
         with self._connection:
             self._connection.execute(
@@ -4551,6 +4609,22 @@ class Database:
         except (TypeError, json.JSONDecodeError):
             return {}
         return state if isinstance(state, dict) else {}
+
+    def set_derived_refresh_state(
+        self, step: str, state: dict[str, Any]
+    ) -> None:
+        """Persist the latest derived calculation basis and outcome."""
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO app_state (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (
+                    f"derived_refresh:{step}",
+                    json.dumps(state, ensure_ascii=False, default=str),
+                ),
+            )
 
     def set_navigation_group_state(self, group: str, is_open: bool) -> None:
         """Persist the local user's sidebar group preference."""

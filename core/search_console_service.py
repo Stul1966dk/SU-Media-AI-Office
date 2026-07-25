@@ -186,6 +186,7 @@ class SearchConsoleService:
                 "website_id": item["website_id"],
                 "rows_created": result["rows_created"],
                 "rows_updated": result["rows_updated"],
+                "rows_changed": result["rows_changed"],
             })
 
         import_mode = (
@@ -279,6 +280,9 @@ class SearchConsoleService:
                 continue
             property_failed = False
             property_calls = 0
+            property_created = 0
+            property_updated = 0
+            property_changed = 0
             attempted_at = now.isoformat(timespec="seconds")
             for period_start, period_end in periods:
                 for dimension_type, dimensions, limit in specs:
@@ -301,6 +305,12 @@ class SearchConsoleService:
                         )
                         created += actions["rows_created"]
                         updated += actions["rows_updated"]
+                        property_created += actions["rows_created"]
+                        property_updated += actions["rows_updated"]
+                        property_changed += actions.get(
+                            "rows_changed",
+                            actions["rows_created"] + actions["rows_updated"],
+                        )
                         totals[dimension_type] += len(rows)
                     except Exception as error:
                         property_failed = True
@@ -337,6 +347,9 @@ class SearchConsoleService:
                 "last_success_after": success_after,
                 "api_calls_executed": property_calls,
                 "api_calls_avoided": 6 - property_calls,
+                "rows_created": property_created,
+                "rows_updated": property_updated,
+                "rows_changed": property_changed,
             })
         processed = len(properties) - skipped
         if not properties or skipped == len(properties):
@@ -491,6 +504,7 @@ class SearchConsoleService:
         )
         created = 0
         updated = 0
+        changed = 0
         for metric in metrics:
             action = self.database.upsert_search_console_daily_metric(
                 website_id=website_id,
@@ -505,9 +519,12 @@ class SearchConsoleService:
                 created += 1
             else:
                 updated += 1
+            if action in {"created", "updated"}:
+                changed += 1
         return {
             "rows_created": created,
             "rows_updated": updated,
+            "rows_changed": changed,
         }
 
     def get_property_metrics(

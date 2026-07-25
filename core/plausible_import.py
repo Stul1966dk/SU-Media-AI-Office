@@ -50,6 +50,8 @@ class PlausibleImportService:
             "datapoints_saved": 0,
             "rows_created": 0,
             "rows_updated": 0,
+            "rows_changed": 0,
+            "rows_unchanged": 0,
             "period_start": full_start_date.isoformat(),
             "period_end": end_date.isoformat(),
             "earliest_fetched_date": full_start_date.isoformat(),
@@ -74,6 +76,8 @@ class PlausibleImportService:
                     "import_mode": None,
                     "rows_created": 0,
                     "rows_updated": 0,
+                    "rows_changed": 0,
+                    "rows_unchanged": 0,
                     "status": "skipped",
                     "reason": configuration["skip_reason"],
                     "error_type": None,
@@ -107,19 +111,27 @@ class PlausibleImportService:
                 )
                 created_count = 0
                 updated_count = 0
+                changed_count = 0
+                unchanged_count = 0
                 for metric_date, visitors in daily.items():
-                    created = self.database.upsert_plausible_daily_metric(
+                    action = self.database.upsert_plausible_daily_metric_action(
                         website_id=website,
                         metric_date=metric_date,
                         visitors=visitors,
                     )
                     result["datapoints_saved"] += 1
-                    if created:
+                    if action == "created":
                         created_count += 1
                     else:
                         updated_count += 1
+                    if action in {"created", "updated"}:
+                        changed_count += 1
+                    else:
+                        unchanged_count += 1
                 result["rows_created"] += created_count
                 result["rows_updated"] += updated_count
+                result["rows_changed"] += changed_count
+                result["rows_unchanged"] += unchanged_count
                 result["websites_updated"] += 1
                 result["website_results"].append({
                     "website_id": website,
@@ -129,6 +141,8 @@ class PlausibleImportService:
                     "import_mode": import_mode,
                     "rows_created": created_count,
                     "rows_updated": updated_count,
+                    "rows_changed": changed_count,
+                    "rows_unchanged": unchanged_count,
                     "status": "completed",
                     "reason": None,
                     "error_type": None,
@@ -149,6 +163,8 @@ class PlausibleImportService:
                         "import_mode": import_mode,
                         "rows_created": 0,
                         "rows_updated": 0,
+                        "rows_changed": 0,
+                        "rows_unchanged": 0,
                         "status": "skipped",
                         "reason": "Plausible er ikke aktiveret",
                         "error_type": None,
@@ -176,6 +192,8 @@ class PlausibleImportService:
                     "import_mode": import_mode,
                     "rows_created": 0,
                     "rows_updated": 0,
+                    "rows_changed": 0,
+                    "rows_unchanged": 0,
                     "status": "failed",
                     "reason": message,
                     "error_type": error_type,

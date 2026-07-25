@@ -27,8 +27,8 @@ class DataRefreshService:
     STEPS = (
         "Website Registry", "Partner Ads", "Search Console-properties",
         "Search Console-dagstal", "Search Console-sider og søgeord",
-        "Plausible", "SEO History", "Website Intelligence", "Systemstatus",
-        "Prioriteringsscore",
+        "Plausible", "SEO History", "Website Intelligence",
+        "SEO-eksperimentovervågning", "Systemstatus", "Prioriteringsscore",
     )
 
     def __init__(
@@ -63,6 +63,7 @@ class DataRefreshService:
         self, progress: Progress | None = None,
         website_ids: list[str] | None = None,
         *, force_dimensions_refresh: bool = False,
+        force_derived_refresh: bool = False,
     ) -> dict[str, Any]:
         """Run all refresh steps in order and skip only direct dependencies."""
         external_notify = progress or (
@@ -144,27 +145,76 @@ class DataRefreshService:
                 ),
                 notify, steps,
             )
-        self._run(
+        plausible = self._run(
             "Plausible",
             lambda: self.refresh_plausible(website_ids),
             notify,
             steps,
         )
-        if daily["status"] != "completed":
-            self._skip(
-                "SEO History",
-                "Ikke kørt, fordi Search Console-opdateringen fejlede.",
-                notify, steps,
-            )
-        else:
-            self._run("SEO History", self.refresh_seo_history, notify, steps)
-        self._run(
-            "Website Intelligence", self.refresh_website_intelligence,
-            notify, steps,
+        partner = self._step_named(steps, "Partner Ads")
+        changes = self._collect_input_changes(
+            registry, partner, daily, dimensions, plausible
         )
+        selected = (
+            set(website_ids) if website_ids is not None
+            else set(self.database.get_active_website_ids())
+        )
+        seo_websites = selected if force_derived_refresh else {
+            website for website in selected
+            if changes["by_website"].get(website, set())
+            & {"search_console_daily", "search_console_dimensions", "plausible"}
+        }
+        seo_result = self._run_or_skip_derived(
+            "SEO History", seo_websites,
+            lambda: self.refresh_seo_history(seo_websites),
+            self._sources_for(changes, seo_websites),
+            force_derived_refresh, notify, steps, changes["unknown"], selected,
+        )
+        for website in seo_result.get("changed_websites", []):
+            changes["by_website"].setdefault(website, set()).add("seo_history")
+        intelligence_global = bool(
+            changes["global"] & {"website_registry", "partner_ads"}
+        )
+        intelligence_websites = (
+            selected if force_derived_refresh or intelligence_global else {
+                website for website in selected
+                if changes["by_website"].get(website, set())
+                & {"search_console_daily", "seo_history"}
+            }
+        )
+        intelligence_result = self._run_or_skip_derived(
+            "Website Intelligence", intelligence_websites,
+            lambda: self.refresh_website_intelligence(intelligence_websites),
+            self._sources_for(changes, intelligence_websites),
+            force_derived_refresh, notify, steps, changes["unknown"], selected,
+        )
+        if intelligence_result.get("data_changed"):
+            changes["global"].add("website_intelligence")
+        experiment_websites, due_websites = self._experiment_trigger_websites(
+            selected, changes, force_derived_refresh
+        )
+        experiment_sources = self._sources_for(changes, experiment_websites)
+        if due_websites:
+            experiment_sources.add("evalueringsdato")
+        experiment_result = self._run_or_skip_derived(
+            "SEO-eksperimentovervågning", experiment_websites,
+            lambda: self.refresh_experiment_monitoring(
+                experiment_websites,
+                due_only=not force_derived_refresh and not experiment_sources,
+            ),
+            experiment_sources, force_derived_refresh,
+            notify, steps, changes["unknown"], selected,
+        )
+        if experiment_result.get("data_changed"):
+            changes["global"].add("experiment_status")
         self._run("Systemstatus", self.refresh_system_status, notify, steps)
-        self._run(
-            "Prioriteringsscore", self.refresh_priority_scores, notify, steps
+        priority_sources = self._priority_sources(changes, seo_result)
+        self._run_or_skip_derived(
+            "Prioriteringsscore",
+            selected if (force_derived_refresh or priority_sources) else set(),
+            lambda: self.refresh_priority_scores(website_ids),
+            priority_sources, force_derived_refresh,
+            notify, steps, changes["unknown"], selected,
         )
         completed = datetime.now().astimezone()
         result = {
@@ -237,23 +287,29 @@ class DataRefreshService:
             new_daily_website_ids=new_daily_website_ids,
             force_dimensions_refresh=force_dimensions_refresh,
         ))
-        try:
-            updates = ExperimentMonitoringService(
-                self.database
-            ).update_active_experiments()
-        except Exception as error:
-            # A monitoring compatibility issue must not turn a successful
-            # Search Console import into a failed data refresh.
-            updates = []
-            result["experiment_update_error"] = type(error).__name__
-        result["experiments_updated"] = len(updates)
         return result
 
-    def refresh_seo_history(self) -> dict[str, Any]:
-        results = self.seo_history.analyze_all_sites()
+    def refresh_seo_history(
+        self, website_ids: set[str] | None = None
+    ) -> dict[str, Any]:
+        websites = website_ids or set()
+        results = [
+            item
+            for website in sorted(websites)
+            for item in self.seo_history.analyze_site(website)
+        ]
+        changed_websites = sorted({
+            item.website for item in results if item.action != "unchanged"
+        })
         return {
-            "records_updated": len(results),
-            "websites_updated": len({item.website for item in results}),
+            "data_changed": bool(changed_websites),
+            "websites_processed": len(websites),
+            "websites_skipped": 0,
+            "websites_failed": 0,
+            "processed_websites": sorted(websites),
+            "changed_websites": changed_websites,
+            "rows_created": sum(item.action == "created" for item in results),
+            "rows_updated": sum(item.action == "updated" for item in results),
         }
 
     def refresh_plausible(
@@ -264,9 +320,58 @@ class DataRefreshService:
             force_full_refresh=False,
         )
 
-    def refresh_website_intelligence(self) -> dict[str, Any]:
-        result = self.intelligence.analyze_all_sites()
-        return asdict(result)
+    def refresh_website_intelligence(
+        self, website_ids: set[str] | None = None
+    ) -> dict[str, Any]:
+        websites = website_ids or set()
+        results = [
+            self.intelligence.analyze_site(website)
+            for website in sorted(websites)
+        ]
+        changed = [
+            item for item in results
+            if any((
+                item.profile_action != "unchanged",
+                item.statistics_action != "unchanged",
+                item.history_action != "unchanged",
+            ))
+        ]
+        return {
+            "data_changed": bool(changed),
+            "websites_processed": len(results),
+            "websites_skipped": 0,
+            "websites_failed": 0,
+            "processed_websites": [item.website for item in results],
+            "changed_websites": [item.website for item in changed],
+            "rows_created": sum(
+                item.profile_action == "created" for item in results
+            ),
+            "rows_updated": sum(
+                item.profile_action == "updated" for item in results
+            ),
+        }
+
+    def refresh_experiment_monitoring(
+        self, website_ids: set[str], *, due_only: bool
+    ) -> dict[str, Any]:
+        updates = ExperimentMonitoringService(
+            self.database
+        ).update_active_experiments(
+            website_ids=website_ids, due_only=due_only
+        )
+        return {
+            "data_changed": any(
+                item.get("data_changed", False) for item in updates
+            ),
+            "objects_processed": len(updates),
+            "objects_skipped": 0,
+            "objects_failed": 0,
+            "processed_websites": sorted(website_ids),
+            "rows_created": sum(
+                bool(item.get("data_changed")) for item in updates
+            ),
+            "rows_updated": 0,
+        }
 
     def refresh_system_status(self) -> dict[str, Any]:
         checks = self.health_check(project_root=self.project_root)
@@ -274,7 +379,9 @@ class DataRefreshService:
             self.database.set_system_health(component, health)
         return {"checks": len(checks)}
 
-    def refresh_priority_scores(self) -> dict[str, Any]:
+    def refresh_priority_scores(
+        self, website_ids: list[str] | None = None
+    ) -> dict[str, Any]:
         """Build and persist one deterministic snapshot after all data sync."""
         from dashboard.components.data import build_dashboard_priority_tasks
 
@@ -297,7 +404,22 @@ class DataRefreshService:
             plausible_rows=context.get("plausible_daily", []),
             limit=None,
         )
-        saved_result = self.database.replace_priority_task_scores(items)
+        if website_ids is not None:
+            selected = set(website_ids)
+            items = [
+                item for item in items
+                if not item.get("website") or item.get("website") in selected
+            ]
+        existing = self.database.get_priority_task_scores(limit=None)
+        comparable_existing = [
+            {key: value for key, value in item.items() if key != "calculated_at"}
+            for item in existing
+        ]
+        data_changed = comparable_existing != items
+        saved_result = (
+            self.database.replace_priority_task_scores(items)
+            if data_changed else len(items)
+        )
         saved = (
             saved_result if isinstance(saved_result, int) else len(items)
         )
@@ -318,12 +440,182 @@ class DataRefreshService:
             ],
         )
         return {
+            "data_changed": data_changed,
             "records_updated": saved,
             "tasks_scored": saved,
             "highest_score": (
                 items[0]["total_score"] if items else 0
             ),
         }
+
+    @staticmethod
+    def _step_named(
+        steps: list[dict[str, Any]], name: str
+    ) -> dict[str, Any]:
+        return next(
+            (item for item in reversed(steps) if item["step"] == name),
+            {"status": "skipped"},
+        )
+
+    @staticmethod
+    def _collect_input_changes(
+        registry: dict[str, Any], partner: dict[str, Any],
+        daily: dict[str, Any], dimensions: dict[str, Any],
+        plausible: dict[str, Any],
+    ) -> dict[str, Any]:
+        by_website: dict[str, set[str]] = {}
+        global_sources: set[str] = set()
+        unknown: set[str] = set()
+
+        def add(website: str, source: str) -> None:
+            by_website.setdefault(str(website), set()).add(source)
+
+        if any(int(registry.get(key, 0)) > 0 for key in (
+            "created", "updated", "phased_out"
+        )):
+            global_sources.add("website_registry")
+        if any(int(partner.get(key, 0)) > 0 for key in ("new", "updated")):
+            global_sources.add("partner_ads")
+        for item in daily.get("property_results", []):
+            if int(item.get("rows_changed", item.get("rows_created", 0))) > 0:
+                add(item["website_id"], "search_console_daily")
+        for item in dimensions.get("property_results", []):
+            if int(item.get("rows_changed", 0)) > 0:
+                add(item["website_id"], "search_console_dimensions")
+        for item in plausible.get("website_results", []):
+            if int(item.get("rows_changed", item.get("rows_created", 0))) > 0:
+                add(item["website_id"], "plausible")
+        for name, result in (
+            ("website_registry", registry), ("partner_ads", partner),
+            ("search_console_daily", daily),
+            ("search_console_dimensions", dimensions),
+            ("plausible", plausible),
+        ):
+            if result.get("status") in {"error", "warning"}:
+                unknown.add(name)
+        state = (
+            "data_changed"
+            if by_website or global_sources
+            else "unknown_due_to_error" if unknown
+            else "no_data_changed"
+        )
+        return {
+            "by_website": by_website,
+            "global": global_sources,
+            "unknown": unknown,
+            "state": state,
+        }
+
+    @staticmethod
+    def _sources_for(
+        changes: dict[str, Any], websites: set[str]
+    ) -> set[str]:
+        sources = set(changes["global"])
+        for website in websites:
+            sources.update(changes["by_website"].get(website, set()))
+        return sources
+
+    def _run_or_skip_derived(
+        self, name: str, websites: set[str],
+        function: Callable[[], dict[str, Any]], sources: set[str],
+        forced: bool, notify: Progress, steps: list[dict[str, Any]],
+        unknown_sources: set[str],
+        eligible_websites: set[str],
+    ) -> dict[str, Any]:
+        if not websites:
+            if unknown_sources:
+                result = {
+                    "step": name,
+                    "status": "warning",
+                    "reason": (
+                        "Kunne ikke afgøre ændringer, fordi en nødvendig "
+                        "datakilde fejlede"
+                    ),
+                }
+                steps.append(result)
+                notify(name, "warning", result)
+            else:
+                result = self._skip(
+                    name,
+                    "Ingen relevante nye eller ændrede data siden seneste "
+                    "beregning",
+                    notify, steps,
+                )
+            result.update({
+                "data_changed": False,
+                "processed_websites": [],
+                "skipped_websites": sorted(eligible_websites),
+                "websites_processed": 0,
+                "websites_skipped": len(eligible_websites),
+                "websites_failed": 0,
+                "trigger_sources": [],
+                "unknown_due_to_error": bool(unknown_sources),
+            })
+            return result
+        result = self._run(name, function, notify, steps)
+        result["trigger_sources"] = sorted(
+            sources | ({"tvungen genberegning"} if forced else set())
+        )
+        result.setdefault("data_changed", False)
+        try:
+            self.database.set_derived_refresh_state(name, {
+                "completed_at": datetime.now().astimezone().isoformat(
+                    timespec="seconds"
+                ),
+                "data_changed": result["data_changed"],
+                "processed_websites": result.get("processed_websites", []),
+                "trigger_sources": result["trigger_sources"],
+                "status": result["status"],
+            })
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Afledt refresh-status kunne ikke gemmes for %s.", name
+            )
+        return result
+
+    def _experiment_trigger_websites(
+        self, selected: set[str], changes: dict[str, Any], forced: bool
+    ) -> tuple[set[str], set[str]]:
+        active = self.database.get_seo_experiments(statuses=(
+            "approved", "running", "waiting_for_data", "ready_for_evaluation",
+        ))
+        today = datetime.now().astimezone().date()
+        due = {
+            str(item["website_id"]) for item in active
+            if item.get("website_id") in selected
+            and item.get("planned_evaluation_date")
+            and datetime.fromisoformat(
+                str(item["planned_evaluation_date"])
+            ).date() <= today
+        }
+        changed = {
+            website for website in selected
+            if changes["by_website"].get(website, set())
+            & {"search_console_daily", "search_console_dimensions"}
+        }
+        active_websites = {
+            str(item["website_id"]) for item in active
+            if item.get("website_id") in selected
+        }
+        triggered = (
+            active_websites if forced else active_websites & (due | changed)
+        )
+        return triggered, due & active_websites
+
+    @staticmethod
+    def _priority_sources(
+        changes: dict[str, Any], seo_result: dict[str, Any]
+    ) -> set[str]:
+        relevant = {
+            "search_console_daily", "plausible", "seo_history",
+            "experiment_status",
+        }
+        sources = set(changes["global"]) & relevant
+        for website_sources in changes["by_website"].values():
+            sources.update(website_sources & relevant)
+        if seo_result.get("data_changed"):
+            sources.add("seo_history")
+        return sources
 
     @staticmethod
     def _run(

@@ -12,13 +12,25 @@ class ExperimentMonitoringService:
         self.database = database
 
     def update_active_experiments(
-        self, reference_date: date | None = None
+        self, reference_date: date | None = None,
+        website_ids: set[str] | None = None,
+        due_only: bool = False,
     ) -> list[dict[str, Any]]:
         today = reference_date or date.today()
         active = self.database.get_seo_experiments(statuses=(
             "approved", "running", "waiting_for_data", "ready_for_evaluation",
         ))
-        return [self.update_experiment(item["id"], today) for item in active]
+        selected = [
+            item for item in active
+            if website_ids is None or item["website_id"] in website_ids
+        ]
+        if due_only:
+            selected = [
+                item for item in selected
+                if item.get("planned_evaluation_date")
+                and date.fromisoformat(item["planned_evaluation_date"]) <= today
+            ]
+        return [self.update_experiment(item["id"], today) for item in selected]
 
     def update_experiment(
         self, experiment_id: int, reference_date: date | None = None
@@ -41,12 +53,14 @@ class ExperimentMonitoringService:
                 "experiment_id": experiment_id,
                 "pulse_status": "Afventer data",
                 "observation": "Der er endnu ingen nye Search Console-data.",
+                "data_changed": False,
             }
         days = self._days_since(experiment.get("started_at"), today)
         quality = self._data_quality(measurement)
         pulse, observation = self._pulse(
             experiment, measurement, days, quality
         )
+        status_changed = False
         if (
             experiment.get("planned_evaluation_date")
             and date.fromisoformat(experiment["planned_evaluation_date"]) <= today
@@ -58,11 +72,12 @@ class ExperimentMonitoringService:
             self.database.update_seo_experiment(
                 experiment_id, {"status": "ready_for_evaluation"}
             )
+            status_changed = experiment.get("status") != "ready_for_evaluation"
             self._observation(
                 experiment_id, today, "klar til evaluering",
                 "ready-for-evaluation", observation,
             )
-        self.database.save_experiment_snapshot({
+        snapshot_created = self.database.save_experiment_snapshot({
             "experiment_id": experiment_id,
             "observed_date": today.isoformat(),
             "period_start": measurement["period_start"],
@@ -78,6 +93,7 @@ class ExperimentMonitoringService:
         return {
             "experiment_id": experiment_id, "pulse_status": pulse,
             "observation": observation, "data_quality": quality,
+            "data_changed": bool(snapshot_created or status_changed),
             **measurement,
         }
 

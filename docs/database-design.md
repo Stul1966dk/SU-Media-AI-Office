@@ -447,3 +447,14 @@ Property-specifik status gemmes uden en ny tabel i `app_state` under nøglen
 `last_success` opdateres kun, hvis samtlige seks dimensionskald for propertyen
 lykkes. En delvist eller helt fejlet property gemmer forsøg og fejl, men
 bevarer en eventuel tidligere succes.
+
+# Sprint 7 – status for afledte beregninger
+
+Seneste udførte afledte beregning gemmes i `app_state` under
+`derived_refresh:<trin>`. Statusobjektet indeholder sluttidspunkt,
+`data_changed`, behandlede websites, udløsende datakilder og kørselsstatus.
+
+Search Console- og Plausible-upsert skelner nu mellem `created`, `updated` og
+`unchanged`, så identiske overlapdata ikke opdaterer timestamps og ikke
+udløser afledte beregninger. SEO Health og Website Intelligence undgår
+ligeledes timestamp-opdateringer, når det beregnede resultat er identisk.
