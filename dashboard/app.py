@@ -45,9 +45,11 @@ SEO_TRENDS = ("growing", "stable", "declining", "critical")
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _runtime_health() -> dict[str, dict[str, Any]]:
+def _runtime_health(_database: Any) -> dict[str, dict[str, Any]]:
     """Run external/runtime checks at most once every five minutes."""
-    return check_runtime_services(project_root=PROJECT_ROOT)
+    return check_runtime_services(
+        project_root=PROJECT_ROOT, database=_database
+    )
 
 
 def main() -> None:
@@ -64,7 +66,7 @@ def main() -> None:
     selected_trend = st.session_state.get("seo_trend")
     database = open_database()
     try:
-        for component, health in _runtime_health().items():
+        for component, health in _runtime_health(database).items():
             database.set_system_health(component, health)
         data = load_dashboard_data(
             database,

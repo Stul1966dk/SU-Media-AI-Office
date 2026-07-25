@@ -64,6 +64,7 @@ class DataRefreshService:
         website_ids: list[str] | None = None,
         *, force_dimensions_refresh: bool = False,
         force_derived_refresh: bool = False,
+        force_system_check: bool = False,
     ) -> dict[str, Any]:
         """Run all refresh steps in order and skip only direct dependencies."""
         external_notify = progress or (
@@ -207,7 +208,11 @@ class DataRefreshService:
         )
         if experiment_result.get("data_changed"):
             changes["global"].add("experiment_status")
-        self._run("Systemstatus", self.refresh_system_status, notify, steps)
+        self._run(
+            "Systemstatus",
+            lambda: self.refresh_system_status(force_system_check),
+            notify, steps,
+        )
         priority_sources = self._priority_sources(changes, seo_result)
         self._run_or_skip_derived(
             "Prioriteringsscore",
@@ -373,11 +378,27 @@ class DataRefreshService:
             "rows_updated": 0,
         }
 
-    def refresh_system_status(self) -> dict[str, Any]:
-        checks = self.health_check(project_root=self.project_root)
+    def refresh_system_status(
+        self, force_system_check: bool = False
+    ) -> dict[str, Any]:
+        checks = self.health_check(
+            project_root=self.project_root,
+            database=self.database,
+            force_openai=force_system_check,
+        )
         for component, health in checks.items():
             self.database.set_system_health(component, health)
-        return {"checks": len(checks)}
+        openai = checks.get("openai", {})
+        return {
+            "checks": len(checks),
+            "openai": openai,
+            "openai_test_calls_executed": int(
+                openai.get("openai_test_calls_executed", 0)
+            ),
+            "openai_test_calls_avoided": int(
+                openai.get("openai_test_calls_avoided", 0)
+            ),
+        }
 
     def refresh_priority_scores(
         self, website_ids: list[str] | None = None

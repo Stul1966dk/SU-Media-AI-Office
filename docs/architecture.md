@@ -480,3 +480,14 @@ og respekterer websitefilteret for websitebaserede trin.
 Opfølgning, ikke implementeret: Partner Ads- og Website Registry-resultater bør
 senere kunne knyttes sikkert til de enkelte websites, så globale ændringer ikke
 unødvendigt udløser Website Intelligence for alle valgte websites.
+
+# Sprint 8 – cachet OpenAI-systemtest
+
+Lokale systemkontroller kører fortsat ved systemstatus. OpenAI-forbindelsestesten
+genbruger derimod et vedvarende resultat i 24 timer efter succes og 15 minutter
+efter fejl. Testen køres straks uden cache, efter cacheudløb, ved ændring af
+`OPENAI_API_KEY` eller `OPENAI_MODEL`, eller når `force_system_check=True`.
+
+Konfigurationsændringer registreres med SHA-256 af API-nøgle og model. Hverken
+API-nøglen eller rå exceptions gemmes eller vises. Resultatet oplyser, om
+OpenAI-kaldet blev udført eller undgået, årsagen samt næste testtidspunkt.

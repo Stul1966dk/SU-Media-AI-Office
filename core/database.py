@@ -4795,6 +4795,39 @@ class Database:
             for component, is_ok in statuses.items()
         }
 
+    def set_openai_health_cache(self, state: dict[str, Any]) -> None:
+        """Persist sanitized OpenAI connection-test metadata."""
+        allowed = {
+            "last_attempt", "last_success", "is_ok", "detail",
+            "error_type", "next_test_at", "config_fingerprint",
+        }
+        payload = {key: state.get(key) for key in allowed}
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO app_state (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (
+                    "system_health_cache:openai",
+                    json.dumps(payload, ensure_ascii=False),
+                ),
+            )
+
+    def get_openai_health_cache(self) -> dict[str, Any] | None:
+        """Return sanitized cached OpenAI health metadata."""
+        row = self._connection.execute(
+            "SELECT value FROM app_state WHERE key = ?",
+            ("system_health_cache:openai",),
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            value = json.loads(row["value"])
+        except (TypeError, json.JSONDecodeError):
+            return None
+        return value if isinstance(value, dict) else None
+
     def get_dashboard_system_status(self) -> dict[str, bool]:
         """Return database-backed status for dashboard components."""
         rows = self._connection.execute(

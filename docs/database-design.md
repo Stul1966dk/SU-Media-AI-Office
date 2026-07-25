@@ -458,3 +458,10 @@ Search Console- og Plausible-upsert skelner nu mellem `created`, `updated` og
 `unchanged`, så identiske overlapdata ikke opdaterer timestamps og ikke
 udløser afledte beregninger. SEO Health og Website Intelligence undgår
 ligeledes timestamp-opdateringer, når det beregnede resultat er identisk.
+
+# Sprint 8 – OpenAI-systemstatuscache
+
+Den saniterede cache gemmes i `app_state` under
+`system_health_cache:openai`. Den indeholder seneste forsøg, seneste succes,
+status, sikker fejltype og fejlbesked, næste testtidspunkt samt et SHA-256-
+fingerprint af API-nøgle og model. API-nøglen gemmes aldrig i klartekst.
