@@ -208,7 +208,7 @@ class DataRefreshService:
         self, website_ids: list[str] | None = None
     ) -> dict[str, Any]:
         return asdict(self.search_console.sync_all_properties(
-            days=35, website_ids=website_ids
+            days=35, website_ids=website_ids, force_full_refresh=False
         ))
 
     def refresh_search_console_dimensions(

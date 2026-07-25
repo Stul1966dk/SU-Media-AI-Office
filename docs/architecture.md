@@ -168,7 +168,7 @@ Hændelser og handlinger gemmes i SQLite-tabellerne `events` og `actions`. En ha
 
 Den read-only Search Console-integration ligger i `integrations/search_console.py`. Et eksplicit desktop OAuth-login bruger den lokale `credentials.json` og gemmer tokenet i `token.json`. Den normale dataimport kræver og genbruger `token.json`; den starter aldrig et browser-login automatisk. Begge filer er udelukket fra Git.
 
-`core/search_console_service.py` henter property-listen, matcher property-domæner med Website Registry og gemmer resultatet gennem den centrale `Database`. Kun aktive properties med et website-match får hentet Search Analytics-data. Den automatiske import forespørger de seneste 180 dage med datodimension, så SEO History Engine har grundlag for 90 mod 90 dage, og gemmer ét samlet dagspunkt pr. website. En fejl isoleres til den enkelte property og logges kun med property-navn og exceptiontype.
+`core/search_console_service.py` henter property-listen, matcher property-domæner med Website Registry og gemmer resultatet gennem den centrale `Database`. Kun aktive properties med et website-match får hentet Search Analytics-data. Den normale import af dagstal med datodimension er trinvis pr. tilknyttet website: den starter fem kalenderdage før den seneste gemte dato, så Search Consoles efterjusteringer bliver hentet igen. Hvis et website endnu ikke har dagstal, eller importen udtrykkeligt tvinges, bruges standardperioden på 35 kalenderdage. Ældre historiske data hentes dermed ikke igen ved normal drift. En fejl isoleres til den enkelte property og logges kun med property-navn og exceptiontype.
 
 ```text
 Google OAuth (read-only)

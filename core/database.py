@@ -2291,6 +2291,20 @@ class Database:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_latest_search_console_metric_date(
+        self, website_id: str
+    ) -> str | None:
+        """Return the latest stored daily metric date for one website."""
+        row = self._connection.execute(
+            """
+            SELECT MAX(metric_date) AS latest_date
+            FROM search_console_daily_metrics
+            WHERE website_id = ?
+            """,
+            (website_id,),
+        ).fetchone()
+        return row["latest_date"] if row and row["latest_date"] else None
+
     def upsert_search_console_dimension(
         self, *, dimension_type: str, website_id: str, site_url: str,
         period_start: str, period_end: str, clicks: int, impressions: int,

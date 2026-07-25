@@ -31,11 +31,16 @@ class FakeService:
 
     def sync_all_properties(
         self, days: int = 35, website_ids: list[str] | None = None,
+        *, force_full_refresh: bool = True,
     ) -> SearchConsoleDataSyncResult:
+        self.force_full_refresh = force_full_refresh
         return SearchConsoleDataSyncResult(
             properties_processed=2, properties_failed=1,
             rows_created=20, rows_updated=10,
             start_date="2026-06-14", end_date="2026-07-18",
+            earliest_fetched_date="2026-06-14",
+            latest_fetched_date="2026-07-18",
+            import_mode="full",
             errors=[{"site_url": "x", "error_type": "TestError"}],
         )
 
@@ -52,8 +57,9 @@ class FakeService:
 class SearchConsoleDashboardTests(unittest.TestCase):
     def test_import_result_reports_websites_days_errors_and_progress(self) -> None:
         progress = []
+        service = FakeService()
         result = MODULE.run_search_console_import(
-            FakeService(), days=35,
+            service, days=35,
             progress=lambda value, text: progress.append((value, text)),
         )
         self.assertEqual(1, result["websites_imported"])
@@ -63,6 +69,7 @@ class SearchConsoleDashboardTests(unittest.TestCase):
         self.assertEqual(20, result["query_rows"])
         self.assertEqual(30, result["page_query_rows"])
         self.assertEqual(100, progress[-1][0])
+        self.assertTrue(service.force_full_refresh)
 
     def test_dashboard_has_import_button_and_explained_empty_state(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

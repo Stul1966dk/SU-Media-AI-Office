@@ -216,6 +216,12 @@ Indeholder samlede dagstal fra Search Analytics API for matchede websites.
 
 Kombinationen af `website_id` og `metric_date` er unik. En gentagen import opdaterer derfor det eksisterende dagspunkt, også hvis property-URL eller måleværdier er ændret.
 
+Ved normal synkronisering findes den seneste `metric_date` separat for hvert
+tilknyttet website. Importen starter fem kalenderdage før denne dato, så
+overlapperioden kan upsertes med eventuelle efterjusteringer fra Search
+Console. Første import og en tvungen fuld opdatering bruger 35 kalenderdage.
+Data ældre end overlapperioden hentes ikke igen under normal drift.
+
 ### `seo_health_history`
 
 Indeholder deterministiske SEO Health-snapshots for 7, 28 og 90 dage sammenlignet med den foregående periode af samme længde.

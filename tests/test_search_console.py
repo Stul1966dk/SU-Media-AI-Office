@@ -31,6 +31,7 @@ class FakeConnector:
         self.failing_site = failing_site
         self.authenticate_calls = 0
         self.metric_calls: list[str] = []
+        self.metric_requests: list[tuple[str, str, str]] = []
 
     def authenticate(self) -> object:
         self.authenticate_calls += 1
@@ -46,6 +47,7 @@ class FakeConnector:
         end_date: str,
     ) -> list[dict[str, object]]:
         self.metric_calls.append(site_url)
+        self.metric_requests.append((site_url, start_date, end_date))
         if site_url == self.failing_site:
             raise RuntimeError("secret-token-must-not-be-logged")
         return self.metrics.get(site_url, [])
@@ -254,6 +256,152 @@ class SearchConsoleTestCase(unittest.TestCase):
         result = service.sync_all_properties()
         self.assertEqual(result.properties_processed, 2)
         self.assertEqual(connector.metric_calls, sites)
+
+    def test_first_incremental_import_uses_35_days(self) -> None:
+        site_url = "sc-domain:alpha.dk"
+        connector = FakeConnector(
+            [], {site_url: [metric(date(2026, 7, 22), 4)]}
+        )
+        self.database.upsert_search_console_property(
+            site_url=site_url, permission_level="siteOwner",
+            website_id="alpha.dk", active=True,
+        )
+        result = self.service(connector).sync_all_properties(
+            force_full_refresh=False,
+            reference_date=date(2026, 7, 25),
+        )
+        self.assertEqual(
+            [(site_url, "2026-06-21", "2026-07-25")],
+            connector.metric_requests,
+        )
+        self.assertEqual("full", result.import_mode)
+        self.assertEqual("2026-06-21", result.earliest_fetched_date)
+        self.assertEqual("2026-07-25", result.latest_fetched_date)
+        self.assertEqual(1, result.rows_created)
+        self.assertEqual(
+            1,
+            len(self.database.get_search_console_daily_metrics("alpha.dk")),
+        )
+        second = self.service(connector).sync_all_properties(
+            force_full_refresh=False,
+            reference_date=date(2026, 7, 25),
+        )
+        self.assertEqual(1, second.rows_updated)
+        self.assertEqual(
+            1,
+            len(self.database.get_search_console_daily_metrics("alpha.dk")),
+        )
+
+    def test_incremental_start_is_separate_for_each_property(self) -> None:
+        connector = FakeConnector([], {})
+        for website, latest_date in (
+            ("alpha.dk", "2026-07-24"),
+            ("beta.dk", "2026-07-20"),
+        ):
+            site_url = f"sc-domain:{website}"
+            self.database.upsert_search_console_property(
+                site_url=site_url, permission_level="siteOwner",
+                website_id=website, active=True,
+            )
+            self.database.upsert_search_console_daily_metric(
+                website_id=website,
+                site_url=site_url,
+                metric_date=latest_date,
+                clicks=1, impressions=10, ctr=.1, average_position=5,
+            )
+        result = self.service(connector).sync_all_properties(
+            force_full_refresh=False,
+            reference_date=date(2026, 7, 25),
+        )
+        self.assertEqual(
+            [
+                ("sc-domain:alpha.dk", "2026-07-19", "2026-07-25"),
+                ("sc-domain:beta.dk", "2026-07-15", "2026-07-25"),
+            ],
+            connector.metric_requests,
+        )
+        self.assertEqual("incremental", result.import_mode)
+        self.assertEqual("2026-07-15", result.earliest_fetched_date)
+
+    def test_overlap_updates_existing_and_creates_new_without_duplicates(
+        self,
+    ) -> None:
+        site_url = "sc-domain:alpha.dk"
+        existing_date = date(2026, 7, 20)
+        new_date = date(2026, 7, 25)
+        connector = FakeConnector(
+            [], {site_url: [
+                metric(existing_date, 9),
+                metric(new_date, 4),
+            ]}
+        )
+        self.database.upsert_search_console_property(
+            site_url=site_url, permission_level="siteOwner",
+            website_id="alpha.dk", active=True,
+        )
+        self.database.upsert_search_console_daily_metric(
+            website_id="alpha.dk", site_url=site_url,
+            metric_date=existing_date.isoformat(),
+            clicks=2, impressions=100, ctr=.02, average_position=7,
+        )
+        result = self.service(connector).sync_all_properties(
+            force_full_refresh=False,
+            reference_date=date(2026, 7, 25),
+        )
+        rows = self.database.get_search_console_daily_metrics("alpha.dk")
+        self.assertEqual(1, result.rows_created)
+        self.assertEqual(1, result.rows_updated)
+        self.assertEqual(2, len(rows))
+        self.assertEqual(9, rows[0]["clicks"])
+
+    def test_force_full_refresh_uses_35_days_despite_existing_data(
+        self,
+    ) -> None:
+        site_url = "sc-domain:alpha.dk"
+        connector = FakeConnector(
+            [], {site_url: [metric(date(2026, 7, 24), 9)]}
+        )
+        self.database.upsert_search_console_property(
+            site_url=site_url, permission_level="siteOwner",
+            website_id="alpha.dk", active=True,
+        )
+        self.database.upsert_search_console_daily_metric(
+            website_id="alpha.dk", site_url=site_url,
+            metric_date="2026-07-24", clicks=1, impressions=10,
+            ctr=.1, average_position=5,
+        )
+        result = self.service(connector).sync_all_properties(
+            force_full_refresh=True,
+            reference_date=date(2026, 7, 25),
+        )
+        self.assertEqual(
+            [(site_url, "2026-06-21", "2026-07-25")],
+            connector.metric_requests,
+        )
+        self.assertEqual("full", result.import_mode)
+        self.assertEqual(1, result.rows_updated)
+        rows = self.database.get_search_console_daily_metrics("alpha.dk")
+        self.assertEqual(1, len(rows))
+        self.assertEqual(9, rows[0]["clicks"])
+
+    def test_incremental_import_respects_website_filter(self) -> None:
+        connector = FakeConnector([], {})
+        for website in ("alpha.dk", "beta.dk"):
+            self.database.upsert_search_console_property(
+                site_url=f"sc-domain:{website}",
+                permission_level="siteOwner",
+                website_id=website,
+                active=True,
+            )
+        result = self.service(connector).sync_all_properties(
+            website_ids=["beta.dk"],
+            force_full_refresh=False,
+            reference_date=date(2026, 7, 25),
+        )
+        self.assertEqual(1, result.properties_processed)
+        self.assertEqual(
+            ["sc-domain:beta.dk"], connector.metric_calls
+        )
 
     def test_reimport_updates_without_duplicates(self) -> None:
         site_url = "sc-domain:alpha.dk"

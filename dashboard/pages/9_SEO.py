@@ -46,7 +46,11 @@ def run_search_console_import(
     report(10, "Kontrollerer Search Console-forbindelsen…")
     properties = service.synchronize()
     report(35, f"{properties.matched} websites matchet. Henter søgedata…")
-    metrics = service.sync_all_properties(days=days, website_ids=website_ids)
+    metrics = service.sync_all_properties(
+        days=days,
+        website_ids=website_ids,
+        force_full_refresh=True,
+    )
     report(60, "Henter sider, søgeord og kombinationer…")
     dimensions = service.sync_dimensions(website_ids=website_ids)
     report(90, "Opdaterer dashboardets oversigter…")

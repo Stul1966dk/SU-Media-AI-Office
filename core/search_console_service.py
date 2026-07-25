@@ -11,6 +11,10 @@ from .database import Database
 from .website_registry import WebsiteRegistry
 
 
+DEFAULT_DAILY_IMPORT_DAYS = 35
+DAILY_IMPORT_OVERLAP_DAYS = 5
+
+
 @dataclass(frozen=True)
 class SearchConsoleSyncResult:
     """Structured status from property discovery."""
@@ -33,6 +37,9 @@ class SearchConsoleDataSyncResult:
     rows_updated: int
     start_date: str
     end_date: str
+    earliest_fetched_date: str
+    latest_fetched_date: str
+    import_mode: str
     errors: list[dict[str, str]]
 
 
@@ -94,14 +101,17 @@ class SearchConsoleService:
 
     def sync_all_properties(
         self,
-        days: int = 35,
+        days: int = DEFAULT_DAILY_IMPORT_DAYS,
         website_ids: list[str] | None = None,
+        *,
+        force_full_refresh: bool = True,
+        reference_date: date | None = None,
     ) -> SearchConsoleDataSyncResult:
         """Synchronize daily data for every active, matched property."""
         if days < 1:
             raise ValueError("days skal være mindst 1.")
-        end_date = date.today()
-        start_date = end_date - timedelta(days=days - 1)
+        end_date = reference_date or date.today()
+        full_start_date = end_date - timedelta(days=days - 1)
         active_websites = set(self.database.get_active_website_ids())
         properties = [
             item
@@ -115,14 +125,35 @@ class SearchConsoleService:
         created = 0
         updated = 0
         errors: list[dict[str, str]] = []
+        fetched_start_dates: list[date] = []
+        property_modes: list[str] = []
 
         for item in properties:
             processed += 1
             try:
+                latest_stored = (
+                    None if force_full_refresh
+                    else self.database.get_latest_search_console_metric_date(
+                        item["website_id"]
+                    )
+                )
+                if latest_stored:
+                    property_start_date = (
+                        date.fromisoformat(latest_stored)
+                        - timedelta(days=DAILY_IMPORT_OVERLAP_DAYS)
+                    )
+                    property_mode = "incremental"
+                else:
+                    property_start_date = full_start_date
+                    property_mode = "full"
+                fetched_start_dates.append(property_start_date)
+                property_modes.append(property_mode)
                 result = self.sync_property(
                     site_url=item["site_url"],
                     website_id=item["website_id"],
                     days=days,
+                    start_date=property_start_date,
+                    end_date=end_date,
                 )
             except Exception as error:
                 failed += 1
@@ -142,13 +173,24 @@ class SearchConsoleService:
             created += result["rows_created"]
             updated += result["rows_updated"]
 
+        import_mode = (
+            property_modes[0]
+            if property_modes and len(set(property_modes)) == 1
+            else "mixed" if property_modes
+            else "full" if force_full_refresh
+            else "incremental"
+        )
+        earliest = min(fetched_start_dates, default=full_start_date)
         return SearchConsoleDataSyncResult(
             properties_processed=processed,
             properties_failed=failed,
             rows_created=created,
             rows_updated=updated,
-            start_date=start_date.isoformat(),
+            start_date=earliest.isoformat(),
             end_date=end_date.isoformat(),
+            earliest_fetched_date=earliest.isoformat(),
+            latest_fetched_date=end_date.isoformat(),
+            import_mode=import_mode,
             errors=errors,
         )
 
@@ -291,17 +333,23 @@ class SearchConsoleService:
         self,
         site_url: str,
         website_id: str,
-        days: int = 35,
+        days: int = DEFAULT_DAILY_IMPORT_DAYS,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> dict[str, int]:
         """Fetch and persist the latest daily metrics for one property."""
         if days < 1:
             raise ValueError("days skal være mindst 1.")
-        end_date = date.today()
-        start_date = end_date - timedelta(days=days - 1)
+        resolved_end_date = end_date or date.today()
+        resolved_start_date = (
+            start_date
+            or resolved_end_date - timedelta(days=days - 1)
+        )
         metrics = self.get_property_metrics(
             site_url,
-            start_date.isoformat(),
-            end_date.isoformat(),
+            resolved_start_date.isoformat(),
+            resolved_end_date.isoformat(),
         )
         created = 0
         updated = 0

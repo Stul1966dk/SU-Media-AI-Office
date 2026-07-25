@@ -19,6 +19,12 @@ og Executive Briefing startes heller ikke automatisk.
 Hvis Search Console fejler, springes dagstal og SEO History over. Partner Ads,
 Website Intelligence og systemstatus forsøges fortsat.
 
+Den normale Search Console-dagstalsimport er trinvis. For hvert tilknyttet
+website genhentes et overlap, der starter fem kalenderdage før seneste gemte
+dato. Websites uden eksisterende dagstal bruger 35 dage, og den eksplicitte
+manuelle Search Console-import bruger ligeledes en tvungen 35-dagesperiode.
+Ældre historiske dagstal hentes ikke igen ved normal synkronisering.
+
 ## Feature runs
 
 Tabellen `feature_runs` gemmer funktionsnavn, status, start, afslutning,

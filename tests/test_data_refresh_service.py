@@ -36,7 +36,10 @@ class DataRefreshServiceTests(unittest.TestCase):
         search.sync_all_properties.return_value = SearchConsoleDataSyncResult(
             properties_processed=2, properties_failed=0,
             rows_created=3, rows_updated=4, start_date="2026-01-01",
-            end_date="2026-02-01", errors=[],
+            end_date="2026-02-01",
+            earliest_fetched_date="2026-01-01",
+            latest_fetched_date="2026-02-01",
+            import_mode="incremental", errors=[],
         )
         search.sync_dimensions.return_value = SearchConsoleDimensionSyncResult(
             properties_processed=2, properties_failed=0, page_rows=10,
@@ -85,6 +88,22 @@ class DataRefreshServiceTests(unittest.TestCase):
         self.assertEqual(len(DataRefreshService.STEPS), result["completed_steps"])
         self.assertEqual(0, result["failed_steps"])
         service.database.replace_priority_task_scores.assert_called_once()
+        search = service._test_parts[1]
+        search.sync_all_properties.assert_called_once_with(
+            days=35, website_ids=None, force_full_refresh=False
+        )
+
+    def test_manual_website_scope_reaches_incremental_daily_import(
+        self,
+    ) -> None:
+        service = self._service()
+        service.refresh_all(website_ids=["alpha.dk"])
+        search = service._test_parts[1]
+        search.sync_all_properties.assert_called_once_with(
+            days=35,
+            website_ids=["alpha.dk"],
+            force_full_refresh=False,
+        )
 
     def test_independent_steps_continue_and_seo_is_skipped_after_search_error(
         self,
