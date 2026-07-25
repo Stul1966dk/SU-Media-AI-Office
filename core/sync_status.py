@@ -5,6 +5,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from core.refresh_status import (
+    canonical_status, result_status, status_label, summarize_steps,
+)
 
 INTEGRATIONS = (
     ("partner_ads", "Partner Ads", "Partner Ads"),
@@ -43,7 +46,7 @@ def load_sync_status(database: Any) -> dict[str, Any]:
         for key, label, step_name in INTEGRATIONS
     ]
     return {
-        "overall_status": _overall_status(items),
+        "overall_status": _overall_status(items, refresh),
         "items": items,
         "last_refresh_started": refresh.get("started_at"),
         "last_refresh_completed": refresh.get("completed_at"),
@@ -90,7 +93,10 @@ def _step_item(
     )
     details = values.get(details_key, []) if details_key else []
     errors = _error_count(values, details)
-    status = _status_label(values.get("status"), errors, bool(step or run))
+    status = (
+        "Ikke kørt endnu" if not (step or run)
+        else status_label(canonical_status(values))
+    )
     last_attempt = (
         (run or {}).get("completed_at") or (run or {}).get("started_at")
     )
@@ -127,14 +133,12 @@ def _step_item(
 
 
 def _combined_derived(label: str, parts: list[dict[str, Any]]) -> dict[str, Any]:
-    if not parts:
-        status = "Ikke kørt endnu"
-    elif any(part.get("status") == "error" for part in parts):
-        status = "Fejlet"
-    elif any(part.get("status") == "skipped" for part in parts):
-        status = "Sprunget over"
-    else:
-        status = "Gennemført"
+    status = (
+        "Ikke kørt endnu" if not parts
+        else status_label(summarize_steps(
+            parts, critical_steps={str(part.get("step")) for part in parts}
+        )["status"])
+    )
     return {
         "key": "derived", "label": label, "status": status,
         "last_attempt": None, "last_success": None,
@@ -174,27 +178,26 @@ def _openai_item(
     }
 
 
-def _status_label(raw: Any, errors: int, has_data: bool) -> str:
-    if not has_data:
-        return "Ikke kørt endnu"
-    if raw in {"error", "failed", "failure"}:
-        return "Fejlet"
-    if raw in {"warning", "completed_with_warnings"}:
-        return "Gennemført med advarsler"
-    if raw in {"skipped", "skip"}:
-        return "Sprunget over"
-    if errors:
-        return "Gennemført med advarsler"
-    return "Gennemført"
-
-
-def _overall_status(items: list[dict[str, Any]]) -> str:
-    statuses = {item["status"] for item in items}
-    if statuses == {"Ikke kørt endnu"}:
+def _overall_status(
+    items: list[dict[str, Any]], refresh: dict[str, Any]
+) -> str:
+    if not refresh and all(
+        item["status"] == "Ikke kørt endnu" for item in items
+    ):
         return "Ingen synkronisering er kørt endnu"
-    if "Fejlet" in statuses:
+    status = (
+        result_status(refresh)
+        if any(key in refresh for key in (
+            "status", "completed_steps", "warning_steps", "failed_steps"
+        ))
+        else summarize_steps([
+            step for step in refresh.get("steps", [])
+            if isinstance(step, dict)
+        ])["status"]
+    )
+    if status == "error":
         return "En eller flere integrationer fejler"
-    if "Gennemført med advarsler" in statuses:
+    if status == "warning":
         return "Synkronisering gennemført med advarsler"
     return "Alle integrationer fungerer"
 

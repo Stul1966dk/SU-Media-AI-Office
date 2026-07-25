@@ -14,6 +14,7 @@ from core.plausible_import import PlausibleImportService
 from core.experiment_monitoring import ExperimentMonitoringService
 from core.seo_history import SEOHistory
 from core.system_health import check_runtime_services
+from core.refresh_status import classify_step, normalize_step, summarize_steps
 from core.website_registry import WebsiteRegistry
 from integrations.search_console_integration import SearchConsoleIntegration
 
@@ -126,7 +127,7 @@ class DataRefreshService:
                 "Search Console-dagstal",
                 lambda: self.refresh_search_console(website_ids), notify, steps,
             )
-        if daily["status"] != "completed":
+        if daily["status"] not in {"success", "warning"}:
             dimensions = self._skip(
                 "Search Console-sider og søgeord",
                 "Ikke kørt, fordi Search Console-opdateringen fejlede.",
@@ -222,22 +223,19 @@ class DataRefreshService:
             notify, steps, changes["unknown"], selected,
         )
         completed = datetime.now().astimezone()
+        summary = summarize_steps(steps)
         result = {
             "started_at": started.isoformat(timespec="seconds"),
             "completed_at": completed.isoformat(timespec="seconds"),
             "duration_seconds": round((completed - started).total_seconds(), 1),
             "steps": steps,
-            "completed_steps": sum(x["status"] == "completed" for x in steps),
-            "failed_steps": sum(x["status"] == "error" for x in steps),
-            "skipped_steps": sum(x["status"] == "skipped" for x in steps),
+            **summary,
             "optional_steps": ["Website Discovery", "Content Explorer"],
         }
         try:
             self.database.save_feature_run(
                 feature_name="data_refresh_all",
-                status=(
-                    "error" if result["failed_steps"] else "success"
-                ),
+                status=result["status"],
                 started_at=result["started_at"],
                 completed_at=result["completed_at"],
                 records_processed=len(steps),
@@ -245,11 +243,12 @@ class DataRefreshService:
                 records_updated=result["skipped_steps"],
                 error_type=(
                     "PartialRefreshError"
-                    if result["failed_steps"] else None
+                    if result["status"] in {"warning", "error"} else None
                 ),
                 error_message=(
-                    f"{result['failed_steps']} trin fejlede."
-                    if result["failed_steps"] else None
+                    f"{result['failed_steps']} trin fejlede og "
+                    f"{result['warning_steps']} trin havde advarsler."
+                    if result["status"] in {"warning", "error"} else None
                 ),
             )
         except Exception:
@@ -389,8 +388,11 @@ class DataRefreshService:
         for component, health in checks.items():
             self.database.set_system_health(component, health)
         openai = checks.get("openai", {})
+        failed = sum(not bool(item.get("is_ok")) for item in checks.values())
         return {
             "checks": len(checks),
+            "checks_succeeded": len(checks) - failed,
+            "checks_failed": failed,
             "openai": openai,
             "openai_test_calls_executed": int(
                 openai.get("openai_test_calls_executed", 0)
@@ -545,14 +547,13 @@ class DataRefreshService:
     ) -> dict[str, Any]:
         if not websites:
             if unknown_sources:
-                result = {
-                    "step": name,
-                    "status": "warning",
+                result = normalize_step(name, "warning", {
                     "reason": (
                         "Kunne ikke afgøre ændringer, fordi en nødvendig "
                         "datakilde fejlede"
                     ),
-                }
+                    "warnings": ["Nødvendig datakilde fejlede"],
+                })
                 steps.append(result)
                 notify(name, "warning", result)
             else:
@@ -650,16 +651,13 @@ class DataRefreshService:
             result = {
                 "step": name, "status": "error",
                 "error_type": type(error).__name__,
-                "error_message": str(error)[:300],
+                "error_message": "Trinnets hovedopgave fejlede.",
             }
         else:
-            outcome = values.get("overall_status")
-            status = {
-                "completed_with_warnings": "warning",
-                "skipped": "skipped",
-                "failed": "error",
-            }.get(outcome, "completed")
-            result = {"step": name, "status": status, **values}
+            status = classify_step(values)
+            result = normalize_step(name, status, values)
+        if result.get("status") == "error" and "processed" not in result:
+            result = normalize_step(name, "error", result)
         steps.append(result)
         notify(name, result["status"], result)
         return result
@@ -669,7 +667,9 @@ class DataRefreshService:
         name: str, reason: str, notify: Progress,
         steps: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        result = {"step": name, "status": "skipped", "reason": reason}
+        result = normalize_step(
+            name, "skipped", {"reason": reason, "skipped": 1}
+        )
         steps.append(result)
         notify(name, "skipped", result)
         return result

@@ -1,6 +1,7 @@
 """Read-only Streamlit dashboard for SU Media AI Office."""
 
 import sys
+import inspect
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,9 @@ from dashboard.components.website_selector import get_selected_website_id
 from dashboard.components.startup_sync import render_startup_sync_status
 from core.system_health import check_runtime_services
 from core.data_refresh_service import DataRefreshService
+from core.refresh_status import (
+    canonical_status, result_status, status_label,
+)
 
 
 DASHBOARD_WIDGET_COUNT = 28
@@ -47,9 +51,14 @@ SEO_TRENDS = ("growing", "stable", "declining", "critical")
 @st.cache_data(ttl=300, show_spinner=False)
 def _runtime_health(_database: Any) -> dict[str, dict[str, Any]]:
     """Run external/runtime checks at most once every five minutes."""
-    return check_runtime_services(
-        project_root=PROJECT_ROOT, database=_database
-    )
+    parameters = inspect.signature(check_runtime_services).parameters
+    if "database" in parameters:
+        return check_runtime_services(
+            project_root=PROJECT_ROOT, database=_database
+        )
+    # A Streamlit hot reload can temporarily retain the pre-Sprint 8
+    # function object. Keep the Dashboard usable until the process restarts.
+    return check_runtime_services(project_root=PROJECT_ROOT)
 
 
 def main() -> None:
@@ -166,13 +175,21 @@ def _render_data_refresh() -> None:
             database.close()
     if not result:
         return
-    st.success("Dataopdateringen er afsluttet")
+    aggregate_status = result_status(result)
+    if aggregate_status == "error":
+        st.error("Dataopdateringen fejlede")
+    elif aggregate_status == "warning":
+        st.warning("Dataopdateringen er gennemført med advarsler")
+    else:
+        st.success("Dataopdateringen er gennemført")
     st.write(
         f"**Start:** {format_datetime(result['started_at'])}  \n"
         f"**Slut:** {format_datetime(result['completed_at'])}  \n"
         f"**Varighed:** {result['duration_seconds']:.1f} sek.  \n"
         f"**Gennemførte trin:** {result['completed_steps']}  \n"
-        f"**Trin med fejl:** {result['failed_steps']}"
+        f"**Trin med advarsler:** {result.get('warning_steps', 0)}  \n"
+        f"**Trin med fejl:** {result['failed_steps']}  \n"
+        f"**Oversprungne trin:** {result.get('skipped_steps', 0)}"
     )
     for step in result["steps"]:
         st.write(
@@ -250,10 +267,9 @@ def _refresh_step(result: dict[str, Any], name: str) -> dict[str, Any]:
 
 
 def _refresh_status_label(status: str) -> str:
-    return {
-        "running": "Kører", "completed": "Gennemført",
-        "error": "Fejl", "skipped": "Ikke kørt",
-    }.get(status, status)
+    if status == "running":
+        return "Kører"
+    return status_label(canonical_status({"status": status}))
 
 
 def _render_system_status(data: DashboardData) -> None:

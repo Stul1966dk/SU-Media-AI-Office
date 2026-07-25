@@ -105,7 +105,7 @@ class DataRefreshServiceTests(unittest.TestCase):
             force_derived_refresh=True,
         )
         completed = [
-            step for step, status in events if status == "completed"
+            step for step, status in events if status == "success"
         ]
         self.assertEqual(
             [

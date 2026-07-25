@@ -9,6 +9,7 @@ from typing import Any, Callable, MutableMapping
 import streamlit as st
 
 from core.data_refresh_service import DataRefreshService
+from core.refresh_status import result_status
 from dashboard.components.database import open_database
 from dashboard.components.formatting import format_datetime
 
@@ -20,6 +21,7 @@ SESSION_KEYS = {
     "started": "startup_sync_started",
     "completed": "startup_sync_completed",
     "failed": "startup_sync_failed",
+    "warning": "startup_sync_warning",
     "started_at": "startup_sync_started_at",
     "completed_at": "startup_sync_completed_at",
     "future": "startup_sync_future",
@@ -53,6 +55,7 @@ def ensure_startup_sync(
     state.setdefault(SESSION_KEYS["started"], False)
     state.setdefault(SESSION_KEYS["completed"], False)
     state.setdefault(SESSION_KEYS["failed"], False)
+    state.setdefault(SESSION_KEYS["warning"], False)
     state.setdefault(SESSION_KEYS["started_at"], None)
     state.setdefault(SESSION_KEYS["completed_at"], None)
     state.setdefault(SESSION_KEYS["error_type"], None)
@@ -82,20 +85,29 @@ def run_startup_sync(
     except Exception as caught:
         error = caught
     completed_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    aggregate_status = (
+        "error" if error is not None else result_status(result)
+    )
     failed_steps = int((result or {}).get("failed_steps", 0))
-    failed = error is not None or failed_steps > 0
+    warning_steps = int((result or {}).get("warning_steps", 0))
+    failed = aggregate_status == "error"
     error_type = (
         type(error).__name__ if error is not None
-        else "PartialRefreshError" if failed_steps else None
+        else "PartialRefreshWarning"
+        if aggregate_status == "warning" else None
     )
     error_message = (
-        str(error) if error is not None
-        else f"{failed_steps} trin fejlede." if failed_steps else None
+        "Opstartssynkroniseringen fejlede." if error is not None
+        else (
+            f"{failed_steps} trin fejlede og {warning_steps} trin havde "
+            "advarsler."
+            if aggregate_status == "warning" else None
+        )
     )
     try:
         database.save_feature_run(
             feature_name="data_refresh_app_start",
-            status="error" if failed else "success",
+            status=aggregate_status,
             started_at=started_at,
             completed_at=completed_at,
             records_processed=len((result or {}).get("steps", [])),
@@ -109,6 +121,7 @@ def run_startup_sync(
     return {
         "completed": not failed,
         "failed": failed,
+        "warning": aggregate_status == "warning",
         "started_at": started_at,
         "completed_at": completed_at,
         "error_type": error_type,
@@ -126,6 +139,7 @@ def _poll_future(state: MutableMapping[str, Any]) -> bool:
         result = {
             "completed": False,
             "failed": True,
+            "warning": False,
             "completed_at": datetime.now().astimezone().isoformat(
                 timespec="seconds"
             ),
@@ -133,6 +147,7 @@ def _poll_future(state: MutableMapping[str, Any]) -> bool:
         }
     state[SESSION_KEYS["completed"]] = bool(result["completed"])
     state[SESSION_KEYS["failed"]] = bool(result["failed"])
+    state[SESSION_KEYS["warning"]] = bool(result.get("warning", False))
     state[SESSION_KEYS["completed_at"]] = result["completed_at"]
     state[SESSION_KEYS["error_type"]] = result.get("error_type")
     state.pop(SESSION_KEYS["future"], None)
@@ -157,6 +172,10 @@ def _render_status_content(state: MutableMapping[str, Any]) -> None:
         st.info("Automatisk synkronisering er slået fra")
     elif state.get(SESSION_KEYS["failed"]):
         st.error("Synkronisering ved app-start fejlede")
+    elif state.get(SESSION_KEYS["warning"]):
+        st.warning(
+            "Synkronisering ved app-start er gennemført med advarsler"
+        )
     elif state.get(SESSION_KEYS["completed"]):
         st.success("Synkronisering ved app-start er gennemført")
     else:
