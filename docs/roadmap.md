@@ -310,6 +310,16 @@ Kandidater optages først i en version, når forventet værdi og målemetode er 
 - Implementeret: planlagt eksperiment, baseline, URL-lås og implementeringsknap.
 - Senere: tilslutning af en dokumenteret, licenseret SERP-datakilde.
 
+# Opfølgning efter Sprint 4 – Plausible
+
+Disse punkter er registreret til senere prioritering og er ikke implementeret:
+
+- [ ] Tilføj mulighed for at gemme et særskilt Plausible-site-id pr. website,
+  så integrationen ikke altid behøver at bruge domænet som site-id.
+- [ ] Udvid Dashboardets integrationsstatus med resultat pr. website,
+  importperiode, antal oprettede og opdaterede rækker, årsager til overspring
+  samt fejl.
+
 # Sprint 38 - Afsluttet
 
 - Produktionsdato: 22. juli 2026

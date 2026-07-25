@@ -222,6 +222,24 @@ overlapperioden kan upsertes med eventuelle efterjusteringer fra Search
 Console. Første import og en tvungen fuld opdatering bruger 35 kalenderdage.
 Data ældre end overlapperioden hentes ikke igen under normal drift.
 
+### `plausible_daily_metrics`
+
+Indeholder Plausibles daglige besøgstal pr. website.
+
+| Felt | Beskrivelse |
+| --- | --- |
+| `id` | Intern unik identifikator |
+| `website_id` | Website fra Website Registry |
+| `metric_date` | Afsluttet lokal kalenderdag |
+| `visitors` | Unikke besøgende |
+| `created_at` | Første importtidspunkt |
+| `updated_at` | Seneste importtidspunkt |
+
+Kombinationen af `website_id` og `metric_date` er unik. Normal import starter
+to kalenderdage før seneste gemte dato for det konkrete website og slutter
+på seneste afsluttede dag. Første og tvungen import bruger 30 afsluttede
+dage. Overlaprækker opdateres via upsert uden dubletter.
+
 ### `seo_health_history`
 
 Indeholder deterministiske SEO Health-snapshots for 7, 28 og 90 dage sammenlignet med den foregående periode af samme længde.

@@ -2257,6 +2257,20 @@ class Database:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_latest_plausible_metric_date(
+        self, website_id: str
+    ) -> str | None:
+        """Return the latest stored Plausible date for one website."""
+        row = self._connection.execute(
+            """
+            SELECT MAX(metric_date) AS latest_date
+            FROM plausible_daily_metrics
+            WHERE website_id = ?
+            """,
+            (website_id,),
+        ).fetchone()
+        return row["latest_date"] if row and row["latest_date"] else None
+
     def get_search_console_daily_metrics(
         self,
         website_id: str | None = None,

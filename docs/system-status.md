@@ -25,6 +25,12 @@ dato. Websites uden eksisterende dagstal bruger 35 dage, og den eksplicitte
 manuelle Search Console-import bruger ligeledes en tvungen 35-dagesperiode.
 Ældre historiske dagstal hentes ikke igen ved normal synkronisering.
 
+Plausible-dagstal importeres ligeledes trinvist pr. website. Overlapperioden
+starter to kalenderdage før seneste gemte Plausible-dato og slutter på
+seneste afsluttede dag. Første og tvungen import bruger 30 afsluttede dage.
+Inaktive eller ukonfigurerede websites springes over med en årsag, og
+enkeltfejl rapporteres som advarsler uden at stoppe de øvrige websites.
+
 ## Feature runs
 
 Tabellen `feature_runs` gemmer funktionsnavn, status, start, afslutning,

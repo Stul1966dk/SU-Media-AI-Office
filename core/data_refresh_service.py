@@ -135,7 +135,12 @@ class DataRefreshService:
                 lambda: self.refresh_search_console_dimensions(website_ids),
                 notify, steps,
             )
-        self._run("Plausible", self.refresh_plausible, notify, steps)
+        self._run(
+            "Plausible",
+            lambda: self.refresh_plausible(website_ids),
+            notify,
+            steps,
+        )
         if daily["status"] != "completed":
             self._skip(
                 "SEO History",
@@ -236,8 +241,13 @@ class DataRefreshService:
             "websites_updated": len({item.website for item in results}),
         }
 
-    def refresh_plausible(self) -> dict[str, Any]:
-        return self.plausible_import.import_active_websites()
+    def refresh_plausible(
+        self, website_ids: list[str] | None = None
+    ) -> dict[str, Any]:
+        return self.plausible_import.import_active_websites(
+            website_ids=website_ids,
+            force_full_refresh=False,
+        )
 
     def refresh_website_intelligence(self) -> dict[str, Any]:
         result = self.intelligence.analyze_all_sites()

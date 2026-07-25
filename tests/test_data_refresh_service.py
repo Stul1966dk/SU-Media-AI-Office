@@ -57,9 +57,12 @@ class DataRefreshServiceTests(unittest.TestCase):
         )
         plausible = Mock()
         plausible.import_active_websites.return_value = {
+            "websites_evaluated": 2,
             "websites_attempted": 2, "websites_updated": 2,
+            "websites_processed": 2, "websites_skipped": 0,
             "datapoints_saved": 60, "rows_created": 60,
             "rows_updated": 0, "errors": [], "websites_failed": 0,
+            "overall_status": "completed",
         }
         service = DataRefreshService(
             database, registry=registry,
@@ -92,6 +95,10 @@ class DataRefreshServiceTests(unittest.TestCase):
         search.sync_all_properties.assert_called_once_with(
             days=35, website_ids=None, force_full_refresh=False
         )
+        plausible = service._test_parts[4]
+        plausible.import_active_websites.assert_called_once_with(
+            website_ids=None, force_full_refresh=False
+        )
 
     def test_manual_website_scope_reaches_incremental_daily_import(
         self,
@@ -103,6 +110,10 @@ class DataRefreshServiceTests(unittest.TestCase):
             days=35,
             website_ids=["alpha.dk"],
             force_full_refresh=False,
+        )
+        plausible = service._test_parts[4]
+        plausible.import_active_websites.assert_called_once_with(
+            website_ids=["alpha.dk"], force_full_refresh=False
         )
 
     def test_independent_steps_continue_and_seo_is_skipped_after_search_error(
@@ -118,7 +129,9 @@ class DataRefreshServiceTests(unittest.TestCase):
         search.sync_all_properties.assert_not_called()
         seo.analyze_all_sites.assert_not_called()
         intelligence.analyze_all_sites.assert_called_once()
-        plausible.import_active_websites.assert_called_once()
+        plausible.import_active_websites.assert_called_once_with(
+            website_ids=None, force_full_refresh=False
+        )
 
 
 class BriefingReadinessTests(unittest.TestCase):

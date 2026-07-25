@@ -187,6 +187,20 @@ Google OAuth (read-only)
 
 Dashboardet viser forbindelsesstatus, property-antal, seneste synkronisering, antal gemte dagspunkter og fordelingen af 28-dages SEO Health. Terminalen viser importresultatet, op til fem websites med størst fald i klik og de fem laveste 28-dages SEO-scorer. Analysen opretter ingen opgaver eller Orchestrator-hændelser, bruger ikke Project Manager og sender ingen Telegram-beskeder.
 
+## Plausible
+
+`core/plausible_import.py` gemmer daglige besøgstal fra Plausible Stats API.
+Normal synkronisering beregnes separat pr. website og starter to kalenderdage
+før seneste gemte dato. Slutdatoen er altid den seneste afsluttede lokale
+kalenderdag. Første import og en tvungen fuld import bruger de seneste 30
+afsluttede dage; ældre historik hentes ikke igen ved normal drift.
+
+Website-domænet bruges fortsat som Plausible site-id, medmindre service-data
+indeholder et eksplicit `plausible_site_id`. Inaktive websites, manglende
+site-id og websites uden Plausible-statistik springes over med en årsag.
+En sikker API-fejl, herunder afvist token, isoleres til det enkelte website,
+mens de øvrige websites fortsætter.
+
 ## SEO Manager
 
 `agents/seo_manager.py` er den første specialistagent. Den bruger 28-dages `SEOHealth` og ignorerer websites med status `phasing_out`, `archived` eller `cancelled`. Et recovery-projekt kræver dokumenteret forværring: score under 35, `critical` trend, mindst 25 procent klikfald eller mindst 15 procent klikfald kombineret med dårligere placering eller CTR.
