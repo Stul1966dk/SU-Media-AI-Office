@@ -18,6 +18,10 @@ from dashboard.components.formatting import format_datetime
 from dashboard.components.help_panel import render_help_panel
 from dashboard.components.ui import load_styles, render_sidebar
 from core.sync_status import load_sync_status
+from core.integration_retry import (
+    FailedIntegrationRetryService, retry_plan,
+)
+from core.refresh_status import result_status, status_label
 from integrations.search_console import SearchConsoleAuthenticationError
 from integrations.plausible_integration import PlausibleIntegration
 from integrations.search_console_integration import SearchConsoleIntegration
@@ -45,6 +49,7 @@ def main() -> None:
     try:
         _render_search_console(SearchConsoleIntegration(PROJECT_ROOT, database))
         _render_plausible(PlausibleIntegration(database))
+        _render_failed_retry(database)
         _render_sync_status(load_sync_status(database))
     finally:
         database.close()
@@ -257,6 +262,56 @@ def _render_sync_status(model: dict) -> None:
                         use_container_width=True,
                         hide_index=True,
                     )
+
+
+def _render_failed_retry(database) -> None:
+    previous = database.get_last_data_refresh_result()
+    plan = retry_plan(previous)
+    stored_result = st.session_state.get("integration_retry_result")
+    if plan["has_concrete_failures"]:
+        if st.button(
+            "Genkør fejlede integrationer",
+            type="primary",
+            use_container_width=True,
+        ):
+            with st.spinner("Genkører kun konkrete fejl…"):
+                stored_result = FailedIntegrationRetryService(
+                    database, project_root=PROJECT_ROOT
+                ).retry()
+            st.session_state["integration_retry_result"] = stored_result
+            st.rerun()
+    elif result_status(previous) in {"warning", "error"}:
+        st.info("Ingen konkrete fejl kan genkøres automatisk")
+
+    if not stored_result:
+        return
+    status = stored_result.get("status", "skipped")
+    message = status_label(status)
+    if status == "success":
+        st.success(f"Genkørsel: {message}")
+    elif status == "warning":
+        st.warning(f"Genkørsel: {message}")
+    elif status == "error":
+        st.error(f"Genkørsel: {message}")
+    else:
+        st.info(stored_result.get(
+            "message", "Ingen konkrete fejl kan genkøres automatisk"
+        ))
+    st.caption(
+        "Kørt: " + format_datetime(stored_result.get("completed_at"))
+    )
+    rows = []
+    for item in stored_result.get("integrations", []):
+        targets = item.get("properties") or item.get("websites") or []
+        rows.append({
+            "Integration": item.get("step"),
+            "Behandlede websites/properties": ", ".join(targets)
+            if targets else "Fælles integration",
+            "Status": status_label(item.get("status", "skipped")),
+            "Fejl": item.get("error_message") or "",
+        })
+    if rows:
+        st.dataframe(rows, use_container_width=True, hide_index=True)
 
 
 def _detail_row(detail: dict) -> dict:

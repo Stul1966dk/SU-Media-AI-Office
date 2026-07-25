@@ -112,6 +112,7 @@ class SearchConsoleService:
         days: int = DEFAULT_DAILY_IMPORT_DAYS,
         website_ids: list[str] | None = None,
         *,
+        property_urls: list[str] | None = None,
         force_full_refresh: bool = True,
         reference_date: date | None = None,
     ) -> SearchConsoleDataSyncResult:
@@ -121,12 +122,19 @@ class SearchConsoleService:
         end_date = reference_date or date.today()
         full_start_date = end_date - timedelta(days=days - 1)
         active_websites = set(self.database.get_active_website_ids())
+        selected_properties = (
+            set(property_urls) if property_urls is not None else None
+        )
         properties = [
             item
             for item in self.database.get_search_console_properties()
             if item["active"] and item["website_id"]
             and item["website_id"] in active_websites
             and (website_ids is None or item["website_id"] in website_ids)
+            and (
+                selected_properties is None
+                or item["site_url"] in selected_properties
+            )
         ]
         processed = 0
         failed = 0
@@ -215,6 +223,7 @@ class SearchConsoleService:
         self, website_ids: list[str] | None = None,
         reference_date: date | None = None,
         *,
+        property_urls: list[str] | None = None,
         force_dimensions_refresh: bool = False,
         new_daily_website_ids: set[str] | None = None,
         reference_time: datetime | None = None,
@@ -233,11 +242,18 @@ class SearchConsoleService:
             (previous_start, previous_end), (current_start, current_end),
         )
         active_websites = set(self.database.get_active_website_ids())
+        selected_properties = (
+            set(property_urls) if property_urls is not None else None
+        )
         properties = [
             item for item in self.database.get_search_console_properties()
             if item["active"] and item["website_id"]
             and item["website_id"] in active_websites
             and (website_ids is None or item["website_id"] in website_ids)
+            and (
+                selected_properties is None
+                or item["site_url"] in selected_properties
+            )
         ]
         totals = {"page": 0, "query": 0, "page_query": 0}
         created = updated = failed = skipped = api_calls = 0

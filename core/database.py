@@ -4739,6 +4739,44 @@ class Database:
             return None
         return value if isinstance(value, dict) else None
 
+    def save_integration_retry_result(
+        self, result: dict[str, Any],
+        previous_refresh: dict[str, Any] | None = None,
+    ) -> None:
+        """Persist latest retry plus a bounded operational history."""
+        row = self._connection.execute(
+            "SELECT value FROM app_state WHERE key = ?",
+            ("integration_retry:history",),
+        ).fetchone()
+        try:
+            history = json.loads(row["value"]) if row else []
+        except (TypeError, json.JSONDecodeError):
+            history = []
+        if not isinstance(history, list):
+            history = []
+        history_entry = {
+            "previous_refresh": previous_refresh,
+            "retry": result,
+        }
+        history = [*history[-49:], history_entry]
+        with self._connection:
+            self._connection.executemany(
+                """
+                INSERT INTO app_state (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (
+                    (
+                        "integration_retry:last_result",
+                        json.dumps(result, ensure_ascii=False),
+                    ),
+                    (
+                        "integration_retry:history",
+                        json.dumps(history, ensure_ascii=False),
+                    ),
+                ),
+            )
+
     def set_system_health(
         self, component: str, health: dict[str, Any]
     ) -> None:
