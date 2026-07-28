@@ -23,7 +23,7 @@ from dashboard.components.database import open_database
 from dashboard.components.errors import safe_error_detail
 from dashboard.components.formatting import format_ai_assessment, format_datetime
 from dashboard.components.help_panel import render_help_panel
-from dashboard.components.ui import load_styles, render_sidebar
+from dashboard.components.ui import load_styles, render_next_step, render_sidebar
 from dashboard.components.website_selector import (
     get_selected_website_id,
     set_selected_website,
@@ -55,6 +55,14 @@ def main() -> None:
         requirements="Et aktivt website og en Website Intelligence-profil.",
         actions="Vælg et website, se datakilderne og start analysen.",
         limitations="Analysen foreslår handlinger, men udfører dem ikke.",
+    )
+    render_next_step(
+        text=(
+            "AI Analyst er et valgfrit specialistværktøj. Konkrete "
+            "arbejdsudkast og godkendelse håndteres på I dag."
+        ),
+        path="app.py",
+        label="Tilbage til I dag",
     )
     database = open_database()
     try:

@@ -44,6 +44,14 @@ def main() -> None:
         actions="Vælg et website, kontrollér status og fortsæt til I dag.",
         limitations="Siden er read-only og ændrer ikke websitet.",
     )
+    render_next_step(
+        text=(
+            "Brug siden til at kontrollere status. Det konkrete arbejde og "
+            "næste handling findes altid på I dag."
+        ),
+        path="app.py",
+        label="Gå til I dag",
+    )
 
     database = open_database()
     try:
@@ -99,14 +107,6 @@ def main() -> None:
     _render_revenue(detail)
     _render_plausible(detail)
     _render_seo(detail)
-    render_next_step(
-        text=(
-            "Status er samlet. Fortsæt til I dag for at se den vigtigste "
-            "konkrete opgave for websitet."
-        ),
-        path="app.py",
-        label="Gå til I dag",
-    )
     with st.expander("Se tekniske og historiske detaljer"):
         st.caption(
             "Disse oplysninger er dokumentation og behøver normalt ikke "

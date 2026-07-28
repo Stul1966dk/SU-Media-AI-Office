@@ -11,7 +11,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from dashboard.components.help_panel import render_help_panel
-from dashboard.components.ui import load_styles, render_page_link, render_sidebar
+from dashboard.components.ui import (
+    load_styles, render_next_step, render_page_link, render_sidebar,
+)
 from dashboard.components.database import open_database
 from dashboard.components.startup_sync import SETTING_NAME
 
@@ -30,6 +32,11 @@ def main() -> None:
         requirements="Vælg det område, du vil administrere.",
         actions="Åbn integrationer, Partner Ads eller systemstatus.",
         limitations="Oversigten ændrer ikke konfiguration eller eksterne data.",
+    )
+    render_next_step(
+        text="Når opsætningen er færdig, fortsætter det daglige arbejde på I dag.",
+        path="app.py",
+        label="Fortsæt til I dag",
     )
     st.subheader("Synkronisering")
     database = open_database()

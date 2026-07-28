@@ -21,7 +21,9 @@ from core.website_registry import WebsiteRegistry
 from dashboard.components.database import open_database
 from dashboard.components.help_panel import render_help_panel
 from dashboard.components.formatting import format_datetime
-from dashboard.components.ui import load_styles, render_sidebar, render_table
+from dashboard.components.ui import (
+    load_styles, render_next_step, render_sidebar, render_table,
+)
 from dashboard.components.website_selector import (
     get_selected_website_id,
     set_selected_website,
@@ -63,6 +65,14 @@ def main() -> None:
         actions="Scan ét website eller alle aktive websites.",
         limitations="Siden logger ikke ind, scanner ikke sårbarheder og skriver ikke til websites.",
     )
+    render_next_step(
+        text=(
+            "Efter en scanning kan du kontrollere den samlede status på "
+            "Website Profile og derefter fortsætte til I dag."
+        ),
+        path="pages/1_Website_Profile.py",
+        label="Åbn Website Profile",
+    )
     database = open_database()
     try:
         agent = build_agent(database)
@@ -79,12 +89,12 @@ def main() -> None:
             set_selected_website(selected)
         one, all_sites = st.columns(2)
         if one.button("Scan valgte website", disabled=not selected,
-                      use_container_width=True):
+                      width="stretch"):
             with st.spinner(f"Scanner {selected}…"):
                 result = agent.scan_site(selected)
             st.success("Website-scanningen er gennemført.")
         if all_sites.button("Scan alle aktive websites",
-                            use_container_width=True):
+                            width="stretch"):
             with st.spinner("Scanner aktive websites…"):
                 result = agent.scan_all_sites()
             st.success(f"{result['websites_scanned']} websites behandlet; "

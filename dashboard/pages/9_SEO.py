@@ -411,7 +411,7 @@ def _render_dimension_table(
         "CTR": f"{item['current_ctr'] * 100:.2f}%",
         "Placering": round(item["current_position"], 1),
         "Trend": item["trend"],
-    } for item in filtered[:250]], use_container_width=True, hide_index=True)
+    } for item in filtered[:250]], width="stretch", hide_index=True)
     if key_field == "page_url" and filtered:
         return st.selectbox(
             "Vis søgeord for side",

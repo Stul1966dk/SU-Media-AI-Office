@@ -11,7 +11,7 @@ from dashboard.components.database import open_database
 from dashboard.components.feature_status import build_feature_status
 from dashboard.components.formatting import format_rows
 from dashboard.components.help_panel import render_help_panel
-from dashboard.components.ui import load_styles, render_sidebar
+from dashboard.components.ui import load_styles, render_next_step, render_sidebar
 
 
 def main() -> None:
@@ -25,12 +25,17 @@ def main() -> None:
         actions="Find næste nødvendige trin for hver central funktion.",
         limitations="Siden starter ingen importer, analyser eller monitorprocesser.",
     )
+    render_next_step(
+        text="Ret eventuelle forbindelsesfejl under Integrationer. Fortsæt ellers til I dag.",
+        path="app.py",
+        label="Fortsæt til I dag",
+    )
     database = open_database()
     try:
         rows = build_feature_status(database, PROJECT_ROOT)
     finally:
         database.close()
-    st.dataframe(format_rows(rows), use_container_width=True, hide_index=True)
+    st.dataframe(format_rows(rows), width="stretch", hide_index=True)
 
 
 if __name__ == "__main__":

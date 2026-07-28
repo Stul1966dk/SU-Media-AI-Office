@@ -217,7 +217,7 @@ def render_table(
     ]
     st.dataframe(
         prepared,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 

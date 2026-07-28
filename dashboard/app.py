@@ -423,7 +423,7 @@ def _render_seo_health(
             f"{label}\n{count}",
             key=f"seo-filter-{trend}",
             type="primary" if selected_trend == trend else "secondary",
-            use_container_width=True,
+            width="stretch",
         ):
             st.session_state["seo_trend"] = (
                 None if selected_trend == trend else trend
@@ -481,7 +481,7 @@ def _render_seo_health(
                 format="%.1f",
             ),
         },
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 

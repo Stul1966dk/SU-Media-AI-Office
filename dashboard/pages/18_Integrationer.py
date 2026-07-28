@@ -16,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from dashboard.components.database import open_database
 from dashboard.components.formatting import format_datetime
 from dashboard.components.help_panel import render_help_panel
-from dashboard.components.ui import load_styles, render_sidebar
+from dashboard.components.ui import load_styles, render_next_step, render_sidebar
 from core.sync_status import load_sync_status
 from core.integration_retry import (
     FailedIntegrationRetryService, retry_plan,
@@ -43,6 +43,14 @@ def main() -> None:
         requirements="De relevante lokale API- og OAuth-oplysninger.",
         actions="Forbind, forny, afbryd eller test en integration.",
         limitations="Afbrydelse sletter ikke allerede importerede data.",
+    )
+    render_next_step(
+        text=(
+            "Når de nødvendige forbindelser er klar, fortsætter du på I dag. "
+            "Du behøver normalt ikke blive på denne side."
+        ),
+        path="app.py",
+        label="Fortsæt til I dag",
     )
     st.header("Integrationer")
     database = open_database()
@@ -142,7 +150,7 @@ def _render_plausible(integration: PlausibleIntegration) -> None:
             }
             for item in result["results"]
         ],
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     st.caption(f"Kontrolleret dato: {result['date']}")
@@ -184,17 +192,17 @@ def _render_search_console(integration: SearchConsoleIntegration) -> None:
     connect_col, reconnect_col, disconnect_col, test_col = st.columns(4)
     if connect_col.button(
         "Forbind", type="primary", disabled=status["connected"],
-        use_container_width=True,
+        width="stretch",
     ):
         _run_connection_action(integration.connect)
     if reconnect_col.button(
         "Forbind igen", disabled=not status["connected"],
-        use_container_width=True,
+        width="stretch",
     ):
         _run_connection_action(integration.reconnect)
     if disconnect_col.button(
         "Afbryd", disabled=not status["connected"],
-        use_container_width=True,
+        width="stretch",
     ):
         try:
             integration.disconnect()
@@ -207,7 +215,7 @@ def _render_search_console(integration: SearchConsoleIntegration) -> None:
     if test_col.button(
         "Test alle websites",
         disabled=not status["connected"],
-        use_container_width=True,
+        width="stretch",
     ):
         st.session_state["search_console_connection_test"] = (
             integration.test_active_websites()
@@ -239,7 +247,7 @@ def _render_search_console(integration: SearchConsoleIntegration) -> None:
                 }
                 for item in test_result["results"]
             ],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
     properties = integration.database.get_search_console_properties()
@@ -256,7 +264,7 @@ def _render_search_console(integration: SearchConsoleIntegration) -> None:
                     }
                     for item in properties
                 ],
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
     st.divider()
@@ -312,7 +320,7 @@ def _render_sync_status(model: dict) -> None:
                 ):
                     st.dataframe(
                         [_detail_row(detail) for detail in details],
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                     )
 
@@ -325,7 +333,7 @@ def _render_failed_retry(database) -> None:
         if st.button(
             "Genkør fejlede integrationer",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         ):
             with st.spinner("Genkører kun konkrete fejl…"):
                 stored_result = FailedIntegrationRetryService(
@@ -364,7 +372,7 @@ def _render_failed_retry(database) -> None:
             "Fejl": item.get("error_message") or "",
         })
     if rows:
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.dataframe(rows, width="stretch", hide_index=True)
 
 
 def _detail_row(detail: dict) -> dict:

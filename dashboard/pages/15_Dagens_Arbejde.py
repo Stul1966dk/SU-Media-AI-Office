@@ -1,6 +1,5 @@
 """The single, focused surface for today's reviewed SEO change."""
 
-import base64
 import importlib
 import sys
 from datetime import date, timedelta
@@ -9,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import streamlit as st
-import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -823,10 +821,10 @@ def _render_recommendation(
 
     accept_column, skip_column = st.columns(2)
     accept = accept_column.button(
-        "🟢 Accepter opgave", type="primary", use_container_width=True
+        "🟢 Accepter opgave", type="primary", width="stretch"
     )
     skip = skip_column.button(
-        "⚪ Spring over", use_container_width=True
+        "⚪ Spring over", width="stretch"
     )
     if accept:
         try:
@@ -865,7 +863,7 @@ def _render_implementation(
     if st.button(
         "🟢 Markér som implementeret",
         type="primary",
-        use_container_width=True,
+        width="stretch",
     ):
         try:
             queue.mark_implemented(
@@ -893,17 +891,11 @@ def _render_change_card(
     with st.container(border=True):
         st.subheader("AI anbefaler")
         st.write("**Ny title**")
-        st.markdown(
-            f"<div class='recommended-copy'>{escape(change['approved_title'])}</div>",
-            unsafe_allow_html=True,
-        )
-        _copy_button("Kopiér title", change["approved_title"], f"title-{item['id']}")
+        st.code(change["approved_title"], language=None, wrap_lines=True)
+        st.caption("Kopiér title med kopiér-ikonet i feltet.")
         st.write("**Ny metabeskrivelse**")
-        st.markdown(
-            f"<div class='recommended-copy'>{escape(change['approved_meta'])}</div>",
-            unsafe_allow_html=True,
-        )
-        _copy_button("Kopiér metabeskrivelse", change["approved_meta"], f"meta-{item['id']}")
+        st.code(change["approved_meta"], language=None, wrap_lines=True)
+        st.caption("Kopiér metabeskrivelse med kopiér-ikonet i feltet.")
 
 
 def _render_reason_card(item: dict[str, Any]) -> None:
@@ -948,27 +940,6 @@ def _short_reason(item: dict[str, Any]) -> list[str]:
     return [first, second][:2]
 
 
-def _copy_button(label: str, value: str, key: str) -> None:
-    encoded = base64.b64encode(value.encode("utf-8")).decode("ascii")
-    components.html(
-        f"""
-        <button id="{escape(key)}" class="copy-button"
-          onclick='navigator.clipboard.writeText(
-                     new TextDecoder().decode(
-                       Uint8Array.from(atob("{encoded}"), c=>c.charCodeAt(0))));
-                   this.textContent="Kopieret"'>
-          {escape(label)}
-        </button>
-        <style>
-          .copy-button {{font: 600 16px sans-serif; padding: 10px 16px;
-            border: 1px solid #b8bec7; border-radius: 8px; background: white;
-            cursor: pointer;}}
-        </style>
-        """,
-        height=52,
-    )
-
-
 def _has_concrete_change(content: dict[str, Any]) -> bool:
     return bool(
         content.get("change_type") == "title_meta"
@@ -983,11 +954,6 @@ def _load_daily_work_styles() -> None:
         <style>
           [data-testid="stMainBlockContainer"] {max-width: 880px;}
           [data-testid="stVerticalBlockBorderWrapper"] {padding: .7rem; margin: 1.3rem 0;}
-          .recommended-copy {font-size: 1.12rem; line-height: 1.6; padding: .9rem 1rem;
-            margin: .35rem 0 .55rem; border-radius: .6rem; background: #f3f6f9;
-            color: #17212b !important; font-weight: 500;
-            border: 1px solid #cbd5e1; overflow-wrap: anywhere;
-            white-space: normal;}
           .stButton button {min-height: 3.25rem; font-size: 1.05rem;}
         </style>
         """,

@@ -510,3 +510,21 @@ tilpasses, tilbageføres eller blot afvente flere data.
 Succeskriterium: AI Office udfører forarbejdet for alle opgavetyper. Brugeren
 skal kontrollere, eventuelt redigere og godkende en færdig leverance – aldrig
 selv begynde med at skrive forslagene eller udføre den indledende analyse.
+
+# Sprint 44.6 - Stabil testversion
+
+- [x] Kompilér al Python-kode og kør den fulde regression som baseline.
+- [x] Gennemgå alle synlige sider i browseren for runtime-fejl.
+- [x] Kontrollér at lokale credentials, tokens og miljøfiler ikke versionsstyres.
+- [x] Tilføj et eksplicit næste trin på alle centrale værktøjs- og
+  indstillingssider.
+- [x] Sørg for at Website Profile også har en vej videre uden profildata.
+- [x] Erstat forældede `use_container_width`-kald med Streamlits aktuelle
+  `width="stretch"`.
+- [x] Regressionstest at generelle opgaver ikke kan godkendes uden en konkret
+  leverance.
+- [x] Browsertest den konkrete AI-generering på en virkelig opgave.
+
+Succeskriterium: Appens synlige brugerflader åbner uden runtime-fejl, brugeren
+efterlades ikke uden et næste trin, og hele opgave- og måleflowet består den
+fulde regression som en sammenhængende testversion.

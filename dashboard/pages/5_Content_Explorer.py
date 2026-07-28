@@ -19,7 +19,9 @@ from core.task_engine import TaskEngine
 from core.website_registry import WebsiteRegistry
 from dashboard.components.database import open_database
 from dashboard.components.help_panel import render_help_panel
-from dashboard.components.ui import load_styles, render_sidebar, render_table
+from dashboard.components.ui import (
+    load_styles, render_next_step, render_sidebar, render_table,
+)
 from dashboard.components.website_selector import (
     get_selected_website_id,
     set_selected_website,
@@ -57,6 +59,14 @@ def main() -> None:
         requirements="Website Discovery skal have identificeret WordPress.",
         actions="Hent indhold, filtrér, søg, sortér og se metadata.",
         limitations="Siden kan ikke redigere eller publicere indhold.",
+    )
+    render_next_step(
+        text=(
+            "Når indholdet er hentet, kan du kontrollere sitets samlede "
+            "status på Website Profile."
+        ),
+        path="pages/1_Website_Profile.py",
+        label="Åbn Website Profile",
     )
     database = open_database()
     try:

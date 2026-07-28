@@ -204,6 +204,7 @@ class Sprint36ExperimentTests(unittest.TestCase):
         self.assertFalse(app.exception)
         visible = " ".join(
             [item.value for item in app.markdown]
+            + [item.value for item in app.code]
             + [item.value for item in app.success]
         )
         self.assertIn("Brugerens valgte title", visible)
@@ -218,6 +219,8 @@ class Sprint36ExperimentTests(unittest.TestCase):
         self.assertNotIn("Vis godkendelsesgrundlag", source)
         self.assertIn("Kopiér title", source)
         self.assertIn("Kopiér metabeskrivelse", source)
+        self.assertIn("st.code(", source)
+        self.assertNotIn("components.html(", source)
 
         self.database._connection.execute(
             """UPDATE approved_changes SET approved_meta = ''
@@ -281,7 +284,10 @@ class Sprint36ExperimentTests(unittest.TestCase):
             [button.label for button in app.button],
         )
         self.assertEqual("Alle websites", app.selectbox[0].value)
-        visible = " ".join(item.value for item in app.markdown)
+        visible = " ".join(
+            [item.value for item in app.markdown]
+            + [item.value for item in app.code]
+        )
         self.assertIn("Den anbefalede guide", visible)
         self.assertIn("site.dk", visible)
         self.assertNotIn("Vis analyse", visible)

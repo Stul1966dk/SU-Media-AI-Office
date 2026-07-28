@@ -19,7 +19,7 @@ from core.website_registry import WebsiteRegistry
 from dashboard.components.database import open_database
 from dashboard.components.formatting import format_datetime, format_status
 from dashboard.components.help_panel import render_help_panel
-from dashboard.components.ui import load_styles, render_sidebar
+from dashboard.components.ui import load_styles, render_next_step, render_sidebar
 from dashboard.components.website_selector import get_selected_website_id
 
 
@@ -48,6 +48,14 @@ def main() -> None:
             "Siden publicerer aldrig. Implementering sker manuelt uden for "
             "AI Office og skal bagefter markeres eksplicit."
         ),
+    )
+    render_next_step(
+        text=(
+            "Brug værktøjet til en specialiseret title/meta-analyse. Det "
+            "daglige opgaveflow og næste handling findes på I dag."
+        ),
+        path="app.py",
+        label="Tilbage til I dag",
     )
     database = open_database()
     optimizer = _optimizer(database)
