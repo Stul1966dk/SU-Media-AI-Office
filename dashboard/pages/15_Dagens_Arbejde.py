@@ -61,9 +61,12 @@ def main() -> None:
         selected = _render_website_filter(websites)
         website_id = None if selected == ALL_WEBSITES else selected
         priority_tasks = database.get_priority_task_scores(limit=None)
+        decision_reader = getattr(
+            database, "get_traffic_recommendation_decisions", None
+        )
         priority_tasks = _filter_decided_recommendations(
             priority_tasks,
-            database.get_traffic_recommendation_decisions(),
+            decision_reader() if decision_reader else [],
         )
         if website_id:
             priority_tasks = [

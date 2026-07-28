@@ -157,11 +157,12 @@ def main() -> None:
                 "plausible_only_decline",
             }
         ), None)
+        decision_reader = getattr(
+            database, "get_traffic_recommendation_decision", None
+        )
         recommendation_decision = (
-            database.get_traffic_recommendation_decision(
-                traffic_recommendation["task_key"]
-            )
-            if traffic_recommendation else None
+            decision_reader(traffic_recommendation["task_key"])
+            if traffic_recommendation and decision_reader else None
         )
     finally:
         database.close()

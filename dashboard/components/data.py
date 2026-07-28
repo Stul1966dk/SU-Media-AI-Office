@@ -66,9 +66,10 @@ def load_dashboard_data(
     )
     if not isinstance(persisted_priority_tasks, list):
         persisted_priority_tasks = []
-    decisions = _safe(
-        database.get_traffic_recommendation_decisions, []
+    decision_reader = getattr(
+        database, "get_traffic_recommendation_decisions", None
     )
+    decisions = _safe(decision_reader, []) if decision_reader else []
     if not isinstance(decisions, list):
         decisions = []
     persisted_priority_tasks = _filter_decided_recommendations(
