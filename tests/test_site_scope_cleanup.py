@@ -78,6 +78,17 @@ class SiteScopeCleanupTests(unittest.TestCase):
         self.assertFalse(self.database.get_website("remove.dk")["active"])
         self.assertFalse(self.database.get_website("inactive.dk")["active"])
 
+    def test_websites_page_uses_checkbox_editor_instead_of_multiselect(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "dashboard" / "pages" / "11_Websites.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("st.data_editor(", source)
+        self.assertIn("st.column_config.CheckboxColumn(", source)
+        self.assertIn('"Gem aktive websites"', source)
+        self.assertNotIn("st.multiselect(", source)
+
 
 if __name__ == "__main__":
     unittest.main()

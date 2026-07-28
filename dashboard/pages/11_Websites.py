@@ -1,4 +1,4 @@
-"""Operational overview of every registered website."""
+"""Operational overview and activation control for registered websites."""
 
 import sys
 from datetime import date
@@ -11,13 +11,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from dashboard.components.database import open_database
-from dashboard.components.help_panel import render_help_panel
 from dashboard.components.formatting import format_rows
+from dashboard.components.help_panel import render_help_panel
 from dashboard.components.ui import load_styles, render_sidebar
-from dashboard.components.website_selector import (
-    get_selected_website_id,
-    set_selected_website,
-)
 
 
 def _year_commission(sales: list[dict]) -> float:
@@ -34,14 +30,18 @@ def main() -> None:
     render_sidebar()
     st.title("Websites")
     render_help_panel(
-        purpose="Giv et samlet drifts- og resultatblik på alle registrerede websites.",
-        requirements="Websites skal være registreret; øvrige kolonner udfyldes af importer.",
+        purpose="Giv et samlet drifts- og resultatblik på registrerede websites.",
+        requirements=(
+            "Websites skal være registreret; øvrige kolonner udfyldes af "
+            "importer."
+        ),
         actions=(
-            "Vælg et website for at aktivere eller deaktivere det, eller klik "
-            "på en række for at åbne Website Profile."
+            "Sæt eller fjern fluebenet i kolonnen Aktiv, og gem derefter "
+            "ændringerne."
         ),
         limitations=(
-            "Statusændringer kræver bekræftelse og sletter ingen historiske data."
+            "Deaktivering stopper fremtidig behandling, men sletter ingen "
+            "historiske data."
         ),
     )
     database = open_database()
@@ -62,9 +62,11 @@ def main() -> None:
             source = database.get_website_intelligence_source(website_id) or {}
             seo = source.get("seo_health") or {}
             partner = source.get("partner_ads") or {}
+            manageable = website.get("status") in {"active", "inactive"}
             rows.append({
+                "Aktiv": bool(website["active"]) and manageable,
                 "Website": website_id,
-                "Status": "active" if website["active"] else "inactive",
+                "Status": website.get("status", "inactive"),
                 "Monetiseret": "Ja" if website.get("monetized") else "Nej",
                 "Prioritet": website.get("priority", ""),
                 "Niche": website.get("niche", ""),
@@ -79,113 +81,81 @@ def main() -> None:
                 "Aktive projekter": len(source.get("active_projects", [])),
                 "Åbne opgaver": len(source.get("active_tasks", [])),
                 "Seneste scanning": (
-                    discoveries.get(website_id, {}).get("scanned_at", "Ikke kørt")
+                    discoveries.get(website_id, {}).get(
+                        "scanned_at", "Ikke kørt"
+                    )
                 ),
             })
     finally:
         database.close()
+
     if not rows:
-        st.info("Ingen websites er registreret. Tilføj først et website i registry.")
-        return
-    options = [website["website"] for website in websites]
-    current = get_selected_website_id()
-    managed_id = st.selectbox(
-        "Administrér website",
-        options,
-        index=options.index(current) if current in options else 0,
-    )
-    managed = next(
-        website for website in websites if website["website"] == managed_id
-    )
-    is_active = bool(managed["active"])
-    st.write(f"**Aktuel status:** {'Aktiv' if is_active else 'Inaktiv'}")
-    pending = st.session_state.get("website_status_confirmation")
-    if pending and pending["website"] == managed_id:
-        target_active = bool(pending["active"])
-        target_label = "aktivere" if target_active else "deaktivere"
-        st.warning(
-            f"Bekræft, at du vil {target_label} {managed_id}. "
-            "Historiske data bliver bevaret."
+        st.info(
+            "Ingen websites er registreret. Tilføj først et website i registry."
         )
-        confirm, cancel = st.columns(2)
-        if confirm.button(
-            "Bekræft aktivering" if target_active
-            else "Bekræft deaktivering",
-            type="primary",
-        ):
-            database = open_database()
-            try:
-                changed = database.set_website_active(
-                    managed_id, target_active
-                )
-            finally:
-                database.close()
-            st.session_state.pop("website_status_confirmation", None)
-            if not changed:
-                st.error("Websitet kunne ikke findes.")
-            else:
-                st.success(
-                    f"{managed_id} er nu "
-                    f"{'aktivt' if target_active else 'inaktivt'}."
-                )
-                st.rerun()
-        if cancel.button("Annuller"):
-            st.session_state.pop("website_status_confirmation", None)
-            st.rerun()
-    elif st.button(
-        "Deaktivér website" if is_active else "Aktivér website",
-        type="secondary",
-    ):
-        st.session_state["website_status_confirmation"] = {
-            "website": managed_id,
-            "active": not is_active,
-        }
-        st.rerun()
+        return
 
     st.subheader("Vælg de websites AI Office skal arbejde med")
-    manageable = [
-        website for website in websites
+    st.caption(
+        "Sæt flueben ved de websites, der skal indgå i fremtidige "
+        "synkroniseringer, analyser og anbefalinger. Du kan altid sætte "
+        "fluebenet igen senere."
+    )
+    manageable_rows = [
+        row for row, website in zip(rows, websites)
         if website.get("status") in {"active", "inactive"}
     ]
-    manageable_ids = [website["website"] for website in manageable]
-    active_ids = [
-        website["website"] for website in manageable if website["active"]
-    ]
-    selected_active_ids = st.multiselect(
-        "Aktive websites",
-        manageable_ids,
-        default=active_ids,
-        help=(
-            "Kun valgte websites bruges ved fremtidige synkroniseringer, "
-            "analyser og nye anbefalinger. Historiske data bevares."
-        ),
+    formatted_rows = format_rows(manageable_rows)
+    edited_rows = st.data_editor(
+        formatted_rows,
+        width="stretch",
+        hide_index=True,
+        disabled=[
+            column for column in formatted_rows[0] if column != "Aktiv"
+        ],
+        column_config={
+            "Aktiv": st.column_config.CheckboxColumn(
+                "Aktiv",
+                help="Slå behandling af websitet til eller fra.",
+                default=False,
+            ),
+        },
+        key="website_active_editor",
     )
-    st.caption(
-        f"{len(selected_active_ids)} af {len(manageable_ids)} websites valgt. "
-        "Websites under udfasning administreres ikke her."
-    )
-    if st.button("Bekræft og gem aktive websites", type="primary"):
+    active_count = sum(bool(row["Aktiv"]) for row in edited_rows)
+    st.caption(f"{active_count} af {len(edited_rows)} websites er valgt.")
+
+    if st.button("Gem aktive websites", type="primary"):
+        selected_active_ids = {
+            str(row["Website"])
+            for row in edited_rows
+            if bool(row["Aktiv"])
+        }
         database = open_database()
         try:
             changed_count = database.set_active_website_ids(
-                set(selected_active_ids)
+                selected_active_ids
             )
         finally:
             database.close()
-        st.session_state.pop("website_status_confirmation", None)
         st.success(
             f"Aktivt udvalg er gemt. {changed_count} websites blev ændret."
         )
         st.rerun()
 
-    event = st.dataframe(
-        format_rows(rows), use_container_width=True, hide_index=True,
-        on_select="rerun", selection_mode="single-row",
-    )
-    selected_rows = getattr(getattr(event, "selection", None), "rows", [])
-    if selected_rows:
-        set_selected_website(rows[selected_rows[0]]["Website"])
-        st.switch_page("pages/1_Website_Profile.py")
+    excluded_rows = [
+        row for row, website in zip(rows, websites)
+        if website.get("status") not in {"active", "inactive"}
+    ]
+    if excluded_rows:
+        with st.expander(
+            f"Websites under udfasning eller arkiveret ({len(excluded_rows)})"
+        ):
+            st.dataframe(
+                format_rows(excluded_rows),
+                width="stretch",
+                hide_index=True,
+            )
 
 
 if __name__ == "__main__":

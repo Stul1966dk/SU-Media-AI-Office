@@ -170,18 +170,14 @@ class WebsiteActivationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "ikke aktivt"):
             analyst.analyze_site("toggle.dk")
 
-    def test_websites_page_has_confirmation_actions(self) -> None:
+    def test_websites_page_has_checkbox_activation_editor(self) -> None:
         source = (
             Path(__file__).resolve().parents[1]
             / "dashboard" / "pages" / "11_Websites.py"
         ).read_text(encoding="utf-8")
-        for text in (
-            "Deaktivér website",
-            "Aktivér website",
-            "Bekræft deaktivering",
-            "Bekræft aktivering",
-        ):
-            self.assertIn(text, source)
+        self.assertIn("st.data_editor(", source)
+        self.assertIn("st.column_config.CheckboxColumn(", source)
+        self.assertIn('"Gem aktive websites"', source)
 
 
 if __name__ == "__main__":
