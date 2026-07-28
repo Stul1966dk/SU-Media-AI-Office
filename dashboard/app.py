@@ -75,6 +75,7 @@ def main() -> None:
     selected_trend = st.session_state.get("seo_trend")
     database = open_database()
     try:
+        _apply_hot_reload_compatibility(database)
         for component, health in _runtime_health(database).items():
             database.set_system_health(component, health)
         data = load_dashboard_data(
@@ -108,6 +109,16 @@ def main() -> None:
     _render_seo_health(data, selected_trend)
     _render_priority_tasks(data)
     _render_events(data)
+
+
+def _apply_hot_reload_compatibility(database: Any) -> None:
+    """Add harmless read shims when Streamlit retained an older DB class."""
+    database_class = type(database)
+    if (
+        "get_traffic_recommendation_decisions"
+        not in vars(database_class)
+    ):
+        database.get_traffic_recommendation_decisions = lambda: []
 
 
 def _render_data_refresh() -> None:

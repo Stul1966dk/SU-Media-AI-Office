@@ -4,9 +4,19 @@ import unittest
 from unittest.mock import Mock
 
 from dashboard.components.data import load_dashboard_data
+from dashboard.app import _apply_hot_reload_compatibility
 
 
 class HotReloadCompatibilityTests(unittest.TestCase):
+    def test_dashboard_entrypoint_shims_old_database_instance(self):
+        class OldDatabase:
+            pass
+
+        database = OldDatabase()
+        _apply_hot_reload_compatibility(database)
+
+        self.assertEqual([], database.get_traffic_recommendation_decisions())
+
     def test_dashboard_accepts_database_without_decision_methods(self):
         database = Mock(
             spec=[
