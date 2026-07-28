@@ -73,15 +73,28 @@ def _search_only(
 def _plausible_only(
     website: str, search: dict[str, Any], plausible: dict[str, Any]
 ) -> dict[str, Any]:
-    action = "Undersøg faldet i ikke-organisk trafik."
+    action = "Find den kanal i Plausible, der har mistet flest besøgende."
     return {
         "task_type": "plausible_only_decline",
         "website": website,
         "description": action,
         "recommended_action": (
-            "Undersøg henvisninger, direkte trafik og øvrige kanaler i "
-            "Plausible; Search Console forklarer ikke faldet."
+            "Sammenlign henvisninger, direkte trafik og øvrige kanaler for "
+            "de samme to 28-dages perioder, og vælg kanalen med størst "
+            "dokumenteret tab til den næste indsats."
         ),
+        "action_steps": [
+            "Åbn Plausibles kanalrapport for de to gemte 28-dages perioder.",
+            "Rangér kanalerne efter tabte besøgende.",
+            "Notér den største faldende kanal og dens vigtigste landingsside.",
+        ],
+        "completion_criterion": (
+            "Én faldende kanal og én berørt landingsside er dokumenteret."
+        ),
+        "measurement_method": (
+            "Sammenlign kanalens besøgende med den foregående 28-dages periode."
+        ),
+        "estimated_minutes": 30,
         "target_url": "",
         "measured_cause": "Faldet er ikke organisk",
         "click_change": _percent_change(
@@ -103,15 +116,20 @@ def _search_fields(
     website: str, search: dict[str, Any]
 ) -> dict[str, Any]:
     page = (search.get("loss_pages") or [{}])[0]
-    action = _page_action(page)
+    plan = _page_plan(page)
     click_change = _percent_change(
         search.get("previous_clicks"), search.get("current_clicks")
     )
     return {
         "website": website,
-        "description": action,
-        "recommended_action": action,
+        "description": plan["title"],
+        "recommended_action": plan["recommended_action"],
+        "action_steps": plan["action_steps"],
+        "completion_criterion": plan["completion_criterion"],
+        "measurement_method": plan["measurement_method"],
+        "estimated_minutes": plan["estimated_minutes"],
         "target_url": page.get("page_url", ""),
+        "target_query": plan["target_query"],
         "measured_cause": page.get("cause", ""),
         "click_change": click_change,
         "ctr_change": _point_change(
@@ -139,16 +157,99 @@ def _comparable(
     )
 
 
-def _page_action(page: dict[str, Any]) -> str:
+def _page_plan(page: dict[str, Any]) -> dict[str, Any]:
+    """Translate measured signals into a bounded proposed work plan."""
     cause = str(page.get("cause", ""))
     url = str(page.get("page_url", "den vigtigste tabsside"))
+    queries = page.get("queries") or []
+    query = str(queries[0].get("query", "")) if queries else ""
+    query_label = f"“{query}”" if query else "det største faldende søgeord"
     if cause == "CTR-fald":
-        return f"Gennemgå title og meta på {url}."
+        return {
+            "title": f"Forbered en title/meta-test på {url}.",
+            "recommended_action": (
+                f"Udarbejd tre title- og metabeskrivelser med fokus på "
+                f"{query_label}, og send den bedste variant til manuel "
+                "godkendelse som ét SEO-eksperiment."
+            ),
+            "action_steps": [
+                f"Kontrollér den nuværende title og meta for {query_label}.",
+                "Skriv tre varianter uden at ændre sidens søgeintention.",
+                "Vælg én variant og gem den som kladde til manuel godkendelse.",
+            ],
+            "completion_criterion": (
+                "Én godkendelsesklar title/meta-kladde er gemt; intet er "
+                "publiceret automatisk."
+            ),
+            "measurement_method": (
+                f"Mål CTR og klik for {query_label} efter 28 hele dage."
+            ),
+            "estimated_minutes": 45,
+            "target_query": query,
+        }
     if cause == "Placeringsfald":
-        return f"Undersøg placeringsfaldet på {url}."
+        return {
+            "title": f"Styrk siden til søgeordet {query_label}.",
+            "recommended_action": (
+                f"Opdatér {url} med fokus på {query_label}: kontrollér at "
+                "søgeintentionen besvares tydeligt, styrk den mest relevante "
+                "sektion, og tilføj interne links fra relevante sider."
+            ),
+            "action_steps": [
+                f"Sammenhold sidens indhold med søgeintentionen bag {query_label}.",
+                "Opdatér eller tilføj den sektion, der mangler et klart svar.",
+                "Tilføj 2–3 relevante interne links til siden.",
+                "Registrér ændringen som ét målbart 28-dages SEO-eksperiment.",
+            ],
+            "completion_criterion": (
+                "Indholdet er opdateret, 2–3 interne links er dokumenteret, "
+                "og ændringen er klar til manuel godkendelse."
+            ),
+            "measurement_method": (
+                f"Mål placering og klik for {query_label} efter 28 hele dage."
+            ),
+            "estimated_minutes": 90,
+            "target_query": query,
+        }
     if cause == "Lavere søgeefterspørgsel":
-        return f"Vurdér søgebehov og relaterede emner for {url}."
-    return f"Afgræns det organiske klikfald på {url}."
+        return {
+            "title": f"Find et beslægtet emne med stabil efterspørgsel til {url}.",
+            "recommended_action": (
+                f"Bevar siden uændret, og brug de faldende søgeord til at "
+                "finde ét beslægtet emne med stabile visninger, før der "
+                "foreslås nyt indhold."
+            ),
+            "action_steps": [
+                "Rangér sidens beslægtede søgeord efter stabile visninger.",
+                "Vælg ét emne, som matcher sidens formål.",
+                "Gem emnet som indholdskladde; publicér ikke automatisk.",
+            ],
+            "completion_criterion": "Ét dokumenteret emne er valgt som kladde.",
+            "measurement_method": (
+                "Mål visninger og klik for det valgte emne efter 28 hele dage."
+            ),
+            "estimated_minutes": 45,
+            "target_query": query,
+        }
+    return {
+        "title": f"Afgræns klikfaldet på {url}.",
+        "recommended_action": (
+            f"Gennemgå de tre største faldende søgeord for {url}, og vælg "
+            "kun en ændring, hvis ét fælles målt problem kan dokumenteres."
+        ),
+        "action_steps": [
+            "Sammenlign placering, CTR og visninger for de tre søgeord.",
+            "Dokumentér det signal, der forklarer flest tabte klik.",
+            "Gem højst én foreslået ændring som kladde.",
+        ],
+        "completion_criterion": (
+            "Én dokumenteret årsag eller en begrundet beslutning om ingen "
+            "ændring er gemt."
+        ),
+        "measurement_method": "Genmål de samme søgeord efter 28 hele dage.",
+        "estimated_minutes": 45,
+        "target_query": query,
+    }
 
 
 def _percent_change(previous: Any, current: Any) -> float:

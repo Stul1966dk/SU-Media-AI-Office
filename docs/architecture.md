@@ -217,6 +217,9 @@ Et eksplicit brugerklik kan gemme kandidaten i
 En kladde er et separat beslutningsobjekt og optræder ikke i `tasks` eller den
 operationelle arbejdskø. Samme anbefalingsnøgle opdateres idempotent, og en
 åben operationel opgave med samme website og titel blokerer en dubletkladde.
+Den viste anbefaling omsætter den målte årsag til en afgrænset arbejdsplan med
+berørt søgeord, foreslåede trin, færdigkriterium, tidsestimat og eftermåling.
+Forslag og målte fakta vises i separate sektioner.
 
 ## SEO Manager
 

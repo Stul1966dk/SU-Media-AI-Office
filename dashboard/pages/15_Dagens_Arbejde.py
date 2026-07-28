@@ -115,6 +115,23 @@ def _render_combined_traffic_task(item: dict[str, Any]) -> None:
         st.subheader(item["description"])
         st.write(f"**Prioritet:** {item['priority']}")
         st.write(f"**Website:** {item['website']}")
+        st.markdown("### Konkret anbefaling")
+        st.write(item.get("recommended_action") or item["description"])
+        steps = item.get("action_steps") or []
+        if steps:
+            for index, step in enumerate(steps, start=1):
+                st.write(f"{index}. {step}")
+        if item.get("completion_criterion"):
+            st.write(
+                f"**Færdig når:** {item['completion_criterion']}"
+            )
+        if item.get("measurement_method"):
+            st.write(f"**Måling:** {item['measurement_method']}")
+        if item.get("estimated_minutes"):
+            st.write(
+                f"**Forventet tid:** {item['estimated_minutes']} minutter"
+            )
+        st.markdown("### Datagrundlag")
         st.write(
             "**Plausible-ændring:** "
             f"{float(item['plausible_change']):.1f} %".replace(".", ",")

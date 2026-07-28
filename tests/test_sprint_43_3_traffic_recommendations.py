@@ -41,7 +41,9 @@ class TrafficRecommendationTests(unittest.TestCase):
         self.assertEqual("combined_traffic_decline", result["task_type"])
         self.assertEqual("høj", result["confidence"])
         self.assertEqual("https://site.dk/side/", result["target_url"])
-        self.assertIn("title og meta", result["description"])
+        self.assertIn("title/meta-test", result["description"])
+        self.assertEqual(3, len(result["action_steps"]))
+        self.assertIn("28 hele dage", result["measurement_method"])
         self.assertEqual(-30.0, result["click_change"])
 
     def test_search_only_decline_is_channel_scoped(self):
@@ -52,14 +54,16 @@ class TrafficRecommendationTests(unittest.TestCase):
         self.assertEqual("search_only_decline", result["task_type"])
         self.assertEqual("middel", result["confidence"])
         self.assertIn("organiske kanal", result["explanation"])
-        self.assertIn("placeringsfaldet", result["description"])
+        self.assertIn("Styrk siden", result["description"])
+        self.assertIn("interne links", result["recommended_action"])
 
     def test_plausible_only_decline_points_away_from_search(self):
         result = build_traffic_recommendations(
             [search(status="no_decline")], [plausible()]
         )[0]
         self.assertEqual("plausible_only_decline", result["task_type"])
-        self.assertIn("ikke-organisk", result["description"])
+        self.assertIn("kanal i Plausible", result["description"])
+        self.assertIn("øvrige kanaler", result["recommended_action"])
 
     def test_insufficient_source_creates_no_recommendation(self):
         self.assertEqual(build_traffic_recommendations(

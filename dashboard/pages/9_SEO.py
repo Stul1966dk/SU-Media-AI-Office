@@ -587,7 +587,19 @@ def _render_traffic_recommendation(
             "Der er ingen kvalificeret anbefaling fra begge datakilder endnu."
         )
         return
-    st.write(f"**Anbefalet handling:** {recommendation['description']}")
+    st.write(
+        f"**Anbefalet handling:** "
+        f"{recommendation.get('recommended_action') or recommendation['description']}"
+    )
+    for index, step in enumerate(
+        recommendation.get("action_steps") or [], start=1
+    ):
+        st.write(f"{index}. {step}")
+    if recommendation.get("completion_criterion"):
+        st.write(f"**Færdig når:** {recommendation['completion_criterion']}")
+    if recommendation.get("measurement_method"):
+        st.write(f"**Måling:** {recommendation['measurement_method']}")
+    st.markdown("**Datagrundlag**")
     st.write(str(recommendation.get("explanation", "")))
     columns = st.columns(3)
     columns[0].metric("Prioritet", recommendation.get("priority", "Ukendt"))

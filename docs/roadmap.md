@@ -383,6 +383,8 @@ bygger på.
 - [x] Blokér dubletter mod samme anbefaling og åbne opgaver med samme titel.
 - [x] Giv mulighed for at udsætte anbefalingen 14 dage.
 - [x] Giv mulighed for eksplicit at afvise anbefalingen.
+- [x] Vis en konkret arbejdsplan med søgeord, trin, færdigkriterium,
+  tidsestimat og 28-dages måling adskilt fra datagrundlaget.
 
 Succeskriterium: En anbefaling kan gemmes som én redigerbar og sporbar kladde,
 udsættes eller afvises uden at oprette, starte eller udføre en operationel
