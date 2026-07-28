@@ -84,6 +84,12 @@ class SearchConsoleService:
         """Fetch all properties, match domains, and upsert each property."""
         self.connector.authenticate()
         properties = self.connector.list_properties()
+        available_site_urls = {
+            str(item["site_url"]) for item in properties
+        }
+        self.database.deactivate_missing_search_console_properties(
+            available_site_urls
+        )
         matched = 0
         stored: list[dict[str, Any]] = []
         for item in properties:

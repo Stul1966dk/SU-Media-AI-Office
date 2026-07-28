@@ -2162,6 +2162,39 @@ class Database:
             item["active"] = bool(item["active"])
         return properties
 
+    def deactivate_missing_search_console_properties(
+        self, available_site_urls: set[str]
+    ) -> int:
+        """Deactivate stored properties no longer returned by Google."""
+        available = {str(value).strip() for value in available_site_urls}
+        active_rows = self._connection.execute(
+            """
+            SELECT site_url
+            FROM search_console_properties
+            WHERE active = 1
+            """
+        ).fetchall()
+        missing = [
+            str(row["site_url"])
+            for row in active_rows
+            if str(row["site_url"]) not in available
+        ]
+        if not missing:
+            return 0
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        placeholders = ", ".join("?" for _ in missing)
+        with self._connection:
+            cursor = self._connection.execute(
+                f"""
+                UPDATE search_console_properties
+                SET active = 0, updated_at = ?
+                WHERE active = 1
+                  AND site_url IN ({placeholders})
+                """,
+                (timestamp, *missing),
+            )
+        return int(cursor.rowcount)
+
     def upsert_search_console_daily_metric(
         self,
         *,
@@ -3701,6 +3734,41 @@ class Database:
                 (int(active), "active" if active else "inactive", website),
             )
         return cursor.rowcount == 1
+
+    def set_active_website_ids(self, active_website_ids: set[str]) -> int:
+        """Replace the active set for manageable websites in one transaction."""
+        selected = {str(value).strip() for value in active_website_ids}
+        rows = self._connection.execute(
+            """
+            SELECT website, active
+            FROM websites
+            WHERE status IN ('active', 'inactive')
+            """
+        ).fetchall()
+        changes = [
+            (website, website in selected)
+            for website, current in (
+                (str(row["website"]), bool(row["active"])) for row in rows
+            )
+            if current != (website in selected)
+        ]
+        if not changes:
+            return 0
+        with self._connection:
+            for website, active in changes:
+                self._connection.execute(
+                    """
+                    UPDATE websites
+                    SET active = ?, status = ?
+                    WHERE website = ?
+                    """,
+                    (
+                        int(active),
+                        "active" if active else "inactive",
+                        website,
+                    ),
+                )
+        return len(changes)
 
     def get_active_website_ids(self) -> list[str]:
         """Return website IDs eligible for future processing."""

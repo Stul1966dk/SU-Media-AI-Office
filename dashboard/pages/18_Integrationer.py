@@ -119,6 +119,11 @@ def _render_plausible(integration: PlausibleIntegration) -> None:
 
 def _render_search_console(integration: SearchConsoleIntegration) -> None:
     st.subheader("Google Search Console")
+    st.caption(
+        "Properties, der er slettet i Google Search Console, markeres "
+        "automatisk inaktive ved næste dataopdatering. Historiske data "
+        "bevares og de inaktive properties synkroniseres ikke."
+    )
     status = integration.status(validate=False)
     if status["connected"] and status["last_error"]:
         state_label = "Kræver ny forbindelse"
@@ -206,6 +211,23 @@ def _render_search_console(integration: SearchConsoleIntegration) -> None:
             use_container_width=True,
             hide_index=True,
         )
+    properties = integration.database.get_search_console_properties()
+    if properties:
+        with st.expander("Lokale Search Console-properties"):
+            st.dataframe(
+                [
+                    {
+                        "Property": item["site_url"],
+                        "Website": item.get("website_id") or "Ikke matchet",
+                        "Status": (
+                            "Aktiv" if item.get("active") else "Fjernet i Google"
+                        ),
+                    }
+                    for item in properties
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
     st.divider()
 
 

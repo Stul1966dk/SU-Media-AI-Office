@@ -141,6 +141,43 @@ def main() -> None:
             "active": not is_active,
         }
         st.rerun()
+
+    st.subheader("Vælg de websites AI Office skal arbejde med")
+    manageable = [
+        website for website in websites
+        if website.get("status") in {"active", "inactive"}
+    ]
+    manageable_ids = [website["website"] for website in manageable]
+    active_ids = [
+        website["website"] for website in manageable if website["active"]
+    ]
+    selected_active_ids = st.multiselect(
+        "Aktive websites",
+        manageable_ids,
+        default=active_ids,
+        help=(
+            "Kun valgte websites bruges ved fremtidige synkroniseringer, "
+            "analyser og nye anbefalinger. Historiske data bevares."
+        ),
+    )
+    st.caption(
+        f"{len(selected_active_ids)} af {len(manageable_ids)} websites valgt. "
+        "Websites under udfasning administreres ikke her."
+    )
+    if st.button("Bekræft og gem aktive websites", type="primary"):
+        database = open_database()
+        try:
+            changed_count = database.set_active_website_ids(
+                set(selected_active_ids)
+            )
+        finally:
+            database.close()
+        st.session_state.pop("website_status_confirmation", None)
+        st.success(
+            f"Aktivt udvalg er gemt. {changed_count} websites blev ændret."
+        )
+        st.rerun()
+
     event = st.dataframe(
         format_rows(rows), use_container_width=True, hide_index=True,
         on_select="rerun", selection_mode="single-row",
