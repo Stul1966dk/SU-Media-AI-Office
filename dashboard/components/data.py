@@ -439,7 +439,9 @@ def _filter_decided_recommendations(
             result.append(item)
             continue
         status = decision.get("status")
-        if status in {"draft", "rejected"}:
+        if status in {
+            "draft", "approved", "experiment_running", "rejected",
+        }:
             continue
         if status == "snoozed":
             try:

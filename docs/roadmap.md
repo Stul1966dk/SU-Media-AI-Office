@@ -389,3 +389,18 @@ bygger på.
 Succeskriterium: En anbefaling kan gemmes som én redigerbar og sporbar kladde,
 udsættes eller afvises uden at oprette, starte eller udføre en operationel
 opgave.
+
+# Sprint 43.5 - Godkendelse og 28-dages SEO-eksperiment
+
+- [x] Kræv eksplicit godkendelse af en gemt opgavekladde.
+- [x] Hold godkendelse og faktisk websiteimplementering som to adskilte trin.
+- [x] Lad brugeren registrere præcist én implementeret ændring og ændringstype.
+- [x] Kontrollér stabil Search Console-baseline før eksperimentet oprettes.
+- [x] Opret, godkend og start præcist ét SEO-eksperiment idempotent.
+- [x] Lås URL'en gennem den eksisterende eksperimentmotor.
+- [x] Gem implementeringstidspunkt, eksperiment-id og planlagt evalueringsdato.
+- [x] Link direkte fra anbefalingen til den løbende eksperimentmåling.
+
+Succeskriterium: En godkendt anbefaling kan efter manuel websiteændring
+registreres som ét sporbart SEO-eksperiment med baseline og en planlagt
+28-dages evaluering, uden at appen selv ændrer websitet.

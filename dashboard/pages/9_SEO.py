@@ -580,7 +580,7 @@ def _render_traffic_recommendation(
     recommendation: dict[str, Any] | None,
     decision: dict[str, Any] | None,
 ) -> None:
-    """Show a candidate and explicit draft/reject/snooze controls."""
+    """Show the approval-gated path from recommendation to experiment."""
     st.subheader("Samlet opgaveanbefaling")
     if not recommendation:
         st.info(
@@ -622,13 +622,33 @@ def _render_traffic_recommendation(
     if decision:
         labels = {
             "draft": "Opgavekladde gemt",
+            "approved": "Opgavekladden er godkendt og afventer implementering",
+            "experiment_running": "Ændringen er registreret og under måling",
             "snoozed": "Anbefaling udsat",
             "rejected": "Anbefaling afvist",
         }
         message = labels.get(decision["status"], decision["status"])
         if decision["status"] == "snoozed":
             message += f" til {decision.get('snoozed_until')}"
+        if decision["status"] == "experiment_running":
+            st.success(message)
+            experiment_id = (decision.get("evidence") or {}).get(
+                "experiment_id"
+            )
+            due = (decision.get("evidence") or {}).get(
+                "planned_evaluation_date"
+            )
+            st.write(
+                f"Eksperiment #{experiment_id} evalueres tidligst {due}."
+            )
+            st.page_link(
+                "pages/13_Eksperimenter.py",
+                label="Følg eksperimentet",
+                icon="🧪",
+            )
+            return
         st.info(message)
+    status = decision.get("status") if decision else None
     default_title = (
         decision["title"] if decision and decision["status"] == "draft"
         else str(recommendation["description"])
@@ -640,20 +660,77 @@ def _render_traffic_recommendation(
         + "\n\nDatagrundlag: "
         + str(recommendation.get("explanation", ""))
     )
-    with st.form(f"traffic-draft-{recommendation['task_key']}"):
-        title = st.text_input("Titel", value=default_title)
-        description = st.text_area(
-            "Beskrivelse og datagrundlag",
-            value=default_description,
-            height=160,
+    if status in {None, "draft", "snoozed", "rejected"}:
+        with st.form(f"traffic-draft-{recommendation['task_key']}"):
+            title = st.text_input("Titel", value=default_title)
+            description = st.text_area(
+                "Beskrivelse og datagrundlag",
+                value=default_description,
+                height=160,
+            )
+            save_draft = st.form_submit_button(
+                "Gem opgavekladde", type="primary"
+            )
+        if save_draft:
+            _save_traffic_decision(
+                recommendation, "draft", title=title,
+                description=description,
+            )
+    if status == "draft":
+        st.warning(
+            "Godkend kun kladden, hvis URL, handling og afgrænsning er "
+            "korrekte. Godkendelsen ændrer ikke websitet."
         )
-        save_draft = st.form_submit_button(
-            "Gem opgavekladde", type="primary"
+        if st.button(
+            "Godkend opgavekladde",
+            type="primary",
+            key=f"approve-{recommendation['task_key']}",
+        ):
+            _save_traffic_decision(recommendation, "approved")
+        return
+    if status == "approved":
+        st.markdown("**Registrér den implementerede ændring**")
+        st.write(
+            "Udfør først ændringen på websitet. Beskriv derefter præcist "
+            "den ene ændring, du har gennemført."
         )
-    if save_draft:
-        _save_traffic_decision(
-            recommendation, "draft", title=title, description=description
+        type_labels = {
+            "Indholdsopdatering": "content_update",
+            "Title og metabeskrivelse": "title_meta",
+            "Interne links": "internal_links",
+            "Teknisk forbedring": "technical_fix",
+            "Strukturerede data": "schema",
+        }
+        default_label = (
+            "Title og metabeskrivelse"
+            if "ctr" in str(recommendation.get("measured_cause", "")).lower()
+            else "Indholdsopdatering"
         )
+        with st.form(f"implement-{recommendation['task_key']}"):
+            experiment_label = st.selectbox(
+                "Ændringstype",
+                list(type_labels),
+                index=list(type_labels).index(default_label),
+            )
+            implementation = st.text_area(
+                "Hvad ændrede du konkret?",
+                placeholder=(
+                    "Eksempel: Opdaterede afsnittet om bryggetid og tilføjede "
+                    "to interne links til siden."
+                ),
+            )
+            implemented = st.form_submit_button(
+                "Markér implementeret og start 28-dages måling",
+                type="primary",
+            )
+        if implemented:
+            _save_traffic_decision(
+                recommendation,
+                "implemented",
+                description=implementation,
+                experiment_type=type_labels[experiment_label],
+            )
+        return
     action_columns = st.columns(2)
     if action_columns[0].button(
         "Udsæt 14 dage", key=f"snooze-{recommendation['task_key']}"
@@ -676,6 +753,7 @@ def _save_traffic_decision(
     title: str = "",
     description: str = "",
     snoozed_until: date | None = None,
+    experiment_type: str = "",
 ) -> None:
     """Persist one explicit UI decision and refresh the displayed state."""
     database = open_database()
@@ -684,6 +762,14 @@ def _save_traffic_decision(
         if status == "draft":
             workflow.create_draft(
                 recommendation, title=title, description=description
+            )
+        elif status == "approved":
+            workflow.approve_draft(str(recommendation["task_key"]))
+        elif status == "implemented":
+            workflow.mark_implemented(
+                str(recommendation["task_key"]),
+                change_description=description,
+                experiment_type=experiment_type,
             )
         elif status == "snoozed" and snoozed_until is not None:
             workflow.snooze(recommendation, snoozed_until)
