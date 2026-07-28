@@ -131,11 +131,20 @@ def main() -> None:
             for row in edited_rows
             if bool(row["Aktiv"])
         }
+        current_active = {
+            str(website["website"]): bool(website["active"])
+            for website in websites
+            if website.get("status") in {"active", "inactive"}
+        }
         database = open_database()
         try:
-            changed_count = database.set_active_website_ids(
-                selected_active_ids
-            )
+            changed_count = 0
+            for website_id, was_active in current_active.items():
+                should_be_active = website_id in selected_active_ids
+                if was_active != should_be_active:
+                    changed_count += int(database.set_website_active(
+                        website_id, should_be_active
+                    ))
         finally:
             database.close()
         st.success(

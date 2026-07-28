@@ -87,6 +87,8 @@ class SiteScopeCleanupTests(unittest.TestCase):
         self.assertIn("st.data_editor(", source)
         self.assertIn("st.column_config.CheckboxColumn(", source)
         self.assertIn('"Gem aktive websites"', source)
+        self.assertIn("database.set_website_active(", source)
+        self.assertNotIn("database.set_active_website_ids(", source)
         self.assertNotIn("st.multiselect(", source)
 
 
