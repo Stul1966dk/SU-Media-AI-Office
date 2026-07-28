@@ -491,3 +491,22 @@ eller en blindgyde.
 Succeskriterium: Brugeren kan følge hele kæden fra aktiv måling til konklusion
 og genbrugelig læring på én side og ved altid, om ændringen skal bevares,
 tilpasses, tilbageføres eller blot afvente flere data.
+
+# Sprint 44.5 - Konkrete AI-leverancer før godkendelse
+
+- [x] Kræv et konkret arbejdsudkast før en ny opgave kan godkendes.
+- [x] Brug samme leveranceformat til title/meta, indhold, interne links,
+  tekniske rettelser, schema og trafikanalyse.
+- [x] Vis AI Offices anbefalede løsning, alternativer, begrundelse,
+  implementering og kontrolpunkter direkte på I dag.
+- [x] Lad brugeren kontrollere og redigere den anbefalede løsning før
+  godkendelse.
+- [x] Gem den godkendte konkrete leverance som opgavens arbejdsbeskrivelse.
+- [x] Bevar manuel implementering og eksplicit start af målingen.
+- [x] Brug et tydeligt regelbaseret nødudkast, hvis AI-forbindelsen fejler.
+- [x] Fjern muligheden for at godkende en generel arbejdsbeskrivelse uden
+  konkrete forslag.
+
+Succeskriterium: AI Office udfører forarbejdet for alle opgavetyper. Brugeren
+skal kontrollere, eventuelt redigere og godkende en færdig leverance – aldrig
+selv begynde med at skrive forslagene eller udføre den indledende analyse.

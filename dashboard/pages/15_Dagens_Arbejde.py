@@ -36,6 +36,9 @@ from core.ai_service import AIService
 from core.daily_work_preparation import DailyWorkPreparationService
 from core.current_diagnosis_reader import read_latest_diagnoses
 from core.seo_experiment_engine import SEOExperimentEngine
+from core.task_deliverables import (
+    fallback_task_deliverable, format_deliverable, generate_task_deliverable,
+)
 from core.website_registry import WebsiteRegistry
 from core.work_queue_service import WorkQueueService
 from dashboard.components.database import open_database
@@ -281,8 +284,17 @@ def _render_draft_decision(
     database: Any, item: dict[str, Any], *, primary: bool
 ) -> None:
     key = str(item["recommendation_key"])
+    if "Anbefalet løsning:" not in str(item.get("description") or ""):
+        st.info(
+            "Denne ældre kladde mangler en konkret leverance. AI Office "
+            "skal først udarbejde selve forslaget."
+        )
+        _render_new_decision_actions(
+            database, _recommendation_from_work_item(item)
+        )
+        return
     if st.button(
-        "Godkend opgave",
+        "Godkend arbejdsudkast",
         type="primary" if primary else "secondary",
         key=f"approve-daily-{key}",
         help=(
@@ -298,7 +310,7 @@ def _render_draft_decision(
             _finish_daily_action(
                 "Opgaven er godkendt. Udfør nu ændringen på websitet."
             )
-    with st.expander("Redigér opgaven før godkendelse"):
+    with st.expander("Redigér arbejdsudkast før godkendelse"):
         with st.form(f"edit-daily-{key}"):
             title = st.text_input("Titel", value=str(item["title"]))
             description = st.text_area(
@@ -331,20 +343,19 @@ def _render_approved_decision(
             help="Åbner websitet i en ny fane. AI Office ændrer intet selv.",
         )
     with st.form(f"implement-daily-{item['recommendation_key']}"):
+        default_change_type = _approved_change_type(item)
         change_type = st.selectbox(
             "Hvilken type ændring udførte du?",
             list(EXPERIMENT_TYPE_LABELS),
+            index=list(EXPERIMENT_TYPE_LABELS).index(default_change_type),
             help="Vælg den ene ændringstype, som 28-dages målingen skal følge.",
         )
         description = st.text_area(
             "Hvad ændrede du konkret?",
-            placeholder=(
-                "Eksempel: Opdaterede afsnittet om iskaffe og tilføjede "
-                "tre interne links."
-            ),
+            value=_approved_solution(item),
             help=(
-                "Beskriv kun den ændring, du netop har udført. Det gør "
-                "resultatet lettere at vurdere efter 28 dage."
+                "AI Office har indsat den godkendte løsning. Tilpas kun "
+                "teksten, hvis du implementerede noget andet."
             ),
         )
         implemented = st.form_submit_button(
@@ -366,6 +377,36 @@ def _render_approved_decision(
                 "Ændringen er registreret, og målingen er startet"
                 + (f" frem til {due}." if due else ".")
             )
+
+
+def _approved_change_type(item: dict[str, Any]) -> str:
+    description = str(item.get("description") or "")
+    mappings = {
+        "title_meta": "Title og metabeskrivelse",
+        "internal_links": "Interne links",
+        "technical_fix": "Teknisk forbedring",
+        "schema": "Strukturerede data",
+        "content_update": "Indholdsopdatering",
+    }
+    return next(
+        (
+            label for key, label in mappings.items()
+            if f"Leverancetype: {key}" in description
+        ),
+        (
+            "Title og metabeskrivelse"
+            if "ctr" in str(item.get("measured_cause") or "").casefold()
+            else "Indholdsopdatering"
+        ),
+    )
+
+
+def _approved_solution(item: dict[str, Any]) -> str:
+    description = str(item.get("description") or "")
+    marker = "Anbefalet løsning:\n"
+    if marker not in description:
+        return ""
+    return description.split(marker, 1)[1].split("\n\nBegrundelse:", 1)[0]
 
 
 def _recommendation_from_work_item(
@@ -391,12 +432,13 @@ def _render_combined_traffic_task(
         st.subheader(item["description"])
         st.write(f"**Prioritet:** {item['priority']}")
         st.write(f"**Website:** {item['website']}")
-        st.markdown("### Det skal du gøre")
+        st.markdown("### Det forbereder AI Office")
         st.write(item.get("recommended_action") or item["description"])
-        steps = item.get("action_steps") or []
-        if steps:
-            for index, step in enumerate(steps, start=1):
-                st.write(f"{index}. {step}")
+        st.info(
+            "Du skal ikke selv udarbejde forslagene. AI Office producerer "
+            "først et konkret arbejdsudkast, som du kan kontrollere, "
+            "redigere og godkende."
+        )
         if item.get("completion_criterion"):
             st.write(
                 f"**Færdig når:** {item['completion_criterion']}"
@@ -435,35 +477,35 @@ def _render_new_decision_actions(
     database: Any, item: dict[str, Any]
 ) -> None:
     title = str(item["description"])
-    description = (
-        str(item.get("recommended_action") or item["description"])
-        + "\n\nDatagrundlag: "
-        + str(item.get("explanation") or "")
-    )
     key = str(item["task_key"])
-    if st.button(
-        "Godkend opgave",
-        type="primary",
-        key=f"approve-new-{key}",
-        help=(
-            "Gemmer og godkender planen i ét trin. Du skal stadig selv "
-            "udføre ændringen på websitet."
-        ),
-    ):
-        _create_and_approve(database, item, title, description)
-    with st.expander("Redigér før godkendelse"):
-        with st.form(f"edit-new-{key}"):
-            edited_title = st.text_input("Titel", value=title)
-            edited_description = st.text_area(
-                "Arbejdsbeskrivelse", value=description, height=170
+    state_key = f"task-deliverable:{key}"
+    if state_key not in st.session_state:
+        if st.button(
+            "Lav konkret arbejdsudkast",
+            type="primary",
+            key=f"generate-deliverable-{key}",
+            help=(
+                "AI Office producerer forslagene. Intet godkendes eller "
+                "ændres på websitet endnu."
+            ),
+        ):
+            with st.spinner("AI Office udarbejder det konkrete forslag…"):
+                deliverable, used_fallback = _generate_deliverable(
+                    database, item
+                )
+            st.session_state[state_key] = deliverable
+            st.session_state[f"{state_key}:fallback"] = used_fallback
+            st.rerun()
+    else:
+        deliverable = st.session_state[state_key]
+        if st.session_state.get(f"{state_key}:fallback"):
+            st.warning(
+                "AI-forbindelsen var ikke tilgængelig. Udkastet er lavet "
+                "med faste regler og bør kontrolleres ekstra grundigt."
             )
-            approve_edited = st.form_submit_button(
-                "Gem ændringer og godkend"
-            )
-        if approve_edited:
-            _create_and_approve(
-                database, item, edited_title, edited_description
-            )
+        _render_deliverable_for_approval(
+            database, item, title, deliverable, state_key
+        )
     snooze_column, reject_column = st.columns(2)
     if snooze_column.button(
         "Udsæt 14 dage",
@@ -485,6 +527,98 @@ def _render_new_decision_actions(
     ):
         _workflow(database).reject(item)
         _finish_daily_action("Anbefalingen er afvist.")
+
+
+def _generate_deliverable(
+    database: Any, item: dict[str, Any]
+) -> tuple[dict[str, Any], bool]:
+    """Generate from public context, with a safe usable fallback."""
+    public_context = []
+    if item.get("target_url"):
+        try:
+            current_page = _optimizer(database).analyze_current_snippet({
+                "target_url": item["target_url"],
+            })
+            public_context.append({
+                "relation": "berørt side",
+                **current_page,
+            })
+        except Exception:
+            pass
+    try:
+        for row in database.get_content(item["website"])[:8]:
+            public_context.append({
+                "relation": "mulig relateret side",
+                "title": row.get("title", ""),
+                "url": row.get("url") or row.get("link") or "",
+                "excerpt": str(
+                    row.get("excerpt") or row.get("content") or ""
+                )[:500],
+            })
+    except Exception:
+        pass
+    load_dotenv(PROJECT_ROOT / ".env", override=False)
+    try:
+        return generate_task_deliverable(
+            item, ai_service=AIService(), public_context=public_context
+        ), False
+    except Exception:
+        return fallback_task_deliverable(item), True
+
+
+def _render_deliverable_for_approval(
+    database: Any,
+    item: dict[str, Any],
+    title: str,
+    deliverable: dict[str, Any],
+    state_key: str,
+) -> None:
+    """Show the actual output before allowing an approval."""
+    st.subheader("Konkret arbejdsudkast")
+    st.write(f"**AI Offices anbefaling:** {deliverable['summary']}")
+    st.success(deliverable["recommended_option"])
+    st.write(f"**Hvorfor:** {deliverable['rationale']}")
+    with st.expander("Se alternativer"):
+        for index, alternative in enumerate(
+            deliverable["alternatives"], start=1
+        ):
+            st.write(f"{index}. {alternative}")
+    with st.expander("Se implementering og kontrol"):
+        st.write("**Sådan implementeres den manuelt:**")
+        for index, step in enumerate(
+            deliverable["implementation_steps"], start=1
+        ):
+            st.write(f"{index}. {step}")
+        st.write("**Kontrollér før godkendelse:**")
+        for check in deliverable["validation_checks"]:
+            st.write(f"- {check}")
+    with st.form(f"approve-deliverable-{item['task_key']}"):
+        edited_title = st.text_input("Opgavetitel", value=title)
+        edited_solution = st.text_area(
+            "Anbefalet løsning",
+            value=deliverable["recommended_option"],
+            height=150,
+            help=(
+                "Ret kun forslaget, hvis AI Office har misforstået siden "
+                "eller søgeintentionen."
+            ),
+        )
+        approved = st.form_submit_button(
+            "Godkend arbejdsudkast", type="primary"
+        )
+    if approved:
+        reviewed = {**deliverable, "recommended_option": edited_solution}
+        _create_and_approve(
+            database, item, edited_title, format_deliverable(reviewed)
+        )
+    if st.button(
+        "Lav et nyt forslag",
+        key=f"regenerate-{item['task_key']}",
+        help="Kasserer det viste udkast og genererer et nyt.",
+    ):
+        st.session_state.pop(state_key, None)
+        st.session_state.pop(f"{state_key}:fallback", None)
+        st.rerun()
 
 
 def _create_and_approve(

@@ -101,8 +101,8 @@ class UnifiedDailyFlowTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         for text in (
-            "Godkend opgave",
-            "Redigér før godkendelse",
+            "Godkend arbejdsudkast",
+            "Redigér arbejdsudkast før godkendelse",
             "Udsæt 14 dage",
             "Afvis",
             "Åbn siden, der skal ændres",
