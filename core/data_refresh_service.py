@@ -15,6 +15,7 @@ from core.experiment_monitoring import ExperimentMonitoringService
 from core.seo_history import SEOHistory
 from core.system_health import check_runtime_services
 from core.refresh_status import classify_step, normalize_step, summarize_steps
+from core.search_console_diagnosis import SearchConsoleDiagnosisService
 from core.website_registry import WebsiteRegistry
 from integrations.search_console_integration import SearchConsoleIntegration
 
@@ -38,6 +39,7 @@ class DataRefreshService:
         search_console: Any | None = None, seo_history: Any | None = None,
         intelligence: Any | None = None,
         plausible_import: Any | None = None,
+        search_diagnosis: Any | None = None,
         health_check: Callable | None = None,
     ) -> None:
         self.database = database
@@ -57,6 +59,10 @@ class DataRefreshService:
         )
         self.plausible_import = plausible_import or PlausibleImportService(
             database
+        )
+        self.search_diagnosis = (
+            search_diagnosis
+            or SearchConsoleDiagnosisService(database, self.search_console)
         )
         self.health_check = health_check or check_runtime_services
 
@@ -291,6 +297,23 @@ class DataRefreshService:
             new_daily_website_ids=new_daily_website_ids,
             force_dimensions_refresh=force_dimensions_refresh,
         ))
+        diagnosis_websites = (
+            list(website_ids) if website_ids is not None else sorted({
+                str(item.get("website_id"))
+                for item in result.get("property_results", [])
+                if item.get("website_id")
+                and item.get("status") != "error"
+            })
+        )
+        diagnosis = self.search_diagnosis.analyze_sites(
+            diagnosis_websites
+        )
+        result.update({
+            "diagnoses_processed": diagnosis["websites_processed"],
+            "diagnoses_created": diagnosis["rows_created"],
+            "diagnoses_updated": diagnosis["rows_updated"],
+            "diagnoses_unchanged": diagnosis["rows_unchanged"],
+        })
         return result
 
     def refresh_seo_history(

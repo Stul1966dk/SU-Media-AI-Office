@@ -336,3 +336,16 @@ Disse punkter er registreret til senere prioritering og er ikke implementeret:
   dashboardtests bestået før produktionssætning.
 - Datakontrol: fire tidligere oprettede produktionsrækker blev vurderet som
   legitime data og er derfor bevaret.
+
+# Sprint 43.1 - Search Console-årsagsanalyse
+
+- [x] Sammenlign de seneste to gemte 28-dages perioder på sideniveau.
+- [x] Kræv mindst 20 tidligere klik og filtrér små fald under 5 klik eller 5 %.
+- [x] Rangér højst fem sider efter dokumenteret kliktab.
+- [x] Knyt højst tre faldende søgeord til hver berørt side.
+- [x] Klassificér målte signaler som placering, CTR, efterspørgsel eller uklart.
+- [x] Gem analysen idempotent uden AI-kald.
+- [x] Vis analysen read-only på SEO-siden.
+
+Succeskriterium: AI Office kan forklare et væsentligt organisk trafikfald med
+konkrete URL'er, søgeord og før/efter-tal uden at gætte ved lav datamængde.

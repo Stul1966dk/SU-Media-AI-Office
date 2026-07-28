@@ -451,7 +451,16 @@ class SearchConsoleService:
         )
         if len(periods) < 2:
             return []
-        current_period, previous_period = periods[:2]
+        current_period = periods[0]
+        previous_period = next(
+            (
+                period for period in periods[1:]
+                if period[1] < current_period[0]
+            ),
+            None,
+        )
+        if previous_period is None:
+            return []
         key_fields = {
             "page": ("page_url",), "query": ("query",),
             "page_query": ("page_url", "query"),
@@ -492,6 +501,8 @@ class SearchConsoleService:
                 ),
                 "period_start": current_period[0],
                 "period_end": current_period[1],
+                "previous_period_start": previous_period[0],
+                "previous_period_end": previous_period[1],
             }
             comparisons.append(item)
         return sorted(

@@ -143,6 +143,37 @@ class SearchConsoleTestCase(unittest.TestCase):
         comparisons = service.get_dimension_comparisons("alpha.dk", "page")
         self.assertEqual("https://alpha.dk/test/", comparisons[0]["page_url"])
 
+    def test_dimension_comparison_ignores_overlapping_rolling_period(self) -> None:
+        connector = FakeConnector([], {})
+        for period_start, period_end, clicks in (
+            ("2026-06-01", "2026-06-28", 20),
+            ("2026-06-28", "2026-07-25", 18),
+            ("2026-06-29", "2026-07-26", 10),
+        ):
+            self.database.upsert_search_console_dimensions(
+                dimension_type="page",
+                website_id="alpha.dk",
+                site_url="sc-domain:alpha.dk",
+                period_start=period_start,
+                period_end=period_end,
+                rows=[{
+                    "page_url": "https://alpha.dk/test/",
+                    "clicks": clicks,
+                    "impressions": 100,
+                    "ctr": clicks / 100,
+                    "average_position": 5,
+                }],
+            )
+
+        result = self.service(connector).get_dimension_comparisons(
+            "alpha.dk", "page"
+        )
+
+        self.assertEqual(10, result[0]["current_clicks"])
+        self.assertEqual(20, result[0]["previous_clicks"])
+        self.assertEqual("2026-06-01", result[0]["previous_period_start"])
+        self.assertEqual("2026-06-28", result[0]["previous_period_end"])
+
     def test_dimension_scope_only_processes_selected_website(self) -> None:
         connector = FakeConnector([], {})
         for website in ("alpha.dk", "beta.dk"):

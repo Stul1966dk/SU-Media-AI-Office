@@ -134,6 +134,12 @@ def main() -> None:
         page_query_comparisons = service.get_dimension_comparisons(
             website_id, "page_query"
         )
+        diagnosis_reader = getattr(
+            database, "get_latest_search_console_diagnosis", None
+        )
+        search_diagnosis = (
+            diagnosis_reader(website_id) if diagnosis_reader else None
+        )
     finally:
         database.close()
     if not current_rows:
@@ -144,7 +150,7 @@ def main() -> None:
     current_kpi = _aggregate(current_rows)
     previous_kpi = _aggregate(previous_rows)
     tabs = st.tabs([
-        "Oversigt", "Historik", "Top sider", "Top søgeord",
+        "Oversigt", "Årsagsanalyse", "Historik", "Top sider", "Top søgeord",
         "Muligheder", "AI analyse", "Rå data",
     ])
     with tabs[0]:
@@ -167,8 +173,10 @@ def main() -> None:
             "estimated_minutes": "Minutter", "status": "Status",
         })
     with tabs[1]:
-        _render_history(current_rows, health)
+        _render_search_console_diagnosis(search_diagnosis)
     with tabs[2]:
+        _render_history(current_rows, health)
+    with tabs[3]:
         selected_page = _render_dimension_table(
             page_comparisons, "page_url", "side"
         )
@@ -178,11 +186,11 @@ def main() -> None:
                 row for row in page_query_comparisons
                 if row.get("page_url") == selected_page
             ], "query", "søgeord", filters=False)
-    with tabs[3]:
-        _render_dimension_table(query_comparisons, "query", "søgeord")
     with tabs[4]:
-        _render_concrete_opportunities(page_comparisons, query_comparisons)
+        _render_dimension_table(query_comparisons, "query", "søgeord")
     with tabs[5]:
+        _render_concrete_opportunities(page_comparisons, query_comparisons)
+    with tabs[6]:
         if analysis:
             st.write(f"**Seneste analyse:** {analysis['summary']}")
             st.write(f"**Anbefaling:** {analysis['recommended_action']}")
@@ -196,7 +204,7 @@ def main() -> None:
             "Analysen bruger websiteprofil, SEO Health, Search Console, "
             "salgshistorik, projekter, opgaver og virksomhedsregler."
         )
-    with tabs[6]:
+    with tabs[7]:
         _render_raw_data(current_rows)
 
 
@@ -395,6 +403,94 @@ def _render_history(
         })
     else:
         st.info("SEO Health-historik er endnu ikke beregnet.")
+
+
+def _render_search_console_diagnosis(
+    diagnosis: dict[str, Any] | None,
+) -> None:
+    """Render the latest persisted, evidence-only traffic diagnosis."""
+    st.subheader("Dokumenteret årsag til trafikfald")
+    if not diagnosis:
+        st.info(
+            "Der er endnu ingen gemt årsagsanalyse. Kør Opdater alle data, "
+            "så de seneste to 28-dages perioder bliver analyseret."
+        )
+        return
+    status = diagnosis.get("status")
+    if status == "missing_periods":
+        st.warning("Der mangler to sammenlignelige 28-dages perioder.")
+        return
+    previous = int(diagnosis.get("previous_clicks", 0))
+    current = int(diagnosis.get("current_clicks", 0))
+    loss = int(diagnosis.get("click_loss", 0))
+    for column, (label, value) in zip(
+        st.columns(4),
+        (
+            ("Klik før", previous),
+            ("Klik nu", current),
+            ("Dokumenteret kliktab", loss),
+            (
+                "Forklaret af viste sider",
+                f"{float(diagnosis.get('explained_loss_share', 0)):.1f} %",
+            ),
+        ),
+    ):
+        column.metric(label, value)
+    st.caption(
+        f"Periode {diagnosis.get('period_start')}–"
+        f"{diagnosis.get('period_end')} sammenlignet med "
+        f"{diagnosis.get('previous_period_start')}–"
+        f"{diagnosis.get('previous_period_end')}."
+    )
+    if status == "insufficient_data":
+        st.warning(str(diagnosis.get("reason", "Datagrundlaget er for lille.")))
+        return
+    if status == "no_decline":
+        st.success("Det samlede antal organiske klik er ikke faldet.")
+        return
+    if status == "minor_decline":
+        st.info(str(diagnosis.get(
+            "reason", "Faldet er under den fastsatte støjgrænse."
+        )))
+        return
+    loss_pages = diagnosis.get("loss_pages") or []
+    if not loss_pages:
+        st.info(str(diagnosis.get("reason", "Ingen tydelig sideårsag fundet.")))
+        return
+    st.write(
+        "Årsagerne nedenfor er klassificeret ud fra målte ændringer i "
+        "placering, CTR og visninger – ikke ud fra en AI-vurdering."
+    )
+    st.dataframe(
+        [
+            {
+                "Nr.": index,
+                "Side": page["page_url"],
+                "Klik før": page["previous_clicks"],
+                "Klik nu": page["current_clicks"],
+                "Kliktab": page["click_loss"],
+                "Målt signal": page["cause"],
+                "Placering": (
+                    f"{page['previous_position']:.1f} → "
+                    f"{page['current_position']:.1f}"
+                ),
+                "CTR": (
+                    f"{page['previous_ctr'] * 100:.1f} % → "
+                    f"{page['current_ctr'] * 100:.1f} %"
+                ),
+                "Berørte søgeord": ", ".join(
+                    f"{item['query']} (−{item['click_loss']})"
+                    for item in page.get("queries", [])
+                ) or "Ingen tydeligt faldende søgeord",
+            }
+            for index, page in enumerate(loss_pages, start=1)
+        ],
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Side": st.column_config.LinkColumn("Side"),
+        },
+    )
 
 
 def _render_opportunities(
