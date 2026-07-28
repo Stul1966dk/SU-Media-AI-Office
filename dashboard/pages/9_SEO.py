@@ -140,6 +140,12 @@ def main() -> None:
         search_diagnosis = (
             diagnosis_reader(website_id) if diagnosis_reader else None
         )
+        plausible_reader = getattr(
+            database, "get_latest_plausible_diagnosis", None
+        )
+        plausible_diagnosis = (
+            plausible_reader(website_id) if plausible_reader else None
+        )
     finally:
         database.close()
     if not current_rows:
@@ -174,6 +180,8 @@ def main() -> None:
         })
     with tabs[1]:
         _render_search_console_diagnosis(search_diagnosis)
+        st.divider()
+        _render_plausible_diagnosis(plausible_diagnosis)
     with tabs[2]:
         _render_history(current_rows, health)
     with tabs[3]:
@@ -492,6 +500,59 @@ def _render_search_console_diagnosis(
         },
     )
 
+
+def _render_plausible_diagnosis(
+    diagnosis: dict[str, Any] | None,
+) -> None:
+    """Render the latest persisted Plausible traffic comparison."""
+    st.subheader("Plausible-trafikudvikling")
+    if not diagnosis:
+        st.info(
+            "Der er endnu ingen gemt Plausible-analyse. Aktivér Plausible "
+            "for websitet og kør Opdater alle data."
+        )
+        return
+    status = str(diagnosis.get("status", ""))
+    previous = int(diagnosis.get("previous_visitors", 0))
+    current = int(diagnosis.get("current_visitors", 0))
+    change = int(diagnosis.get("visitor_change", 0))
+    percent = diagnosis.get("visitor_change_percent")
+    for column, (label, value) in zip(
+        st.columns(3),
+        (
+            ("Besøgende før", previous),
+            ("Besøgende nu", current),
+            (
+                "Ændring",
+                f"{change:+d} ({float(percent):+.1f} %)"
+                if percent is not None else f"{change:+d}",
+            ),
+        ),
+    ):
+        column.metric(label, value)
+    if diagnosis.get("period_start"):
+        st.caption(
+            f"Periode {diagnosis.get('period_start')}–"
+            f"{diagnosis.get('period_end')} sammenlignet med "
+            f"{diagnosis.get('previous_period_start')}–"
+            f"{diagnosis.get('previous_period_end')}."
+        )
+    reason = str(diagnosis.get("reason", ""))
+    if status == "missing_periods":
+        st.warning(reason)
+    elif status == "insufficient_data":
+        st.warning(reason)
+    elif status == "significant_decline":
+        st.error(reason)
+    elif status == "minor_decline":
+        st.info(reason)
+    elif status == "growth":
+        st.success(reason)
+    else:
+        st.success(reason or "Besøgstallet er stabilt.")
+    st.caption(
+        "Klassifikationen er beregnet ud fra gemte besøgstal og bruger ikke AI."
+    )
 
 def _render_opportunities(
     current: dict[str, float], previous: dict[str, float],

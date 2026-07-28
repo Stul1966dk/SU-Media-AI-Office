@@ -237,8 +237,15 @@ Indeholder Plausibles daglige besøgstal pr. website.
 
 Kombinationen af `website_id` og `metric_date` er unik. Normal import starter
 to kalenderdage før seneste gemte dato for det konkrete website og slutter
-på seneste afsluttede dag. Første og tvungen import bruger 30 afsluttede
-dage. Overlaprækker opdateres via upsert uden dubletter.
+på seneste afsluttede dag. Første og tvungen import bruger 56 afsluttede
+dage, så to komplette 28-dages perioder er tilgængelige. Overlaprækker
+opdateres via upsert uden dubletter.
+
+### `plausible_diagnoses`
+
+Gemmer den deterministiske sammenligning af to komplette Plausible-perioder
+pr. website. Kombinationen af website, aktuel periodestart og periodeslut er
+unik; det strukturerede analyseresultat gemmes som JSON.
 
 ### `seo_health_history`
 

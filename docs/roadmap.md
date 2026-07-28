@@ -349,3 +349,15 @@ Disse punkter er registreret til senere prioritering og er ikke implementeret:
 
 Succeskriterium: AI Office kan forklare et væsentligt organisk trafikfald med
 konkrete URL'er, søgeord og før/efter-tal uden at gætte ved lav datamængde.
+
+# Sprint 43.2 - Plausible-trafikanalyse
+
+- [x] Sammenlign to komplette, ikke-overlappende 28-dages perioder.
+- [x] Kræv mindst 100 tidligere besøgende.
+- [x] Filtrér fald under 20 besøgende eller 10 % som mindre udsving.
+- [x] Klassificér vækst, stabilitet, mindre fald og væsentligt fald.
+- [x] Gem analysen idempotent uden AI- eller ekstra API-kald.
+- [x] Vis manglende data og seneste analyse read-only på SEO-siden.
+
+Succeskriterium: AI Office kan dokumentere, om udviklingen i Search Console
+også ledsages af et reelt fald i Plausible-besøgende.

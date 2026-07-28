@@ -88,7 +88,7 @@ class PlausibleImportTests(unittest.TestCase):
         self.assertEqual(6, second["rows_updated"])
         self.assertEqual(6, len(self.database.get_plausible_daily_metrics()))
 
-    def test_first_import_uses_30_completed_days(self) -> None:
+    def test_first_import_uses_56_completed_days(self) -> None:
         connector = RangePlausible()
         result = PlausibleImportService(
             self.database, connector=connector
@@ -98,29 +98,26 @@ class PlausibleImportTests(unittest.TestCase):
             force_full_refresh=False,
         )
         self.assertEqual(
-            [("a.dk", date(2026, 6, 25), date(2026, 7, 24))],
+            [("a.dk", date(2026, 5, 30), date(2026, 7, 24))],
             connector.calls,
         )
         self.assertEqual("full", result["import_mode"])
-        self.assertEqual("2026-06-25", result["earliest_fetched_date"])
+        self.assertEqual("2026-05-30", result["earliest_fetched_date"])
         self.assertEqual("2026-07-24", result["latest_fetched_date"])
-        self.assertEqual(30, result["rows_created"])
+        self.assertEqual(56, result["rows_created"])
         self.assertEqual(
-            30,
+            56,
             len(self.database.get_plausible_daily_metrics(
                 website_id="a.dk"
             )),
         )
 
-    def test_incremental_period_is_calculated_per_website(self) -> None:
+    def test_short_history_is_backfilled_per_website(self) -> None:
         for website, metric_date in (
-            ("a.dk", "2026-07-24"),
-            ("b.dk", "2026-07-20"),
+            ("a.dk", "2026-07-24"), ("b.dk", "2026-07-20")
         ):
             self.database.upsert_plausible_daily_metric(
-                website_id=website,
-                metric_date=metric_date,
-                visitors=1,
+                website_id=website, metric_date=metric_date, visitors=1
             )
         connector = RangePlausible()
         result = PlausibleImportService(
@@ -132,20 +129,20 @@ class PlausibleImportTests(unittest.TestCase):
         )
         self.assertEqual(
             [
-                ("a.dk", date(2026, 7, 22), date(2026, 7, 24)),
-                ("b.dk", date(2026, 7, 18), date(2026, 7, 24)),
+                ("a.dk", date(2026, 5, 30), date(2026, 7, 24)),
+                ("b.dk", date(2026, 5, 30), date(2026, 7, 24)),
             ],
             connector.calls,
         )
-        self.assertEqual("incremental", result["import_mode"])
-        self.assertEqual("2026-07-18", result["earliest_fetched_date"])
-        self.assertEqual(8, result["rows_created"])
+        self.assertEqual("full", result["import_mode"])
+        self.assertEqual("2026-05-30", result["earliest_fetched_date"])
+        self.assertEqual(110, result["rows_created"])
         self.assertEqual(2, result["rows_updated"])
         self.assertEqual(
-            10, len(self.database.get_plausible_daily_metrics())
+            112, len(self.database.get_plausible_daily_metrics())
         )
 
-    def test_force_full_refresh_uses_30_days_and_upserts(self) -> None:
+    def test_force_full_refresh_uses_56_days_and_upserts(self) -> None:
         self.database.upsert_plausible_daily_metric(
             website_id="a.dk", metric_date="2026-07-24", visitors=1
         )
@@ -158,14 +155,14 @@ class PlausibleImportTests(unittest.TestCase):
             force_full_refresh=True,
         )
         self.assertEqual(
-            [("a.dk", date(2026, 6, 25), date(2026, 7, 24))],
+            [("a.dk", date(2026, 5, 30), date(2026, 7, 24))],
             connector.calls,
         )
         self.assertEqual("full", result["import_mode"])
-        self.assertEqual(29, result["rows_created"])
+        self.assertEqual(55, result["rows_created"])
         self.assertEqual(1, result["rows_updated"])
         self.assertEqual(
-            30,
+            56,
             len(self.database.get_plausible_daily_metrics(
                 website_id="a.dk"
             )),

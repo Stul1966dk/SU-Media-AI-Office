@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from agents.website_intelligence import WebsiteIntelligenceAgent
 from core.partner_ads_import import execute_partner_ads_check
 from core.plausible_import import PlausibleImportService
+from core.plausible_diagnosis import PlausibleDiagnosisService
 from core.experiment_monitoring import ExperimentMonitoringService
 from core.seo_history import SEOHistory
 from core.system_health import check_runtime_services
@@ -39,6 +40,7 @@ class DataRefreshService:
         search_console: Any | None = None, seo_history: Any | None = None,
         intelligence: Any | None = None,
         plausible_import: Any | None = None,
+        plausible_diagnosis: Any | None = None,
         search_diagnosis: Any | None = None,
         health_check: Callable | None = None,
     ) -> None:
@@ -59,6 +61,9 @@ class DataRefreshService:
         )
         self.plausible_import = plausible_import or PlausibleImportService(
             database
+        )
+        self.plausible_diagnosis = (
+            plausible_diagnosis or PlausibleDiagnosisService(database)
         )
         self.search_diagnosis = (
             search_diagnosis
@@ -342,10 +347,28 @@ class DataRefreshService:
     def refresh_plausible(
         self, website_ids: list[str] | None = None
     ) -> dict[str, Any]:
-        return self.plausible_import.import_active_websites(
+        result = self.plausible_import.import_active_websites(
             website_ids=website_ids,
             force_full_refresh=False,
         )
+        diagnosis_websites = (
+            list(website_ids) if website_ids is not None else [
+                str(item["website_id"])
+                for item in result.get("website_results", [])
+                if item.get("website_id")
+                and item.get("status") in {"completed", "skipped"}
+            ]
+        )
+        diagnosis = self.plausible_diagnosis.analyze_sites(
+            diagnosis_websites
+        )
+        result.update({
+            "diagnoses_processed": diagnosis["websites_processed"],
+            "diagnoses_created": diagnosis["rows_created"],
+            "diagnoses_updated": diagnosis["rows_updated"],
+            "diagnoses_unchanged": diagnosis["rows_unchanged"],
+        })
+        return result
 
     def refresh_website_intelligence(
         self, website_ids: set[str] | None = None

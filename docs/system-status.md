@@ -27,7 +27,8 @@ manuelle Search Console-import bruger ligeledes en tvungen 35-dagesperiode.
 
 Plausible-dagstal importeres ligeledes trinvist pr. website. Overlapperioden
 starter to kalenderdage før seneste gemte Plausible-dato og slutter på
-seneste afsluttede dag. Første og tvungen import bruger 30 afsluttede dage.
+seneste afsluttede dag. Første og tvungen import bruger 56 afsluttede dage,
+så to komplette 28-dages perioder kan sammenlignes.
 Inaktive eller ukonfigurerede websites springes over med en årsag, og
 enkeltfejl rapporteres som advarsler uden at stoppe de øvrige websites.
 

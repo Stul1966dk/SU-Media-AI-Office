@@ -62,6 +62,7 @@ class Database:
         self._create_search_console_dimension_tables()
         self._create_search_console_diagnoses_table()
         self._create_plausible_daily_metrics_table()
+        self._create_plausible_diagnoses_table()
         self._create_seo_health_history_table()
         self._create_seo_recommendations_table()
         self._create_website_intelligence_tables()
@@ -2017,6 +2018,31 @@ class Database:
             """
         )
 
+    def _create_plausible_diagnoses_table(self) -> None:
+        """Store deterministic Plausible comparisons by period."""
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS plausible_diagnoses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                website_id TEXT NOT NULL,
+                period_start TEXT NOT NULL,
+                period_end TEXT NOT NULL,
+                previous_period_start TEXT NOT NULL,
+                previous_period_end TEXT NOT NULL,
+                status TEXT NOT NULL,
+                data_quality TEXT NOT NULL,
+                previous_visitors INTEGER NOT NULL,
+                current_visitors INTEGER NOT NULL,
+                visitor_change INTEGER NOT NULL,
+                analysis_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (website_id, period_start, period_end),
+                FOREIGN KEY (website_id) REFERENCES websites(website)
+            )
+            """
+        )
+
     def _create_seo_health_history_table(self) -> None:
         """Create idempotent SEO health snapshots for every analysis period."""
         self._connection.execute(
@@ -2349,6 +2375,20 @@ class Database:
         ).fetchone()
         return row["latest_date"] if row and row["latest_date"] else None
 
+    def get_earliest_plausible_metric_date(
+        self, website_id: str
+    ) -> str | None:
+        """Return the earliest stored Plausible date for one website."""
+        row = self._connection.execute(
+            """
+            SELECT MIN(metric_date) AS earliest_date
+            FROM plausible_daily_metrics
+            WHERE website_id = ?
+            """,
+            (website_id,),
+        ).fetchone()
+        return row["earliest_date"] if row and row["earliest_date"] else None
+
     def get_search_console_daily_metrics(
         self,
         website_id: str | None = None,
@@ -2671,6 +2711,87 @@ class Database:
             """
             SELECT analysis_json, created_at, updated_at
             FROM search_console_diagnoses
+            WHERE website_id = ?
+            ORDER BY period_end DESC, id DESC
+            LIMIT 1
+            """,
+            (website_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        diagnosis = json.loads(str(row["analysis_json"]))
+        diagnosis["created_at"] = row["created_at"]
+        diagnosis["updated_at"] = row["updated_at"]
+        return diagnosis
+
+    def upsert_plausible_diagnosis(
+        self, diagnosis: dict[str, Any]
+    ) -> str:
+        """Persist one Plausible period comparison idempotently."""
+        key = (
+            str(diagnosis["website_id"]),
+            str(diagnosis["period_start"]),
+            str(diagnosis["period_end"]),
+        )
+        existing = self._connection.execute(
+            """
+            SELECT previous_period_start, previous_period_end, status,
+                   data_quality, previous_visitors, current_visitors,
+                   visitor_change, analysis_json
+            FROM plausible_diagnoses
+            WHERE website_id = ? AND period_start = ? AND period_end = ?
+            """,
+            key,
+        ).fetchone()
+        analysis_json = json.dumps(
+            diagnosis, ensure_ascii=False, sort_keys=True
+        )
+        values = (
+            str(diagnosis["previous_period_start"]),
+            str(diagnosis["previous_period_end"]),
+            str(diagnosis["status"]),
+            str(diagnosis["data_quality"]),
+            int(diagnosis["previous_visitors"]),
+            int(diagnosis["current_visitors"]),
+            int(diagnosis["visitor_change"]),
+            analysis_json,
+        )
+        if existing and tuple(existing) == values:
+            return "unchanged"
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO plausible_diagnoses (
+                    website_id, period_start, period_end,
+                    previous_period_start, previous_period_end, status,
+                    data_quality, previous_visitors, current_visitors,
+                    visitor_change, analysis_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(website_id, period_start, period_end) DO UPDATE SET
+                    previous_period_start = excluded.previous_period_start,
+                    previous_period_end = excluded.previous_period_end,
+                    status = excluded.status,
+                    data_quality = excluded.data_quality,
+                    previous_visitors = excluded.previous_visitors,
+                    current_visitors = excluded.current_visitors,
+                    visitor_change = excluded.visitor_change,
+                    analysis_json = excluded.analysis_json,
+                    updated_at = excluded.updated_at
+                """,
+                (*key, *values, timestamp, timestamp),
+            )
+        return "updated" if existing else "created"
+
+    def get_latest_plausible_diagnosis(
+        self, website_id: str
+    ) -> dict[str, Any] | None:
+        """Return the latest saved Plausible diagnosis."""
+        row = self._connection.execute(
+            """
+            SELECT analysis_json, created_at, updated_at
+            FROM plausible_diagnoses
             WHERE website_id = ?
             ORDER BY period_end DESC, id DESC
             LIMIT 1

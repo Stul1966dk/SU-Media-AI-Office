@@ -9,7 +9,7 @@ from connectors.plausible_connector import (
 )
 
 
-DEFAULT_PLAUSIBLE_IMPORT_DAYS = 30
+DEFAULT_PLAUSIBLE_IMPORT_DAYS = 56
 PLAUSIBLE_OVERLAP_DAYS = 2
 INACTIVE_STATUSES = {"inactive", "phasing_out", "archived", "cancelled"}
 
@@ -95,7 +95,21 @@ class PlausibleImportService:
                         website
                     )
                 )
-                if latest_stored:
+                earliest_stored = (
+                    None if force_full_refresh or not latest_stored
+                    else self.database.get_earliest_plausible_metric_date(
+                        website
+                    )
+                )
+                has_full_history = bool(
+                    latest_stored
+                    and earliest_stored
+                    and (
+                        date.fromisoformat(latest_stored)
+                        - date.fromisoformat(earliest_stored)
+                    ).days >= self.days - 1
+                )
+                if latest_stored and has_full_history:
                     start_date = (
                         date.fromisoformat(latest_stored)
                         - timedelta(days=PLAUSIBLE_OVERLAP_DAYS)
