@@ -24,24 +24,28 @@ def render_sidebar(*, show_website_selector: bool = True) -> None:
     from dashboard.components.startup_sync import ensure_startup_sync
     ensure_startup_sync()
     primary_pages = (
-        ("pages/15_Dagens_Arbejde.py", "Aktuel opgave", ":material/today:"),
-        ("app.py", "Dashboard", ":material/dashboard:"),
-        ("pages/3_Executive_Briefing.py", "Executive Briefing", ":material/strategy:"),
+        ("app.py", "I dag", ":material/today:"),
+        ("pages/11_Websites.py", "Websites", ":material/public:"),
+        ("pages/13_Eksperimenter.py", "Resultater", ":material/science:"),
+        ("pages/19_Portefolje.py", "Portefølje", ":material/dashboard:"),
     )
     groups = (
         (
-            "Websites", "websites", ":material/public:",
+            "Værktøjer", "tools", ":material/build:",
             (
-                ("pages/11_Websites.py", "Oversigt", ":material/public:"),
                 (
-                    "pages/1_Website_Profile.py", "Website Profile",
+                    "pages/1_Website_Profile.py", "Websiteprofil",
                     ":material/language:",
                 ),
-            ),
-        ),
-        (
-            "Research", "research", ":material/travel_explore:",
-            (
+                ("pages/9_SEO.py", "SEO-analyse", ":material/query_stats:"),
+                (
+                    "pages/14_Title_Optimering.py", "Title-optimering",
+                    ":material/title:",
+                ),
+                (
+                    "pages/6_AI_Analyst.py", "AI-analyse",
+                    ":material/psychology:",
+                ),
                 (
                     "pages/4_Website_Discovery.py", "Website Discovery",
                     ":material/travel_explore:",
@@ -50,31 +54,6 @@ def render_sidebar(*, show_website_selector: bool = True) -> None:
                     "pages/5_Content_Explorer.py", "Content Explorer",
                     ":material/article:",
                 ),
-            ),
-        ),
-        (
-            "SEO", "seo", ":material/query_stats:",
-            (
-                ("pages/9_SEO.py", "SEO-overblik", ":material/query_stats:"),
-                (
-                    "pages/17_SEO_Insights.py", "SEO Insights",
-                    ":material/insights:",
-                ),
-                (
-                    "pages/14_Title_Optimering.py", "Title optimering",
-                    ":material/title:",
-                ),
-                (
-                    "pages/13_Eksperimenter.py", "Eksperimenter",
-                    ":material/science:",
-                ),
-            ),
-        ),
-        (
-            "Arbejde", "work", ":material/work:",
-            (
-                ("pages/2_Projekter.py", "Projekter", ":material/folder:"),
-                ("pages/8_Opgaver.py", "Opgaver", ":material/checklist:"),
             ),
         ),
         (
@@ -118,13 +97,7 @@ def render_sidebar(*, show_website_selector: bool = True) -> None:
         for path, label, icon in primary_pages:
             st.sidebar.page_link(path, label=label, icon=icon)
 
-        for index, (label, key, icon, pages) in enumerate(groups):
-            if index == 3:
-                st.sidebar.page_link(
-                    "pages/6_AI_Analyst.py",
-                    label="AI Analyst",
-                    icon=":material/psychology:",
-                )
+        for label, key, icon, pages in groups:
             state_key = f"nav_group_open:{key}"
             is_active = active_page in {
                 Path(path).name for path, _label, _icon in pages
@@ -155,7 +128,6 @@ def render_sidebar(*, show_website_selector: bool = True) -> None:
     except KeyError:
         all_pages = [
             *primary_pages,
-            ("pages/6_AI_Analyst.py", "AI Analyst", ":material/psychology:"),
             *[
                 page
                 for _label, _key, _icon, pages in groups
@@ -262,6 +234,19 @@ def render_page_link(path: str, label: str) -> None:
     """Render an internal page link in app and bare Streamlit tests."""
     try:
         st.page_link(path, label=label)
+    except KeyError:
+        st.markdown(f"[{label}]({path})")
+
+
+def render_next_step(*, text: str, path: str, label: str) -> None:
+    """Keep the user's next meaningful action visible on core pages."""
+    st.info(f"**Næste trin:** {text}")
+    try:
+        st.page_link(
+            path,
+            label=label,
+            icon=":material/arrow_forward:",
+        )
     except KeyError:
         st.markdown(f"[{label}]({path})")
 

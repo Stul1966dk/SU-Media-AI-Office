@@ -176,7 +176,10 @@ class Sprint26Tests(unittest.TestCase):
         os.environ["SU_MEDIA_DATABASE_PATH"] = str(self.database.path)
         try:
             app = AppTest.from_file(
-                str(ROOT / "dashboard" / "app.py"), default_timeout=20
+                str(
+                    ROOT / "dashboard" / "pages" / "19_Portefolje.py"
+                ),
+                default_timeout=20,
             ).run()
         finally:
             if previous is None:

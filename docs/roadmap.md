@@ -418,3 +418,21 @@ registreres som ét sporbart SEO-eksperiment med baseline og en planlagt
 
 Succeskriterium: Aktuel opgave viser, hvor hvert SEO-arbejde befinder sig, og
 hvilken konkret brugerhandling der kommer først, før appen foreslår nyt arbejde.
+
+# Sprint 44.1 - Enkel start og tydelig navigation
+
+- [x] Gør I dag til appens faktiske startside.
+- [x] Begræns den daglige hovednavigation til I dag, Websites, Resultater og
+  Portefølje.
+- [x] Saml specialistfunktioner under Værktøjer og driftsfunktioner under
+  Indstillinger.
+- [x] Vis næste trin før status, datagrundlag og tekniske forklaringer.
+- [x] Fold sekundære data og øvrigt igangværende arbejde sammen som standard.
+- [x] Tilføj kontekstuel hoverhjælp til valg og navigation, hvor konsekvensen
+  ikke er selvforklarende.
+- [x] Bevar alle eksisterende funktioner og direkte links fra relevante
+  arbejdsflows.
+
+Succeskriterium: En ny bruger lander på én konkret arbejdsflade, kan se det
+næste trin uden at lede og behøver kun åbne flere sider, når opgaven kræver
+specialiseret arbejde eller yderligere dokumentation.

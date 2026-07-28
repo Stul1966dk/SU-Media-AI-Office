@@ -136,7 +136,7 @@ class TrafficWorkOverviewTests(unittest.TestCase):
         )
         self.assertIn("set_selected_website(website)", source)
         self.assertIn(
-            'label="Åbn alle aktive SEO-eksperimenter"', source
+            'label="Se aktive målinger og resultater"', source
         )
 
     def test_hot_reload_fallback_reads_diagnoses_per_website(self):

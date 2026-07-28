@@ -26,12 +26,20 @@ class DashboardUsabilityTests(unittest.TestCase):
             os.environ["SU_MEDIA_DATABASE_PATH"] = self.previous
         self.temp.cleanup()
 
-    def test_dashboard_is_named_dashboard(self) -> None:
+    def test_application_opens_on_today(self) -> None:
         app = AppTest.from_file(
             str(ROOT / "dashboard" / "app.py"), default_timeout=20
         ).run()
         self.assertFalse(app.exception)
-        self.assertEqual(["Dashboard"], [item.value for item in app.title])
+        self.assertEqual(["I dag"], [item.value for item in app.title])
+
+    def test_portfolio_remains_available_as_secondary_page(self) -> None:
+        app = AppTest.from_file(
+            str(ROOT / "dashboard" / "pages" / "19_Portefolje.py"),
+            default_timeout=20,
+        ).run()
+        self.assertFalse(app.exception)
+        self.assertEqual(["Portefølje"], [item.value for item in app.title])
 
     def test_getting_started_has_fixed_order_and_help(self) -> None:
         app = AppTest.from_file(
@@ -68,7 +76,8 @@ class DashboardUsabilityTests(unittest.TestCase):
                 continue
             self.assertTrue(
                 "render_help_panel" in source or
-                "dashboard.components.placeholder" in source,
+                "dashboard.components.placeholder" in source or
+                "render_portfolio" in source,
                 path.name,
             )
 

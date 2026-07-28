@@ -17,7 +17,9 @@ from core.experiment_evaluation import (
 from dashboard.components.database import open_database
 from dashboard.components.formatting import format_date, format_datetime
 from dashboard.components.help_panel import render_help_panel
-from dashboard.components.ui import load_styles, render_sidebar
+from dashboard.components.ui import (
+    load_styles, render_next_step, render_sidebar,
+)
 
 
 STATUS_LABELS = {
@@ -61,6 +63,19 @@ def main() -> None:
         requirements="En konkret beslutning, URL-data og brugerens godkendelse.",
         actions="Godkend, start, evaluér eller annullér planlagte eksperimenter.",
         limitations="Siden ændrer aldrig et website og starter intet automatisk.",
+    )
+    render_next_step(
+        text=(
+            "Følg målingerne her. Gå tilbage til I dag, når ingen resultater "
+            "kræver din handling."
+        ),
+        path="app.py",
+        label="Tilbage til I dag",
+    )
+    st.page_link(
+        "pages/17_SEO_Insights.py",
+        label="Se læring fra afsluttede målinger",
+        icon=":material/insights:",
     )
     database = open_database(read_only=True)
     try:

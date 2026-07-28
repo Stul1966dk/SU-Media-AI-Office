@@ -55,12 +55,16 @@ def _optimizer(database: Any) -> TitleOptimizer:
 
 def main() -> None:
     st.set_page_config(
-        page_title="Aktuel opgave", page_icon="✓", layout="centered"
+        page_title="I dag", page_icon="✓", layout="centered"
     )
     load_styles(PROJECT_ROOT / "dashboard" / "assets" / "styles.css")
     _load_daily_work_styles()
     render_sidebar(show_website_selector=False)
-    st.title("Aktuel opgave")
+    st.title("I dag")
+    st.caption(
+        "Her får du ét tydeligt næste trin. Når det er udført, viser siden "
+        "automatisk, hvad du skal gøre bagefter."
+    )
 
     database = open_database()
     try:
@@ -199,27 +203,25 @@ def _render_work_overview(items: list[dict[str, Any]]) -> None:
             item["stage"] == "ready_for_evaluation" for item in items
         ),
     }
-    columns = st.columns(4)
-    for column, (label, value) in zip(columns, counts.items()):
-        column.metric(label, value)
-    if counts["Under måling"] or counts["Klar til evaluering"]:
-        st.page_link(
-            "pages/13_Eksperimenter.py",
-            label="Åbn alle aktive SEO-eksperimenter",
-            icon="🧪",
-        )
     actionable = next_actionable_work(items)
     if actionable:
-        st.markdown("### Næste handling")
+        st.markdown("### Næste trin")
         _render_workflow_card(actionable, primary=True)
     other_items = [
         item for item in items
         if not actionable or item is not actionable
     ]
-    if other_items:
-        with st.expander(
-            f"Vis øvrigt igangværende arbejde ({len(other_items)})"
-        ):
+    with st.expander("Se status og øvrigt igangværende arbejde"):
+        columns = st.columns(4)
+        for column, (label, value) in zip(columns, counts.items()):
+            column.metric(label, value)
+        if counts["Under måling"] or counts["Klar til evaluering"]:
+            st.page_link(
+                "pages/13_Eksperimenter.py",
+                label="Se aktive målinger og resultater",
+                icon=":material/science:",
+            )
+        if other_items:
             for item in other_items:
                 _render_workflow_card(item, primary=False)
 
@@ -262,7 +264,7 @@ def _render_combined_traffic_task(item: dict[str, Any]) -> None:
         st.subheader(item["description"])
         st.write(f"**Prioritet:** {item['priority']}")
         st.write(f"**Website:** {item['website']}")
-        st.markdown("### Konkret anbefaling")
+        st.markdown("### Det skal du gøre")
         st.write(item.get("recommended_action") or item["description"])
         steps = item.get("action_steps") or []
         if steps:
@@ -278,19 +280,21 @@ def _render_combined_traffic_task(item: dict[str, Any]) -> None:
             st.write(
                 f"**Forventet tid:** {item['estimated_minutes']} minutter"
             )
-        st.markdown("### Datagrundlag")
-        st.write(
-            "**Plausible-ændring:** "
-            f"{float(item['plausible_change']):.1f} %".replace(".", ",")
-        )
-        st.write(
-            f"**Search Console-ændring:** {item['search_console_change']}"
-        )
-        st.write(item["explanation"])
-        if item.get("measured_cause"):
-            st.write(f"**Målt signal:** {item['measured_cause']}")
-        if item.get("confidence"):
-            st.write(f"**Sikkerhed:** {item['confidence']}")
+        with st.expander("Se datagrundlag og forklaring"):
+            st.write(
+                "**Plausible-ændring:** "
+                f"{float(item['plausible_change']):.1f} %".replace(".", ",")
+            )
+            st.write(
+                f"**Search Console-ændring:** "
+                f"{item['search_console_change']}"
+            )
+            st.write(item["explanation"])
+            if item.get("measured_cause"):
+                st.write(f"**Målt signal:** {item['measured_cause']}")
+            if item.get("confidence"):
+                st.write(f"**Sikkerhed:** {item['confidence']}")
+        st.markdown("### Næste trin")
         _render_scoped_navigation(
             item,
             label=item.get(
@@ -329,6 +333,10 @@ def _render_scoped_navigation(
         if st.button(
             label,
             type="primary",
+            help=(
+                "Åbner den relevante side med korrekt website og analyse "
+                "valgt, så du kan fortsætte direkte."
+            ),
             key=f"open-{item.get('task_key') or target}-{website}",
         ):
             set_selected_website(website)
@@ -348,8 +356,7 @@ def _render_priority_explanation(item: dict[str, Any]) -> None:
     explanations = _priority_explanations(item)
     if not explanations:
         return
-    with st.container(border=True):
-        st.subheader("Hvorfor denne opgave?")
+    with st.expander("Hvorfor er denne opgave valgt?"):
         for signal, explanation, score in explanations:
             st.markdown(f"**{signal}**")
             st.write(explanation)
@@ -675,6 +682,10 @@ def _render_website_filter(websites: list[dict[str, Any]]) -> str:
         index=options.index(current),
         key=FILTER_WIDGET_KEY,
         on_change=_store_website_filter,
+        help=(
+            "Vælg Alle websites for at få den vigtigste opgave på tværs, "
+            "eller afgræns til ét website."
+        ),
     )
     st.session_state[FILTER_SESSION_KEY] = selected
     if selected == ALL_WEBSITES:

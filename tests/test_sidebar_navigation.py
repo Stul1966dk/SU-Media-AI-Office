@@ -24,16 +24,21 @@ class SidebarNavigationTests(unittest.TestCase):
             )
             database.close()
 
-    def test_sidebar_contains_requested_groups_and_subpages(self) -> None:
+    def test_sidebar_prioritizes_daily_flow_and_hides_specialists(self) -> None:
         source = (
             ROOT / "dashboard" / "components" / "ui.py"
         ).read_text(encoding="utf-8")
         for label in (
-            "Aktuel opgave", "Dashboard", "Executive Briefing", "Websites",
-            "Research", "SEO", "AI Analyst", "Arbejde", "Indstillinger",
-            "Kom godt i gang", "SEO-læring", "Integrationer",
+            "I dag", "Websites", "Resultater", "Portefølje",
+            "Værktøjer", "Indstillinger", "Kom godt i gang",
+            "SEO-læring", "Integrationer",
         ):
             self.assertIn(label, source)
+        primary_section = source.split("groups = (", 1)[0]
+        self.assertNotIn("Executive Briefing", primary_section)
+        self.assertNotIn("AI Analyst", primary_section)
+        self.assertNotIn("Projekter", source)
+        self.assertNotIn("Opgaver", source)
         self.assertIn("set_navigation_group_state", source)
 
 

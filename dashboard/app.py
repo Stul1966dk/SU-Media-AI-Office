@@ -2,6 +2,8 @@
 
 import sys
 import inspect
+import importlib
+import importlib.util
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,7 @@ from dashboard.components.formatting import (
 )
 from dashboard.components.ui import (
     load_styles,
+    render_next_step,
     render_sidebar,
     render_page_link,
     render_status,
@@ -62,9 +65,25 @@ def _runtime_health(_database: Any) -> dict[str, dict[str, Any]]:
 
 
 def main() -> None:
-    """Render the complete dashboard from database-backed sections."""
+    """Open the daily workflow as the application's true starting point."""
+    import dashboard.components.ui as ui_module
+
+    importlib.reload(ui_module)
+    daily_path = PROJECT_ROOT / "dashboard" / "pages" / "15_Dagens_Arbejde.py"
+    spec = importlib.util.spec_from_file_location(
+        "dashboard_daily_start", daily_path
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Siden I dag kunne ikke indlæses.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.main()
+
+
+def render_portfolio() -> None:
+    """Render the complete portfolio dashboard from database-backed sections."""
     st.set_page_config(
-        page_title="Dashboard",
+        page_title="Portefølje",
         page_icon="🏢",
         layout="wide",
         initial_sidebar_state="expanded",
@@ -86,7 +105,7 @@ def main() -> None:
     finally:
         database.close()
 
-    st.title("Dashboard")
+    st.title("Portefølje")
     render_help_panel(
         purpose="Giv et samlet overblik over AI Office og de vigtigste datakilder.",
         requirements="Den lokale database og de services, du ønsker at bruge.",
@@ -98,17 +117,23 @@ def main() -> None:
         ),
     )
     st.caption(format_datetime(now))
-    st.subheader("Synkronisering ved app-start")
-    render_startup_sync_status()
-    _render_data_refresh()
-    _render_system_status(data)
-    _render_ai_status(data)
+    render_next_step(
+        text="Gå til I dag for at arbejde videre med den vigtigste opgave.",
+        path="app.py",
+        label="Fortsæt til I dag",
+    )
     _render_overview(data)
-    _render_getting_started(data)
     _render_economy(data)
     _render_seo_health(data, selected_trend)
-    _render_priority_tasks(data)
-    _render_events(data)
+    with st.expander("Se øvrige prioriterede signaler"):
+        _render_priority_tasks(data)
+    with st.expander("Se dataopdatering og teknisk status"):
+        st.subheader("Synkronisering ved app-start")
+        render_startup_sync_status()
+        _render_data_refresh()
+        _render_system_status(data)
+        _render_ai_status(data)
+        _render_events(data)
 
 
 def _apply_hot_reload_compatibility(database: Any) -> None:

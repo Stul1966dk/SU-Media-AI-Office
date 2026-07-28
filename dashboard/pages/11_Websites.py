@@ -13,7 +13,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from dashboard.components.database import open_database
 from dashboard.components.formatting import format_rows
 from dashboard.components.help_panel import render_help_panel
-from dashboard.components.ui import load_styles, render_sidebar
+from dashboard.components.ui import (
+    load_styles, render_next_step, render_sidebar,
+)
 
 
 def _year_commission(sales: list[dict]) -> float:
@@ -93,6 +95,11 @@ def main() -> None:
         st.info(
             "Ingen websites er registreret. Tilføj først et website i registry."
         )
+        render_next_step(
+            text="Forbind eller registrér de websites, du vil arbejde med.",
+            path="pages/18_Integrationer.py",
+            label="Åbn Integrationer",
+        )
         return
 
     st.subheader("Vælg de websites AI Office skal arbejde med")
@@ -165,6 +172,11 @@ def main() -> None:
                 width="stretch",
                 hide_index=True,
             )
+    render_next_step(
+        text="Gå til I dag for at få den vigtigste opgave for de aktive sites.",
+        path="app.py",
+        label="Fortsæt til I dag",
+    )
 
 
 if __name__ == "__main__":

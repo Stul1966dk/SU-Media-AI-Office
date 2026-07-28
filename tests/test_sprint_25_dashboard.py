@@ -44,7 +44,10 @@ class Sprint25DashboardTests(unittest.TestCase):
 
     def test_sidebar_selector_excludes_archived_websites(self) -> None:
         app = AppTest.from_file(
-            str(ROOT / "dashboard" / "app.py"), default_timeout=20
+            str(
+                ROOT / "dashboard" / "pages" / "19_Portefolje.py"
+            ),
+            default_timeout=20,
         ).run()
         self.assertFalse(app.exception)
         selector = next(
