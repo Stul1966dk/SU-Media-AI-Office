@@ -404,3 +404,17 @@ opgave.
 Succeskriterium: En godkendt anbefaling kan efter manuel websiteændring
 registreres som ét sporbart SEO-eksperiment med baseline og en planlagt
 28-dages evaluering, uden at appen selv ændrer websitet.
+
+# Sprint 43.6 - Praktisk overblik over igangværende SEO-arbejde
+
+- [x] Saml anbefalingskladder og aktive eksperimenter i Aktuel opgave.
+- [x] Vis antal kladder, afventende implementeringer, målinger og evalueringer.
+- [x] Giv igangværende arbejde forrang for nye anbefalinger.
+- [x] Prioritér næste handling som evaluér, implementér og derefter godkend.
+- [x] Vis aktiv måling uden at blokere arbejde på andre ulåste URL'er.
+- [x] Undgå dubletter mellem anbefalingsbeslutning og tilknyttet eksperiment.
+- [x] Respektér websitefilteret i både beslutninger og eksperimenter.
+- [x] Navigér direkte til korrekt website i SEO eller til Eksperimenter.
+
+Succeskriterium: Aktuel opgave viser, hvor hvert SEO-arbejde befinder sig, og
+hvilken konkret brugerhandling der kommer først, før appen foreslår nyt arbejde.

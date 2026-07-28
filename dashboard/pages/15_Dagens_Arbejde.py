@@ -21,6 +21,10 @@ from agents.title_optimizer import TitleOptimizer
 from core.ai_service import AIService
 from core.daily_work_preparation import DailyWorkPreparationService
 from core.seo_experiment_engine import SEOExperimentEngine
+from core.traffic_work_overview import (
+    build_traffic_work_overview,
+    next_actionable_work,
+)
 from core.website_registry import WebsiteRegistry
 from core.work_queue_service import WorkQueueService
 from dashboard.components.database import open_database
@@ -29,6 +33,7 @@ from dashboard.components.data import (
     build_combined_traffic_tasks,
 )
 from dashboard.components.ui import load_styles, render_sidebar
+from dashboard.components.website_selector import set_selected_website
 
 
 def _optimizer(database: Any) -> TitleOptimizer:
@@ -60,13 +65,20 @@ def main() -> None:
         websites = _active_websites(registry)
         selected = _render_website_filter(websites)
         website_id = None if selected == ALL_WEBSITES else selected
-        priority_tasks = database.get_priority_task_scores(limit=None)
         decision_reader = getattr(
             database, "get_traffic_recommendation_decisions", None
         )
+        decisions = decision_reader() if decision_reader else []
+        experiments = database.get_seo_experiments()
+        work_overview = build_traffic_work_overview(
+            decisions, experiments, website_id=website_id
+        )
+        _render_work_overview(work_overview)
+        if next_actionable_work(work_overview):
+            return
+        priority_tasks = database.get_priority_task_scores(limit=None)
         priority_tasks = _filter_decided_recommendations(
-            priority_tasks,
-            decision_reader() if decision_reader else [],
+            priority_tasks, decisions,
         )
         if website_id:
             priority_tasks = [
@@ -108,6 +120,75 @@ def main() -> None:
             _render_recommendation(database, queue, current)
     finally:
         database.close()
+
+
+def _render_work_overview(items: list[dict[str, Any]]) -> None:
+    """Show the current workflow before proposing another recommendation."""
+    if not items:
+        return
+    st.subheader("Igangværende SEO-arbejde")
+    counts = {
+        "Kladder": sum(item["stage"] == "draft" for item in items),
+        "Afventer implementering": sum(
+            item["stage"] == "approved" for item in items
+        ),
+        "Under måling": sum(
+            item["stage"] == "measurement" for item in items
+        ),
+        "Klar til evaluering": sum(
+            item["stage"] == "ready_for_evaluation" for item in items
+        ),
+    }
+    columns = st.columns(4)
+    for column, (label, value) in zip(columns, counts.items()):
+        column.metric(label, value)
+    actionable = next_actionable_work(items)
+    if actionable:
+        st.markdown("### Næste handling")
+        _render_workflow_card(actionable, primary=True)
+    other_items = [
+        item for item in items
+        if not actionable or item is not actionable
+    ]
+    if other_items:
+        with st.expander(
+            f"Vis øvrigt igangværende arbejde ({len(other_items)})"
+        ):
+            for item in other_items:
+                _render_workflow_card(item, primary=False)
+
+
+def _render_workflow_card(
+    item: dict[str, Any], *, primary: bool
+) -> None:
+    with st.container(border=True):
+        st.write(f"**{item['status_label']} · {item['website']}**")
+        st.write(item["title"])
+        if item.get("target_url"):
+            st.caption(item["target_url"])
+        st.write(f"**Det skal du gøre:** {item['next_action']}")
+        if item.get("planned_evaluation_date"):
+            st.write(
+                "**Planlagt evaluering:** "
+                f"{item['planned_evaluation_date']}"
+            )
+        if item["target"] == "pages/9_SEO.py":
+            if st.button(
+                item["link_label"],
+                type="primary" if primary else "secondary",
+                key=(
+                    f"workflow-{item['stage']}-{item['website']}-"
+                    f"{item.get('experiment_id') or item['target_url']}"
+                ),
+            ):
+                set_selected_website(item["website"])
+                st.switch_page(item["target"])
+        else:
+            st.page_link(
+                item["target"],
+                label=item["link_label"],
+                icon="🧪",
+            )
 
 
 def _render_combined_traffic_task(item: dict[str, Any]) -> None:
