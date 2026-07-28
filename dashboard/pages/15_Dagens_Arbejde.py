@@ -1,6 +1,7 @@
 """The single, focused surface for today's reviewed SEO change."""
 
 import base64
+import importlib
 import sys
 from html import escape
 from pathlib import Path
@@ -14,12 +15,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ALL_WEBSITES = "Alle websites"
 FILTER_SESSION_KEY = "daily_work_website_filter"
 FILTER_WIDGET_KEY = "daily_work_website_filter_widget"
+CONCRETE_TRAFFIC_TASKS = {
+    "combined_traffic_decline",
+    "search_only_decline",
+    "plausible_only_decline",
+}
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agents.title_optimizer import TitleOptimizer
 from core.ai_service import AIService
 from core.daily_work_preparation import DailyWorkPreparationService
+from core.current_diagnosis_reader import read_latest_diagnoses
 from core.seo_experiment_engine import SEOExperimentEngine
 from core.traffic_work_overview import (
     build_traffic_work_overview,
@@ -30,8 +37,9 @@ from core.work_queue_service import WorkQueueService
 from dashboard.components.database import open_database
 from dashboard.components.data import (
     _filter_decided_recommendations,
-    build_combined_traffic_tasks,
 )
+import dashboard.components.data as dashboard_data_module
+import core.traffic_recommendations as traffic_recommendations_module
 from dashboard.components.ui import load_styles, render_sidebar
 from dashboard.components.website_selector import set_selected_website
 
@@ -76,7 +84,33 @@ def main() -> None:
         _render_work_overview(work_overview)
         if next_actionable_work(work_overview):
             return
-        priority_tasks = database.get_priority_task_scores(limit=None)
+        context = database.get_dashboard_action_context()
+        search_diagnoses = _current_diagnoses(
+            database, websites, context,
+            context_key="search_diagnoses",
+            reader_name="get_latest_search_console_diagnosis",
+        )
+        plausible_diagnoses = _current_diagnoses(
+            database, websites, context,
+            context_key="plausible_diagnoses",
+            reader_name="get_latest_plausible_diagnosis",
+        )
+        priority_tasks = _build_current_priority_tasks(
+            system_status=database.get_dashboard_system_health(),
+            seo_sites=context["seo_health"],
+            project_tasks=database.get_priority_tasks(),
+            experiments=context["experiments"],
+            active_experiments=context["active_experiments"],
+            coverage=context["coverage"],
+            plausible_rows=context["plausible_daily"],
+            search_diagnoses=search_diagnoses,
+            plausible_diagnoses=plausible_diagnoses,
+            limit=None,
+        )
+        priority_tasks = [
+            item for item in priority_tasks
+            if item.get("task_type") in CONCRETE_TRAFFIC_TASKS
+        ]
         priority_tasks = _filter_decided_recommendations(
             priority_tasks, decisions,
         )
@@ -87,19 +121,6 @@ def main() -> None:
             ]
         if priority_tasks:
             _render_priority_task(priority_tasks[0])
-            return
-        context = database.get_dashboard_action_context()
-        combined_tasks = build_combined_traffic_tasks(
-            seo_sites=context["seo_health"],
-            plausible_rows=context["plausible_daily"],
-        )
-        if website_id:
-            combined_tasks = [
-                item for item in combined_tasks
-                if item["website"] == website_id
-            ]
-        if combined_tasks:
-            _render_combined_traffic_task(combined_tasks[0])
             return
         optimizer = _optimizer(database)
         preparation = DailyWorkPreparationService(
@@ -122,6 +143,45 @@ def main() -> None:
         database.close()
 
 
+def _build_current_priority_tasks(**context: Any) -> list[dict[str, Any]]:
+    """Use current pure recommendation code despite Streamlit module caching."""
+    importlib.reload(traffic_recommendations_module)
+    current_data = importlib.reload(dashboard_data_module)
+    return current_data.build_dashboard_priority_tasks(**context)
+
+
+def _current_diagnoses(
+    database: Any,
+    websites: list[Any],
+    context: dict[str, Any],
+    *,
+    context_key: str,
+    reader_name: str,
+) -> list[dict[str, Any]]:
+    """Read diagnoses across both current and hot-reloaded Database classes."""
+    website_ids = [
+        str(item.get("website", ""))
+        if isinstance(item, dict) else str(item)
+        for item in websites
+    ]
+    kind = "search" if context_key == "search_diagnoses" else "plausible"
+    result = read_latest_diagnoses(database, website_ids, kind=kind)
+    if result:
+        return result
+    stored = context.get(context_key)
+    if isinstance(stored, list) and stored:
+        return stored
+    reader = getattr(database, reader_name, None)
+    if reader is None:
+        return []
+    return [
+        diagnosis
+        for website in website_ids
+        if website
+        if (diagnosis := reader(website)) is not None
+    ]
+
+
 def _render_work_overview(items: list[dict[str, Any]]) -> None:
     """Show the current workflow before proposing another recommendation."""
     if not items:
@@ -142,6 +202,12 @@ def _render_work_overview(items: list[dict[str, Any]]) -> None:
     columns = st.columns(4)
     for column, (label, value) in zip(columns, counts.items()):
         column.metric(label, value)
+    if counts["Under måling"] or counts["Klar til evaluering"]:
+        st.page_link(
+            "pages/13_Eksperimenter.py",
+            label="Åbn alle aktive SEO-eksperimenter",
+            icon="🧪",
+        )
     actionable = next_actionable_work(items)
     if actionable:
         st.markdown("### Næste handling")
@@ -225,9 +291,11 @@ def _render_combined_traffic_task(item: dict[str, Any]) -> None:
             st.write(f"**Målt signal:** {item['measured_cause']}")
         if item.get("confidence"):
             st.write(f"**Sikkerhed:** {item['confidence']}")
-        st.page_link(
-            item["target"],
-            label=item.get("link_label", f"Åbn analyse for {item['website']}"),
+        _render_scoped_navigation(
+            item,
+            label=item.get(
+                "link_label", f"Åbn analyse for {item['website']}"
+            ),
         )
     _render_priority_explanation(item)
 
@@ -247,8 +315,32 @@ def _render_priority_task(item: dict[str, Any]) -> None:
             st.write(f"**Website:** {item['website']}")
         if item.get("change"):
             st.write(f"**Ændring:** {item['change']}")
-        st.page_link(item["target"], label=item["link_label"])
+        _render_scoped_navigation(item, label=item["link_label"])
     _render_priority_explanation(item)
+
+
+def _render_scoped_navigation(
+    item: dict[str, Any], *, label: str
+) -> None:
+    """Open the target after selecting the task's website globally."""
+    website = str(item.get("website") or "")
+    target = str(item["target"])
+    if website and website != "—":
+        if st.button(
+            label,
+            type="primary",
+            key=f"open-{item.get('task_key') or target}-{website}",
+        ):
+            set_selected_website(website)
+            if target == "pages/9_SEO.py" and item.get("target_url"):
+                st.session_state["seo_requested_tab"] = "Årsagsanalyse"
+            st.switch_page(target)
+        return
+    if st.button(
+        label,
+        key=f"open-{item.get('task_key') or target}-global",
+    ):
+        st.switch_page(target)
 
 
 def _render_priority_explanation(item: dict[str, Any]) -> None:

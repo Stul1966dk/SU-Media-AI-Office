@@ -1,5 +1,6 @@
 """Website-scoped SEO dashboard and explicit Search Console import."""
 
+import importlib
 import sys
 from dataclasses import asdict
 from datetime import date, timedelta
@@ -13,9 +14,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.search_console_service import SearchConsoleService
+from core.current_diagnosis_reader import read_latest_diagnosis
+from core.priority_scoring import score_priority_item
 from core.traffic_recommendation_workflow import (
     TrafficRecommendationWorkflow,
 )
+import core.traffic_recommendations as traffic_recommendations_module
 from dashboard.components.database import open_database
 from dashboard.components.errors import safe_error_detail
 from dashboard.components.formatting import format_date
@@ -34,6 +38,10 @@ from integrations.search_console_integration import SearchConsoleIntegration
 
 
 PERIODS = {"7 dage": 7, "28 dage": 28, "90 dage": 90, "12 måneder": 365}
+SEO_TABS = [
+    "Oversigt", "Årsagsanalyse", "Historik", "Top sider", "Top søgeord",
+    "Muligheder", "AI analyse", "Rå data",
+]
 
 
 def build_service(database: Any) -> SearchConsoleService:
@@ -137,26 +145,15 @@ def main() -> None:
         page_query_comparisons = service.get_dimension_comparisons(
             website_id, "page_query"
         )
-        diagnosis_reader = getattr(
-            database, "get_latest_search_console_diagnosis", None
+        search_diagnosis = _latest_diagnosis(
+            database, website_id, kind="search"
         )
-        search_diagnosis = (
-            diagnosis_reader(website_id) if diagnosis_reader else None
+        plausible_diagnosis = _latest_diagnosis(
+            database, website_id, kind="plausible"
         )
-        plausible_reader = getattr(
-            database, "get_latest_plausible_diagnosis", None
+        traffic_recommendation = _current_traffic_recommendation(
+            search_diagnosis, plausible_diagnosis
         )
-        plausible_diagnosis = (
-            plausible_reader(website_id) if plausible_reader else None
-        )
-        traffic_recommendation = next((
-            item for item in database.get_priority_task_scores(limit=None)
-            if item.get("website") == website_id
-            and item.get("task_type") in {
-                "combined_traffic_decline", "search_only_decline",
-                "plausible_only_decline",
-            }
-        ), None)
         decision_reader = getattr(
             database, "get_traffic_recommendation_decision", None
         )
@@ -173,10 +170,11 @@ def main() -> None:
         )
     current_kpi = _aggregate(current_rows)
     previous_kpi = _aggregate(previous_rows)
-    tabs = st.tabs([
-        "Oversigt", "Årsagsanalyse", "Historik", "Top sider", "Top søgeord",
-        "Muligheder", "AI analyse", "Rå data",
-    ])
+    requested_tab = st.session_state.pop("seo_requested_tab", "Oversigt")
+    tabs = st.tabs(
+        SEO_TABS,
+        default=requested_tab if requested_tab in SEO_TABS else "Oversigt",
+    )
     with tabs[0]:
         _render_kpis(current_kpi, previous_kpi, latest_health)
         st.write(
@@ -236,6 +234,44 @@ def main() -> None:
         )
     with tabs[7]:
         _render_raw_data(current_rows)
+
+
+def _current_traffic_recommendation(
+    search_diagnosis: dict[str, Any] | None,
+    plausible_diagnosis: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Build the current concrete plan instead of reading a stale snapshot."""
+    if not search_diagnosis or not plausible_diagnosis:
+        return None
+    current_module = importlib.reload(traffic_recommendations_module)
+    recommendations = current_module.build_traffic_recommendations(
+        [search_diagnosis], [plausible_diagnosis]
+    )
+    if not recommendations:
+        return None
+    item = recommendations[0]
+    item = {
+        "task_key": "|".join((
+            str(item["task_type"]),
+            str(item["website"]),
+            str(item["description"]),
+            "pages/9_SEO.py",
+        )),
+        "target": "pages/9_SEO.py",
+        "link_label": "Åbn årsagsanalyse",
+        **item,
+    }
+    return score_priority_item(item)
+
+
+def _latest_diagnosis(
+    database: Any,
+    website_id: str,
+    *,
+    kind: str,
+) -> dict[str, Any] | None:
+    """Read the current diagnosis across hot-reloaded Database versions."""
+    return read_latest_diagnosis(database, website_id, kind=kind)
 
 
 def _render_import(database: Any, website_id: str | None) -> None:

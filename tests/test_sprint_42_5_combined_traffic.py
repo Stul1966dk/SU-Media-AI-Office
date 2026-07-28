@@ -112,10 +112,12 @@ class CombinedTrafficTaskTests(unittest.TestCase):
             Path(__file__).resolve().parents[1]
             / "dashboard" / "pages" / "15_Dagens_Arbejde.py"
         ).read_text(encoding="utf-8")
-        combined_branch = page.index("if combined_tasks:")
+        combined_branch = page.index(
+            "priority_tasks = _build_current_priority_tasks("
+        )
         optimizer = page.index("optimizer = _optimizer(database)")
         self.assertLess(combined_branch, optimizer)
-        self.assertIn("_render_combined_traffic_task(combined_tasks[0])", page)
+        self.assertIn("_render_priority_task(priority_tasks[0])", page)
         self.assertIn("Plausible-ændring", page)
         self.assertIn("Search Console-ændring", page)
 

@@ -61,7 +61,7 @@ class PriorityExplanationTests(unittest.TestCase):
     def test_website_filter_is_applied_before_selecting_first_task(self) -> None:
         source = PAGE_PATH.read_text(encoding="utf-8")
         filter_position = source.index("if website_id:", source.index(
-            "priority_tasks = database.get_priority_task_scores"
+            "priority_tasks = _build_current_priority_tasks"
         ))
         render_position = source.index("if priority_tasks:", filter_position)
         self.assertLess(filter_position, render_position)

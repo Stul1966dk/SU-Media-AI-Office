@@ -1,6 +1,8 @@
 """Sprint 43.6 tests for the practical SEO work overview."""
 
 import unittest
+from pathlib import Path
+from unittest.mock import Mock
 
 from core.traffic_work_overview import (
     build_traffic_work_overview,
@@ -120,6 +122,90 @@ class TrafficWorkOverviewTests(unittest.TestCase):
         )
         self.assertTrue(rows)
         self.assertEqual({"a.dk"}, {item["website"] for item in rows})
+
+    def test_daily_work_uses_fresh_diagnoses_and_scoped_navigation(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "dashboard" / "pages" / "15_Dagens_Arbejde.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "priority_tasks = _build_current_priority_tasks(", source
+        )
+        self.assertNotIn(
+            "priority_tasks = database.get_priority_task_scores", source
+        )
+        self.assertIn("set_selected_website(website)", source)
+        self.assertIn(
+            'label="Åbn alle aktive SEO-eksperimenter"', source
+        )
+
+    def test_hot_reload_fallback_reads_diagnoses_per_website(self):
+        import importlib.util
+
+        page_path = (
+            Path(__file__).resolve().parents[1]
+            / "dashboard" / "pages" / "15_Dagens_Arbejde.py"
+        )
+        spec = importlib.util.spec_from_file_location(
+            "daily_work_43_6", page_path
+        )
+        page = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(page)
+        database = Mock()
+        database.get_latest_search_console_diagnosis.side_effect = (
+            lambda website: (
+                {"website_id": website} if website == "a.dk" else None
+            )
+        )
+        result = page._current_diagnoses(
+            database,
+            [{"website": "a.dk"}, {"website": "b.dk"}],
+            {},
+            context_key="search_diagnoses",
+            reader_name="get_latest_search_console_diagnosis",
+        )
+        self.assertEqual([{"website_id": "a.dk"}], result)
+
+    def test_seo_page_builds_the_same_concrete_current_plan(self):
+        import importlib.util
+
+        page_path = (
+            Path(__file__).resolve().parents[1]
+            / "dashboard" / "pages" / "9_SEO.py"
+        )
+        spec = importlib.util.spec_from_file_location("seo_43_6", page_path)
+        page = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(page)
+        search = {
+            "website_id": "site.dk",
+            "status": "ready",
+            "previous_clicks": 100,
+            "current_clicks": 60,
+            "loss_pages": [{
+                "page_url": "https://site.dk/guide/",
+                "cause": "Placeringsfald",
+                "previous_ctr": .04,
+                "current_ctr": .03,
+                "previous_position": 5,
+                "current_position": 9,
+                "queries": [{"query": "bedste guide"}],
+            }],
+        }
+        plausible = {
+            "website_id": "site.dk",
+            "status": "significant_decline",
+            "visitor_change_percent": -25,
+        }
+        result = page._current_traffic_recommendation(search, plausible)
+        self.assertEqual(
+            "Styrk siden til søgeordet “bedste guide”.",
+            result["description"],
+        )
+        self.assertEqual(4, len(result["action_steps"]))
+        source = page_path.read_text(encoding="utf-8")
+        self.assertIn('st.session_state.pop("seo_requested_tab"', source)
 
 
 if __name__ == "__main__":
