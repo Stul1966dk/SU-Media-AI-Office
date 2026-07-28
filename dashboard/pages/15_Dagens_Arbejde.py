@@ -24,7 +24,10 @@ from core.seo_experiment_engine import SEOExperimentEngine
 from core.website_registry import WebsiteRegistry
 from core.work_queue_service import WorkQueueService
 from dashboard.components.database import open_database
-from dashboard.components.data import build_combined_traffic_tasks
+from dashboard.components.data import (
+    _filter_decided_recommendations,
+    build_combined_traffic_tasks,
+)
 from dashboard.components.ui import load_styles, render_sidebar
 
 
@@ -58,6 +61,10 @@ def main() -> None:
         selected = _render_website_filter(websites)
         website_id = None if selected == ALL_WEBSITES else selected
         priority_tasks = database.get_priority_task_scores(limit=None)
+        priority_tasks = _filter_decided_recommendations(
+            priority_tasks,
+            database.get_traffic_recommendation_decisions(),
+        )
         if website_id:
             priority_tasks = [
                 item for item in priority_tasks

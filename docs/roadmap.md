@@ -374,3 +374,16 @@ også ledsages af et reelt fald i Plausible-besøgende.
 Succeskriterium: AI Office kan anbefale én konkret, prioriteret næste handling
 og forklare præcist, hvilke målte Search Console- og Plausible-signaler den
 bygger på.
+
+# Sprint 43.4 - Opgavekladde og anbefalingsbeslutning
+
+- [x] Opret en redigerbar opgavekladde ved eksplicit brugerklik.
+- [x] Hold kladden uden for den operationelle opgavekø.
+- [x] Gem website, URL, målt årsag, evidens og prioritet.
+- [x] Blokér dubletter mod samme anbefaling og åbne opgaver med samme titel.
+- [x] Giv mulighed for at udsætte anbefalingen 14 dage.
+- [x] Giv mulighed for eksplicit at afvise anbefalingen.
+
+Succeskriterium: En anbefaling kan gemmes som én redigerbar og sporbar kladde,
+udsættes eller afvises uden at oprette, starte eller udføre en operationel
+opgave.

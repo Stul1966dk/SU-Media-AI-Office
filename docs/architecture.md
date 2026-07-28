@@ -212,6 +212,12 @@ website, skelner mellem organisk, ikke-organisk og bekræftet samlet fald og
 sender kandidaten gennem den eksisterende deterministiske prioriteringsscore.
 Kandidaten vises read-only og opretter ikke en operationel opgave.
 
+Et eksplicit brugerklik kan gemme kandidaten i
+`traffic_recommendation_decisions` som `draft`, `snoozed` eller `rejected`.
+En kladde er et separat beslutningsobjekt og optræder ikke i `tasks` eller den
+operationelle arbejdskø. Samme anbefalingsnøgle opdateres idempotent, og en
+åben operationel opgave med samme website og titel blokerer en dubletkladde.
+
 ## SEO Manager
 
 `agents/seo_manager.py` er den første specialistagent. Den bruger 28-dages `SEOHealth` og ignorerer websites med status `phasing_out`, `archived` eller `cancelled`. Et recovery-projekt kræver dokumenteret forværring: score under 35, `critical` trend, mindst 25 procent klikfald eller mindst 15 procent klikfald kombineret med dårligere placering eller CTR.

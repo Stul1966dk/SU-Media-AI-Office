@@ -66,6 +66,14 @@ def load_dashboard_data(
     )
     if not isinstance(persisted_priority_tasks, list):
         persisted_priority_tasks = []
+    decisions = _safe(
+        database.get_traffic_recommendation_decisions, []
+    )
+    if not isinstance(decisions, list):
+        decisions = []
+    persisted_priority_tasks = _filter_decided_recommendations(
+        persisted_priority_tasks, decisions, now=(now.date() if now else None)
+    )
     return DashboardData(
         system_status=system_status,
         overview=_safe(
@@ -410,3 +418,34 @@ def _safe(function: Callable[[], T], fallback: T) -> T:
         return function()
     except (OSError, RuntimeError, ValueError, sqlite3.Error):
         return fallback
+
+
+def _filter_decided_recommendations(
+    items: list[dict[str, Any]],
+    decisions: list[dict[str, Any]],
+    *,
+    now: date | None = None,
+) -> list[dict[str, Any]]:
+    """Hide handled recommendations until they become actionable again."""
+    today = now or date.today()
+    by_key = {
+        str(item.get("recommendation_key", "")): item for item in decisions
+    }
+    result = []
+    for item in items:
+        decision = by_key.get(str(item.get("task_key", "")))
+        if not decision:
+            result.append(item)
+            continue
+        status = decision.get("status")
+        if status in {"draft", "rejected"}:
+            continue
+        if status == "snoozed":
+            try:
+                until = date.fromisoformat(str(decision["snoozed_until"]))
+            except (TypeError, ValueError):
+                continue
+            if until > today:
+                continue
+        result.append(item)
+    return result

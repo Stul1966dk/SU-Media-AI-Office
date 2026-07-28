@@ -78,6 +78,7 @@ class Database:
         self._create_experiment_monitoring_tables()
         self._create_experiment_evaluations_table()
         self._create_priority_task_scores_table()
+        self._create_traffic_recommendation_decisions_table()
         self.connection.execute(
             """
             CREATE TABLE IF NOT EXISTS app_state (
@@ -112,6 +113,30 @@ class Database:
                 existing_task_score REAL NOT NULL,
                 payload_json TEXT NOT NULL,
                 calculated_at TEXT NOT NULL
+            )
+            """
+        )
+
+    def _create_traffic_recommendation_decisions_table(self) -> None:
+        """Create safe drafts and user decisions for traffic candidates."""
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS traffic_recommendation_decisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recommendation_key TEXT NOT NULL UNIQUE,
+                website_id TEXT NOT NULL,
+                task_type TEXT NOT NULL,
+                target_url TEXT NOT NULL,
+                measured_cause TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                status TEXT NOT NULL,
+                snoozed_until TEXT,
+                evidence_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (website_id) REFERENCES websites(website)
             )
             """
         )
@@ -5381,6 +5406,115 @@ class Database:
             item["calculated_at"] = row["calculated_at"]
             result.append(item)
         return result
+
+    def upsert_traffic_recommendation_decision(
+        self, values: dict[str, Any]
+    ) -> str:
+        """Create or update one draft, snooze, or rejection decision."""
+        key = str(values["recommendation_key"])
+        existing = self._connection.execute(
+            """
+            SELECT id FROM traffic_recommendation_decisions
+            WHERE recommendation_key = ?
+            """,
+            (key,),
+        ).fetchone()
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO traffic_recommendation_decisions (
+                    recommendation_key, website_id, task_type, target_url,
+                    measured_cause, title, description, priority, status,
+                    snoozed_until, evidence_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(recommendation_key) DO UPDATE SET
+                    website_id = excluded.website_id,
+                    task_type = excluded.task_type,
+                    target_url = excluded.target_url,
+                    measured_cause = excluded.measured_cause,
+                    title = excluded.title,
+                    description = excluded.description,
+                    priority = excluded.priority,
+                    status = excluded.status,
+                    snoozed_until = excluded.snoozed_until,
+                    evidence_json = excluded.evidence_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    key,
+                    str(values["website_id"]),
+                    str(values["task_type"]),
+                    str(values.get("target_url", "")),
+                    str(values.get("measured_cause", "")),
+                    str(values["title"]),
+                    str(values["description"]),
+                    str(values["priority"]),
+                    str(values["status"]),
+                    values.get("snoozed_until"),
+                    json.dumps(
+                        values.get("evidence", {}),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+        return "updated" if existing else "created"
+
+    def get_traffic_recommendation_decision(
+        self, recommendation_key: str
+    ) -> dict[str, Any] | None:
+        """Return one saved traffic recommendation decision."""
+        row = self._connection.execute(
+            """
+            SELECT * FROM traffic_recommendation_decisions
+            WHERE recommendation_key = ?
+            """,
+            (recommendation_key,),
+        ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["evidence"] = json.loads(result.pop("evidence_json"))
+        return result
+
+    def get_traffic_recommendation_decisions(
+        self,
+    ) -> list[dict[str, Any]]:
+        """Return all saved recommendation decisions newest first."""
+        rows = self._connection.execute(
+            """
+            SELECT * FROM traffic_recommendation_decisions
+            ORDER BY updated_at DESC, id DESC
+            """
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["evidence"] = json.loads(item.pop("evidence_json"))
+            result.append(item)
+        return result
+
+    def find_open_task_by_title(
+        self, website_id: str, title: str
+    ) -> dict[str, Any] | None:
+        """Find an operational task with the same normalized title."""
+        row = self._connection.execute(
+            """
+            SELECT id, website_id, title, status
+            FROM tasks
+            WHERE website_id = ?
+              AND LOWER(TRIM(title)) = LOWER(TRIM(?))
+              AND status NOT IN ('completed', 'cancelled')
+            ORDER BY id
+            LIMIT 1
+            """,
+            (website_id, title),
+        ).fetchone()
+        return dict(row) if row else None
 
     def get_dashboard_action_context(self) -> dict[str, list[dict[str, Any]]]:
         """Return existing records needed for the dashboard action list."""

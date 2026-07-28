@@ -247,6 +247,13 @@ Gemmer den deterministiske sammenligning af to komplette Plausible-perioder
 pr. website. Kombinationen af website, aktuel periodestart og periodeslut er
 unik; det strukturerede analyseresultat gemmes som JSON.
 
+### `traffic_recommendation_decisions`
+
+Gemmer brugerens eksplicitte beslutning om en kombineret trafikanbefaling.
+`recommendation_key` er unik. Status er `draft`, `snoozed` eller `rejected`;
+evidens gemmes struktureret som JSON. Tabellen har ingen automatisk relation
+til den operationelle `tasks`-tabel.
+
 ### `seo_health_history`
 
 Indeholder deterministiske SEO Health-snapshots for 7, 28 og 90 dage sammenlignet med den foregående periode af samme længde.

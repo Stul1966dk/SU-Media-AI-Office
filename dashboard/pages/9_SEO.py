@@ -13,6 +13,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.search_console_service import SearchConsoleService
+from core.traffic_recommendation_workflow import (
+    TrafficRecommendationWorkflow,
+)
 from dashboard.components.database import open_database
 from dashboard.components.errors import safe_error_detail
 from dashboard.components.formatting import format_date
@@ -154,6 +157,12 @@ def main() -> None:
                 "plausible_only_decline",
             }
         ), None)
+        recommendation_decision = (
+            database.get_traffic_recommendation_decision(
+                traffic_recommendation["task_key"]
+            )
+            if traffic_recommendation else None
+        )
     finally:
         database.close()
     if not current_rows:
@@ -191,7 +200,9 @@ def main() -> None:
         st.divider()
         _render_plausible_diagnosis(plausible_diagnosis)
         st.divider()
-        _render_traffic_recommendation(traffic_recommendation)
+        _render_traffic_recommendation(
+            traffic_recommendation, recommendation_decision
+        )
     with tabs[2]:
         _render_history(current_rows, health)
     with tabs[3]:
@@ -566,8 +577,9 @@ def _render_plausible_diagnosis(
 
 def _render_traffic_recommendation(
     recommendation: dict[str, Any] | None,
+    decision: dict[str, Any] | None,
 ) -> None:
-    """Show a persisted cross-source candidate without creating a task."""
+    """Show a candidate and explicit draft/reject/snooze controls."""
     st.subheader("Samlet opgaveanbefaling")
     if not recommendation:
         st.info(
@@ -591,9 +603,87 @@ def _render_traffic_recommendation(
             "Åbn berørt side", str(recommendation["target_url"])
         )
     st.caption(
-        "Dette er en read-only anbefaling. Der er ikke oprettet eller startet "
-        "en opgave."
+        "Ingen handling udføres automatisk. En opgavekladde ligger uden for "
+        "den operationelle opgavekø."
     )
+    if decision:
+        labels = {
+            "draft": "Opgavekladde gemt",
+            "snoozed": "Anbefaling udsat",
+            "rejected": "Anbefaling afvist",
+        }
+        message = labels.get(decision["status"], decision["status"])
+        if decision["status"] == "snoozed":
+            message += f" til {decision.get('snoozed_until')}"
+        st.info(message)
+    default_title = (
+        decision["title"] if decision and decision["status"] == "draft"
+        else str(recommendation["description"])
+    )
+    default_description = (
+        decision["description"]
+        if decision and decision["status"] == "draft"
+        else str(recommendation.get("recommended_action", ""))
+        + "\n\nDatagrundlag: "
+        + str(recommendation.get("explanation", ""))
+    )
+    with st.form(f"traffic-draft-{recommendation['task_key']}"):
+        title = st.text_input("Titel", value=default_title)
+        description = st.text_area(
+            "Beskrivelse og datagrundlag",
+            value=default_description,
+            height=160,
+        )
+        save_draft = st.form_submit_button(
+            "Gem opgavekladde", type="primary"
+        )
+    if save_draft:
+        _save_traffic_decision(
+            recommendation, "draft", title=title, description=description
+        )
+    action_columns = st.columns(2)
+    if action_columns[0].button(
+        "Udsæt 14 dage", key=f"snooze-{recommendation['task_key']}"
+    ):
+        _save_traffic_decision(
+            recommendation,
+            "snoozed",
+            snoozed_until=date.today() + timedelta(days=14),
+        )
+    if action_columns[1].button(
+        "Afvis anbefaling", key=f"reject-{recommendation['task_key']}"
+    ):
+        _save_traffic_decision(recommendation, "rejected")
+
+
+def _save_traffic_decision(
+    recommendation: dict[str, Any],
+    status: str,
+    *,
+    title: str = "",
+    description: str = "",
+    snoozed_until: date | None = None,
+) -> None:
+    """Persist one explicit UI decision and refresh the displayed state."""
+    database = open_database()
+    try:
+        workflow = TrafficRecommendationWorkflow(database)
+        if status == "draft":
+            workflow.create_draft(
+                recommendation, title=title, description=description
+            )
+        elif status == "snoozed" and snoozed_until is not None:
+            workflow.snooze(recommendation, snoozed_until)
+        elif status == "rejected":
+            workflow.reject(recommendation)
+        else:
+            raise ValueError("Ugyldig handling.")
+    except ValueError as error:
+        st.error(str(error))
+        return
+    finally:
+        database.close()
+    st.rerun()
 
 
 def _render_opportunities(
