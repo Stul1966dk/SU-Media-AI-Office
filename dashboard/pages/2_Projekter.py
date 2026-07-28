@@ -9,7 +9,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from dashboard.components.database import open_database
 from dashboard.components.help_panel import render_help_panel
-from dashboard.components.ui import load_styles, render_sidebar, render_table
+from dashboard.components.ui import (
+    load_styles, render_next_step, render_sidebar, render_table,
+)
 from dashboard.components.website_selector import get_selected_website_id
 
 
@@ -23,6 +25,14 @@ def main() -> None:
         requirements="Et website og mindst ét projekt skal være oprettet.",
         actions="Filtrér på det valgte website eller vis alle projekter.",
         limitations="Siden ændrer ikke projekter automatisk.",
+    )
+    render_next_step(
+        text=(
+            "Dette er et historisk register. Nye anbefalinger, beslutninger "
+            "og opgaver håndteres samlet på I dag."
+        ),
+        path="app.py",
+        label="Gå til I dag",
     )
     show_all = st.checkbox("Vis alle websites")
     selected = get_selected_website_id()

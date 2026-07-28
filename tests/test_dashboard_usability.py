@@ -48,10 +48,8 @@ class DashboardUsabilityTests(unittest.TestCase):
         self.assertFalse(app.exception)
         headings = [item.value for item in app.subheader]
         self.assertEqual(
-            ["1. Website Registry", "2. Search Console",
-             "3. Website Discovery", "4. Content import",
-             "5. Website Intelligence", "6. AI Analyst",
-             "7. Executive Briefing", "8. Projekter og opgaver"],
+            ["1. Vælg websites", "2. Forbind data",
+             "3. Arbejd fra I dag", "4. Følg resultater"],
             headings,
         )
         self.assertTrue(any(

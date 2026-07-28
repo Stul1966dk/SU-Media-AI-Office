@@ -33,7 +33,7 @@ from dashboard.components.formatting import (
     format_ai_assessment, format_date, format_datetime,
 )
 from dashboard.components.help_panel import render_help_panel
-from dashboard.components.ui import load_styles, render_sidebar
+from dashboard.components.ui import load_styles, render_next_step, render_sidebar
 from dashboard.components.website_selector import get_selected_website_id
 
 
@@ -536,6 +536,14 @@ def main() -> None:
         requirements="Search Console-data for mindst to perioder.",
         actions="Godkend dagens opgave eller afvent et aktivt eksperiment.",
         limitations="AI Office publicerer aldrig ændringer på websites.",
+    )
+    render_next_step(
+        text=(
+            "Denne side er en ældre, avanceret briefing. Den aktuelle "
+            "anbefaling og hele opgaveflowet findes nu på I dag."
+        ),
+        path="app.py",
+        label="Gå til I dag",
     )
     database = open_database()
     try:

@@ -456,3 +456,21 @@ specialiseret arbejde eller yderligere dokumentation.
 Succeskriterium: Brugeren kan gå fra anbefaling til aktiv 28-dages måling via
 I dag uden at navigere gennem andre AI Office-sider; kun selve websitet åbnes
 for den manuelle ændring.
+
+# Sprint 44.3 - Faste roller og færre gentagelser
+
+- [x] Fastlæg fire primære informationshjem: I dag for handling,
+  Website Profile for ét sites status, Portefølje for tværgående overblik og
+  Resultater for målinger og læring.
+- [x] Gør SEO til analyse og dokumentation uden et parallelt opgaveflow.
+- [x] Skjul tekniske og historiske detaljer på Website Profile som standard.
+- [x] Forkort Kom godt i gang fra otte tekniske trin til fire brugertrin.
+- [x] Send ældre projekt-, opgave- og briefingvisninger tydeligt tilbage til
+  I dag.
+- [x] Fjern Executive Briefing som næste handling efter dataopdatering.
+- [x] Tilføj hoverhjælp til websitevalget og et synligt næste trin på de
+  centrale flader.
+
+Succeskriterium: Brugeren ved, hvilken side der ejer hvilken information, og
+kan altid fortsætte til den konkrete opgave uden at møde en parallel handling
+eller en blindgyde.

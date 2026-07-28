@@ -15,7 +15,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from dashboard.components.database import open_database
 from dashboard.components.help_panel import render_help_panel
 from dashboard.components.formatting import format_currency, format_status
-from dashboard.components.ui import load_styles, render_sidebar, render_table
+from dashboard.components.ui import (
+    load_styles, render_next_step, render_sidebar, render_table,
+)
 from dashboard.components.website_selector import (
     get_selected_website_id,
     set_selected_website,
@@ -33,14 +35,13 @@ def main() -> None:
     render_sidebar()
     st.title("Website Profile")
     st.write(
-        "Formålet med siden er at samle alle kendte oplysninger om ét "
-        "website, herunder SEO, indtjening, teknisk profil, projekter, "
-        "opgaver og AI-anbefalinger."
+        "Her ser du status og udvikling for ét website. Selve arbejdet "
+        "udføres fra I dag."
     )
     render_help_panel(
-        purpose="Saml alle kendte oplysninger om ét website.",
+        purpose="Se status og udvikling for ét website.",
         requirements="Website Registry og helst Discovery, Search Console og Intelligence.",
-        actions="Vælg et website og gennemgå de enkelte datasektioner.",
+        actions="Vælg et website, kontrollér status og fortsæt til I dag.",
         limitations="Siden er read-only og ændrer ikke websitet.",
     )
 
@@ -75,6 +76,7 @@ def main() -> None:
             options=options,
             index=options.index(current) if current in options else 0,
             format_func=labels.get,
+            help="Skifter alle oplysninger på siden til det valgte website.",
         )
         set_selected_website(website_id)
         detail = database.get_website_profile_detail(website_id)
@@ -97,11 +99,24 @@ def main() -> None:
     _render_revenue(detail)
     _render_plausible(detail)
     _render_seo(detail)
-    _render_technical(detail)
-    _render_content(detail)
-    _render_projects(detail)
-    _render_tasks(detail)
-    _render_recommendations(detail)
+    render_next_step(
+        text=(
+            "Status er samlet. Fortsæt til I dag for at se den vigtigste "
+            "konkrete opgave for websitet."
+        ),
+        path="app.py",
+        label="Gå til I dag",
+    )
+    with st.expander("Se tekniske og historiske detaljer"):
+        st.caption(
+            "Disse oplysninger er dokumentation og behøver normalt ikke "
+            "kontrolleres i det daglige."
+        )
+        _render_technical(detail)
+        _render_content(detail)
+        _render_projects(detail)
+        _render_tasks(detail)
+        _render_recommendations(detail)
 
 
 def _render_profile(detail: dict[str, Any]) -> None:

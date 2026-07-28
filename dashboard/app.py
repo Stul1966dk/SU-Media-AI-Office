@@ -284,16 +284,16 @@ def _render_data_refresh() -> None:
         finally:
             database.close()
         if analysis:
-            st.info("Analysen er klar. Generér Executive Briefing.")
-            render_page_link(
-                "pages/3_Executive_Briefing.py",
-                f"Generér Executive Briefing for {selected}",
+            st.info(
+                f"Data og analyse for {selected} er klar. Fortsæt på I dag "
+                "for at se den prioriterede opgave."
             )
         else:
-            st.info(f"Data er opdateret. Kør AI Analyst for {selected}.")
-            render_page_link(
-                "pages/6_AI_Analyst.py", f"Kør AI Analyst for {selected}"
+            st.info(
+                f"Data for {selected} er opdateret. AI-analyse er et "
+                "valgfrit værktøj; næste opgave findes på I dag."
             )
+        render_page_link("app.py", "Fortsæt til I dag")
 
 
 def _refresh_step(result: dict[str, Any], name: str) -> dict[str, Any]:

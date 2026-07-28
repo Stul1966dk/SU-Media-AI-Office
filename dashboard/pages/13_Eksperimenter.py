@@ -54,12 +54,12 @@ QUALITY_LABELS = {
 
 
 def main() -> None:
-    st.set_page_config(page_title="Eksperimenter", page_icon="🧪", layout="wide")
+    st.set_page_config(page_title="Resultater", page_icon="🧪", layout="wide")
     load_styles(PROJECT_ROOT / "dashboard" / "assets" / "styles.css")
     render_sidebar()
-    st.title("Eksperimenter")
+    st.title("Resultater")
     render_help_panel(
-        purpose="Følg én målelig SEO-ændring ad gangen og dens effekt.",
+        purpose="Følg aktive målinger og lær af afsluttede ændringer.",
         requirements="En konkret beslutning, URL-data og brugerens godkendelse.",
         actions="Godkend, start, evaluér eller annullér planlagte eksperimenter.",
         limitations="Siden ændrer aldrig et website og starter intet automatisk.",

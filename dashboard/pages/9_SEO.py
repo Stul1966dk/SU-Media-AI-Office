@@ -16,7 +16,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.search_console_service import SearchConsoleService
 from core.current_diagnosis_reader import read_latest_diagnosis
 from core.priority_scoring import score_priority_item
-import core.traffic_recommendation_workflow as traffic_workflow_module
 import core.traffic_recommendations as traffic_recommendations_module
 from core.traffic_recommendation_store import get_decision
 from dashboard.components.database import open_database
@@ -24,7 +23,8 @@ from dashboard.components.errors import safe_error_detail
 from dashboard.components.formatting import format_date
 from dashboard.components.help_panel import render_help_panel
 from dashboard.components.ui import (
-    load_styles, render_page_link, render_sidebar, render_table,
+    load_styles, render_next_step, render_page_link, render_sidebar,
+    render_table,
 )
 from dashboard.components.website_selector import (
     get_selected_website_id,
@@ -88,6 +88,14 @@ def main() -> None:
         requirements="Det valgte website skal have importerede Search Console-data.",
         actions="Skift periode, udforsk fanerne eller start en eksplicit import.",
         limitations="Sidevisning kalder ingen API'er og opretter ingen projekter.",
+    )
+    render_next_step(
+        text=(
+            "Brug SEO til at undersøge datagrundlaget. Når du er klar til at "
+            "handle, fortsætter du altid på I dag."
+        ),
+        path="app.py",
+        label="Gå til I dag",
     )
     database = open_database()
     try:
@@ -619,11 +627,6 @@ def _render_traffic_recommendation(
             "Der er ingen kvalificeret anbefaling fra begge datakilder endnu."
         )
         return
-    action_result = st.session_state.pop(
-        "seo_traffic_action_result", None
-    )
-    if action_result:
-        st.success(action_result)
     st.write(
         f"**Anbefalet handling:** "
         f"{recommendation.get('recommended_action') or recommendation['description']}"
@@ -653,8 +656,8 @@ def _render_traffic_recommendation(
             "Åbn berørt side", str(recommendation["target_url"])
         )
     st.caption(
-        "Ingen handling udføres automatisk. En opgavekladde ligger uden for "
-        "den operationelle opgavekø."
+        "Denne side forklarer datagrundlaget. Beslutninger og udførelse "
+        "samles på I dag."
     )
     if decision:
         labels = {
@@ -685,155 +688,14 @@ def _render_traffic_recommendation(
             )
             return
         st.info(message)
-    status = decision.get("status") if decision else None
-    default_title = (
-        decision["title"] if decision and decision["status"] == "draft"
-        else str(recommendation["description"])
+    render_next_step(
+        text=(
+            "Gå til I dag for at godkende, redigere, udsætte eller udføre "
+            "den anbefalede opgave."
+        ),
+        path="app.py",
+        label="Fortsæt opgaven på I dag",
     )
-    default_description = (
-        decision["description"]
-        if decision and decision["status"] == "draft"
-        else str(recommendation.get("recommended_action", ""))
-        + "\n\nDatagrundlag: "
-        + str(recommendation.get("explanation", ""))
-    )
-    if status in {None, "draft", "snoozed", "rejected"}:
-        with st.form(f"traffic-draft-{recommendation['task_key']}"):
-            title = st.text_input("Titel", value=default_title)
-            description = st.text_area(
-                "Beskrivelse og datagrundlag",
-                value=default_description,
-                height=160,
-            )
-            save_draft = st.form_submit_button(
-                (
-                    "Opdater opgavekladde"
-                    if status == "draft" else "Gem opgavekladde"
-                ),
-                type="primary",
-            )
-        if save_draft:
-            _save_traffic_decision(
-                recommendation, "draft", title=title,
-                description=description,
-            )
-    if status == "draft":
-        st.warning(
-            "Godkend kun kladden, hvis URL, handling og afgrænsning er "
-            "korrekte. Godkendelsen ændrer ikke websitet."
-        )
-        if st.button(
-            "Godkend opgavekladde",
-            type="primary",
-            key=f"approve-{recommendation['task_key']}",
-        ):
-            _save_traffic_decision(recommendation, "approved")
-        return
-    if status == "approved":
-        st.markdown("**Registrér den implementerede ændring**")
-        st.write(
-            "Udfør først ændringen på websitet. Beskriv derefter præcist "
-            "den ene ændring, du har gennemført."
-        )
-        type_labels = {
-            "Indholdsopdatering": "content_update",
-            "Title og metabeskrivelse": "title_meta",
-            "Interne links": "internal_links",
-            "Teknisk forbedring": "technical_fix",
-            "Strukturerede data": "schema",
-        }
-        default_label = (
-            "Title og metabeskrivelse"
-            if "ctr" in str(recommendation.get("measured_cause", "")).lower()
-            else "Indholdsopdatering"
-        )
-        with st.form(f"implement-{recommendation['task_key']}"):
-            experiment_label = st.selectbox(
-                "Ændringstype",
-                list(type_labels),
-                index=list(type_labels).index(default_label),
-            )
-            implementation = st.text_area(
-                "Hvad ændrede du konkret?",
-                placeholder=(
-                    "Eksempel: Opdaterede afsnittet om bryggetid og tilføjede "
-                    "to interne links til siden."
-                ),
-            )
-            implemented = st.form_submit_button(
-                "Markér implementeret og start 28-dages måling",
-                type="primary",
-            )
-        if implemented:
-            _save_traffic_decision(
-                recommendation,
-                "implemented",
-                description=implementation,
-                experiment_type=type_labels[experiment_label],
-            )
-        return
-    action_columns = st.columns(2)
-    if action_columns[0].button(
-        "Udsæt 14 dage", key=f"snooze-{recommendation['task_key']}"
-    ):
-        _save_traffic_decision(
-            recommendation,
-            "snoozed",
-            snoozed_until=date.today() + timedelta(days=14),
-        )
-    if action_columns[1].button(
-        "Afvis anbefaling", key=f"reject-{recommendation['task_key']}"
-    ):
-        _save_traffic_decision(recommendation, "rejected")
-
-
-def _save_traffic_decision(
-    recommendation: dict[str, Any],
-    status: str,
-    *,
-    title: str = "",
-    description: str = "",
-    snoozed_until: date | None = None,
-    experiment_type: str = "",
-) -> None:
-    """Persist one explicit UI decision and refresh the displayed state."""
-    database = open_database()
-    try:
-        workflow_module = importlib.reload(traffic_workflow_module)
-        workflow = workflow_module.TrafficRecommendationWorkflow(database)
-        if status == "draft":
-            workflow.create_draft(
-                recommendation, title=title, description=description
-            )
-        elif status == "approved":
-            workflow.approve_draft(str(recommendation["task_key"]))
-        elif status == "implemented":
-            workflow.mark_implemented(
-                str(recommendation["task_key"]),
-                change_description=description,
-                experiment_type=experiment_type,
-            )
-        elif status == "snoozed" and snoozed_until is not None:
-            workflow.snooze(recommendation, snoozed_until)
-        elif status == "rejected":
-            workflow.reject(recommendation)
-        else:
-            raise ValueError("Ugyldig handling.")
-    except ValueError as error:
-        st.error(str(error))
-        return
-    finally:
-        database.close()
-    messages = {
-        "draft": "Opgavekladden er gemt og klar til din godkendelse.",
-        "approved": "Opgavekladden er godkendt.",
-        "implemented": "Ændringen er registreret, og målingen er startet.",
-        "snoozed": "Anbefalingen er udsat 14 dage.",
-        "rejected": "Anbefalingen er afvist.",
-    }
-    st.session_state["seo_traffic_action_result"] = messages[status]
-    st.session_state["seo_requested_tab"] = "Årsagsanalyse"
-    st.rerun()
 
 
 def _render_opportunities(

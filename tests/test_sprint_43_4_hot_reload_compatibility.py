@@ -9,7 +9,7 @@ from dashboard.app import _apply_hot_reload_compatibility
 
 
 class HotReloadCompatibilityTests(unittest.TestCase):
-    def test_seo_page_reads_saved_draft_through_compatibility_store(self):
+    def test_seo_page_is_read_only_and_points_to_today(self):
         source = (
             Path(__file__).resolve().parents[1]
             / "dashboard"
@@ -21,12 +21,10 @@ class HotReloadCompatibilityTests(unittest.TestCase):
             "get_decision(database, traffic_recommendation[\"task_key\"])",
             source,
         )
-        self.assertIn(
-            '"seo_traffic_action_result"', source
-        )
-        self.assertIn(
-            "Opgavekladden er gemt og klar til din godkendelse.", source
-        )
+        self.assertIn("render_next_step(", source)
+        self.assertIn('path="app.py"', source)
+        self.assertNotIn("Gem opgavekladde", source)
+        self.assertNotIn("Godkend opgavekladde", source)
 
     def test_dashboard_entrypoint_shims_old_database_instance(self):
         class OldDatabase:
