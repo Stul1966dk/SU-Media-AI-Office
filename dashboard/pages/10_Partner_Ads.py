@@ -12,7 +12,9 @@ from dashboard.components.database import open_database
 from dashboard.components.errors import safe_error_detail
 from dashboard.components.formatting import format_datetime
 from dashboard.components.help_panel import render_help_panel
-from dashboard.components.ui import load_styles, render_sidebar, render_table
+from dashboard.components.ui import (
+    load_styles, render_next_step, render_sidebar, render_table,
+)
 from dashboard.components.website_selector import get_selected_website_id
 
 
@@ -26,6 +28,11 @@ def main() -> None:
         requirements="Partner Ads-data skal være importeret.",
         actions="Vis alle salg eller afgræns dem til det aktive website.",
         limitations="Siden ændrer ikke data hos Partner Ads.",
+    )
+    render_next_step(
+        text="Gå tilbage til Integrationer, når du har kontrolleret data.",
+        path="pages/18_Integrationer.py",
+        label="Tilbage til Integrationer",
     )
     st.info(
         "Automatisk overvågning kører kun, når monitorprocessen er startet med "

@@ -18,7 +18,7 @@ from dashboard.components.database import open_database
 from dashboard.components.formatting import format_date, format_datetime
 from dashboard.components.help_panel import render_help_panel
 from dashboard.components.ui import (
-    load_styles, render_next_step, render_sidebar,
+    load_styles, render_next_step, render_page_link, render_sidebar,
 )
 
 
@@ -72,10 +72,9 @@ def main() -> None:
         path="app.py",
         label="Tilbage til I dag",
     )
-    st.page_link(
+    render_page_link(
         "pages/17_SEO_Insights.py",
-        label="Se læring fra afsluttede målinger",
-        icon=":material/insights:",
+        "Se læring fra afsluttede målinger",
     )
     database = open_database(read_only=True)
     try:

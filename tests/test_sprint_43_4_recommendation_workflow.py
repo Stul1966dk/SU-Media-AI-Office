@@ -10,6 +10,7 @@ from core.database import Database
 from core.traffic_recommendation_workflow import (
     TrafficRecommendationWorkflow,
 )
+from core.traffic_recommendation_store import get_decisions
 from dashboard.components.data import _filter_decided_recommendations
 
 
@@ -100,6 +101,13 @@ class RecommendationWorkflowTests(unittest.TestCase):
         self.assertEqual(
             result,
             workflow._required(RECOMMENDATION["task_key"]),
+        )
+        self.assertEqual(
+            [RECOMMENDATION["task_key"]],
+            [
+                item["recommendation_key"]
+                for item in get_decisions(legacy_database)
+            ],
         )
 
     def test_snooze_and_reject_are_persisted(self):

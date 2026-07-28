@@ -3,6 +3,7 @@
 import base64
 import importlib
 import sys
+from datetime import date, timedelta
 from html import escape
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,13 @@ CONCRETE_TRAFFIC_TASKS = {
     "search_only_decline",
     "plausible_only_decline",
 }
+EXPERIMENT_TYPE_LABELS = {
+    "Indholdsopdatering": "content_update",
+    "Title og metabeskrivelse": "title_meta",
+    "Interne links": "internal_links",
+    "Teknisk forbedring": "technical_fix",
+    "Strukturerede data": "schema",
+}
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -28,10 +36,6 @@ from core.ai_service import AIService
 from core.daily_work_preparation import DailyWorkPreparationService
 from core.current_diagnosis_reader import read_latest_diagnoses
 from core.seo_experiment_engine import SEOExperimentEngine
-from core.traffic_work_overview import (
-    build_traffic_work_overview,
-    next_actionable_work,
-)
 from core.website_registry import WebsiteRegistry
 from core.work_queue_service import WorkQueueService
 from dashboard.components.database import open_database
@@ -39,7 +43,10 @@ from dashboard.components.data import (
     _filter_decided_recommendations,
 )
 import dashboard.components.data as dashboard_data_module
+import core.traffic_recommendation_store as traffic_store_module
+import core.traffic_recommendation_workflow as traffic_workflow_module
 import core.traffic_recommendations as traffic_recommendations_module
+import core.traffic_work_overview as traffic_work_module
 from dashboard.components.ui import load_styles, render_sidebar
 from dashboard.components.website_selector import set_selected_website
 
@@ -65,6 +72,9 @@ def main() -> None:
         "Her får du ét tydeligt næste trin. Når det er udført, viser siden "
         "automatisk, hvad du skal gøre bagefter."
     )
+    action_result = st.session_state.pop("daily_action_result", None)
+    if action_result:
+        st.success(action_result)
 
     database = open_database()
     try:
@@ -77,16 +87,16 @@ def main() -> None:
         websites = _active_websites(registry)
         selected = _render_website_filter(websites)
         website_id = None if selected == ALL_WEBSITES else selected
-        decision_reader = getattr(
-            database, "get_traffic_recommendation_decisions", None
+        decisions = importlib.reload(traffic_store_module).get_decisions(
+            database
         )
-        decisions = decision_reader() if decision_reader else []
         experiments = database.get_seo_experiments()
-        work_overview = build_traffic_work_overview(
+        work_module = importlib.reload(traffic_work_module)
+        work_overview = work_module.build_traffic_work_overview(
             decisions, experiments, website_id=website_id
         )
-        _render_work_overview(work_overview)
-        if next_actionable_work(work_overview):
+        _render_work_overview(database, work_overview)
+        if work_module.next_actionable_work(work_overview):
             return
         context = database.get_dashboard_action_context()
         search_diagnoses = _current_diagnoses(
@@ -124,7 +134,7 @@ def main() -> None:
                 if item["website"] in {website_id, "—"}
             ]
         if priority_tasks:
-            _render_priority_task(priority_tasks[0])
+            _render_priority_task(database, priority_tasks[0])
             return
         optimizer = _optimizer(database)
         preparation = DailyWorkPreparationService(
@@ -186,7 +196,9 @@ def _current_diagnoses(
     ]
 
 
-def _render_work_overview(items: list[dict[str, Any]]) -> None:
+def _render_work_overview(
+    database: Any, items: list[dict[str, Any]]
+) -> None:
     """Show the current workflow before proposing another recommendation."""
     if not items:
         return
@@ -203,10 +215,10 @@ def _render_work_overview(items: list[dict[str, Any]]) -> None:
             item["stage"] == "ready_for_evaluation" for item in items
         ),
     }
-    actionable = next_actionable_work(items)
+    actionable = traffic_work_module.next_actionable_work(items)
     if actionable:
         st.markdown("### Næste trin")
-        _render_workflow_card(actionable, primary=True)
+        _render_workflow_card(database, actionable, primary=True)
     other_items = [
         item for item in items
         if not actionable or item is not actionable
@@ -223,11 +235,11 @@ def _render_work_overview(items: list[dict[str, Any]]) -> None:
             )
         if other_items:
             for item in other_items:
-                _render_workflow_card(item, primary=False)
+                _render_workflow_card(database, item, primary=False)
 
 
 def _render_workflow_card(
-    item: dict[str, Any], *, primary: bool
+    database: Any, item: dict[str, Any], *, primary: bool
 ) -> None:
     with st.container(border=True):
         st.write(f"**{item['status_label']} · {item['website']}**")
@@ -240,17 +252,10 @@ def _render_workflow_card(
                 "**Planlagt evaluering:** "
                 f"{item['planned_evaluation_date']}"
             )
-        if item["target"] == "pages/9_SEO.py":
-            if st.button(
-                item["link_label"],
-                type="primary" if primary else "secondary",
-                key=(
-                    f"workflow-{item['stage']}-{item['website']}-"
-                    f"{item.get('experiment_id') or item['target_url']}"
-                ),
-            ):
-                set_selected_website(item["website"])
-                st.switch_page(item["target"])
+        if item["stage"] == "draft":
+            _render_draft_decision(database, item, primary=primary)
+        elif item["stage"] == "approved":
+            _render_approved_decision(database, item)
         else:
             st.page_link(
                 item["target"],
@@ -259,7 +264,126 @@ def _render_workflow_card(
             )
 
 
-def _render_combined_traffic_task(item: dict[str, Any]) -> None:
+def _workflow(database: Any) -> Any:
+    module = importlib.reload(traffic_workflow_module)
+    return module.TrafficRecommendationWorkflow(database)
+
+
+def _finish_daily_action(message: str) -> None:
+    st.session_state["daily_action_result"] = message
+    st.rerun()
+
+
+def _render_draft_decision(
+    database: Any, item: dict[str, Any], *, primary: bool
+) -> None:
+    key = str(item["recommendation_key"])
+    if st.button(
+        "Godkend opgave",
+        type="primary" if primary else "secondary",
+        key=f"approve-daily-{key}",
+        help=(
+            "Godkender arbejdsplanen. Appen ændrer ikke websitet og starter "
+            "ingen måling endnu."
+        ),
+    ):
+        try:
+            _workflow(database).approve_draft(key)
+        except ValueError as error:
+            st.error(str(error))
+        else:
+            _finish_daily_action(
+                "Opgaven er godkendt. Udfør nu ændringen på websitet."
+            )
+    with st.expander("Redigér opgaven før godkendelse"):
+        with st.form(f"edit-daily-{key}"):
+            title = st.text_input("Titel", value=str(item["title"]))
+            description = st.text_area(
+                "Arbejdsbeskrivelse",
+                value=str(item.get("description") or ""),
+                height=150,
+            )
+            save = st.form_submit_button("Gem ændringer")
+        if save:
+            recommendation = _recommendation_from_work_item(item)
+            try:
+                _workflow(database).create_draft(
+                    recommendation,
+                    title=title,
+                    description=description,
+                )
+            except ValueError as error:
+                st.error(str(error))
+            else:
+                _finish_daily_action("Dine ændringer er gemt.")
+
+
+def _render_approved_decision(
+    database: Any, item: dict[str, Any]
+) -> None:
+    if item.get("target_url"):
+        st.link_button(
+            "Åbn siden, der skal ændres",
+            str(item["target_url"]),
+            help="Åbner websitet i en ny fane. AI Office ændrer intet selv.",
+        )
+    with st.form(f"implement-daily-{item['recommendation_key']}"):
+        change_type = st.selectbox(
+            "Hvilken type ændring udførte du?",
+            list(EXPERIMENT_TYPE_LABELS),
+            help="Vælg den ene ændringstype, som 28-dages målingen skal følge.",
+        )
+        description = st.text_area(
+            "Hvad ændrede du konkret?",
+            placeholder=(
+                "Eksempel: Opdaterede afsnittet om iskaffe og tilføjede "
+                "tre interne links."
+            ),
+            help=(
+                "Beskriv kun den ændring, du netop har udført. Det gør "
+                "resultatet lettere at vurdere efter 28 dage."
+            ),
+        )
+        implemented = st.form_submit_button(
+            "Registrér ændring og start 28-dages måling",
+            type="primary",
+        )
+    if implemented:
+        try:
+            experiment = _workflow(database).mark_implemented(
+                str(item["recommendation_key"]),
+                change_description=description,
+                experiment_type=EXPERIMENT_TYPE_LABELS[change_type],
+            )
+        except ValueError as error:
+            st.error(str(error))
+        else:
+            due = experiment.get("planned_evaluation_date")
+            _finish_daily_action(
+                "Ændringen er registreret, og målingen er startet"
+                + (f" frem til {due}." if due else ".")
+            )
+
+
+def _recommendation_from_work_item(
+    item: dict[str, Any]
+) -> dict[str, Any]:
+    evidence = item.get("evidence") or {}
+    return {
+        "task_key": item["recommendation_key"],
+        "website": item["website"],
+        "task_type": "combined_traffic_decline",
+        "target_url": item.get("target_url", ""),
+        "measured_cause": item.get("measured_cause", ""),
+        "description": item["title"],
+        "priority": "Kritisk",
+        **evidence,
+    }
+
+
+def _render_combined_traffic_task(
+    database: Any, item: dict[str, Any]
+) -> None:
     with st.container(border=True):
         st.subheader(item["description"])
         st.write(f"**Prioritet:** {item['priority']}")
@@ -295,22 +419,95 @@ def _render_combined_traffic_task(item: dict[str, Any]) -> None:
             if item.get("confidence"):
                 st.write(f"**Sikkerhed:** {item['confidence']}")
         st.markdown("### Næste trin")
-        _render_scoped_navigation(
-            item,
-            label=item.get(
-                "link_label", f"Åbn analyse for {item['website']}"
-            ),
-        )
+        _render_new_decision_actions(database, item)
     _render_priority_explanation(item)
 
 
-def _render_priority_task(item: dict[str, Any]) -> None:
+def _render_new_decision_actions(
+    database: Any, item: dict[str, Any]
+) -> None:
+    title = str(item["description"])
+    description = (
+        str(item.get("recommended_action") or item["description"])
+        + "\n\nDatagrundlag: "
+        + str(item.get("explanation") or "")
+    )
+    key = str(item["task_key"])
+    if st.button(
+        "Godkend opgave",
+        type="primary",
+        key=f"approve-new-{key}",
+        help=(
+            "Gemmer og godkender planen i ét trin. Du skal stadig selv "
+            "udføre ændringen på websitet."
+        ),
+    ):
+        _create_and_approve(database, item, title, description)
+    with st.expander("Redigér før godkendelse"):
+        with st.form(f"edit-new-{key}"):
+            edited_title = st.text_input("Titel", value=title)
+            edited_description = st.text_area(
+                "Arbejdsbeskrivelse", value=description, height=170
+            )
+            approve_edited = st.form_submit_button(
+                "Gem ændringer og godkend"
+            )
+        if approve_edited:
+            _create_and_approve(
+                database, item, edited_title, edited_description
+            )
+    snooze_column, reject_column = st.columns(2)
+    if snooze_column.button(
+        "Udsæt 14 dage",
+        key=f"snooze-new-{key}",
+        help="Skjuler anbefalingen i 14 dage uden at slette den.",
+    ):
+        try:
+            _workflow(database).snooze(
+                item, date.today() + timedelta(days=14)
+            )
+        except ValueError as error:
+            st.error(str(error))
+        else:
+            _finish_daily_action("Anbefalingen er udsat 14 dage.")
+    if reject_column.button(
+        "Afvis",
+        key=f"reject-new-{key}",
+        help="Afviser denne konkrete anbefaling, så den ikke foreslås igen.",
+    ):
+        _workflow(database).reject(item)
+        _finish_daily_action("Anbefalingen er afvist.")
+
+
+def _create_and_approve(
+    database: Any,
+    recommendation: dict[str, Any],
+    title: str,
+    description: str,
+) -> None:
+    try:
+        workflow = _workflow(database)
+        decision = workflow.create_draft(
+            recommendation, title=title, description=description
+        )
+        workflow.approve_draft(str(decision["recommendation_key"]))
+    except ValueError as error:
+        st.error(str(error))
+    else:
+        _finish_daily_action(
+            "Opgaven er godkendt. Udfør nu ændringen på websitet."
+        )
+
+
+def _render_priority_task(
+    database: Any, item: dict[str, Any]
+) -> None:
     """Render the highest persisted task without exposing internal scores."""
     if item.get("task_type") in {
         "combined_traffic_decline", "search_only_decline",
         "plausible_only_decline",
     }:
-        _render_combined_traffic_task(item)
+        _render_combined_traffic_task(database, item)
         return
     with st.container(border=True):
         st.subheader(item["description"])

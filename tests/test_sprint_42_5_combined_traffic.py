@@ -117,7 +117,9 @@ class CombinedTrafficTaskTests(unittest.TestCase):
         )
         optimizer = page.index("optimizer = _optimizer(database)")
         self.assertLess(combined_branch, optimizer)
-        self.assertIn("_render_priority_task(priority_tasks[0])", page)
+        self.assertIn(
+            "_render_priority_task(database, priority_tasks[0])", page
+        )
         self.assertIn("Plausible-ændring", page)
         self.assertIn("Search Console-ændring", page)
 

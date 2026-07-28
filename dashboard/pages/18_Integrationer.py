@@ -47,12 +47,43 @@ def main() -> None:
     st.header("Integrationer")
     database = open_database()
     try:
+        sync_status = load_sync_status(database)
         _render_search_console(SearchConsoleIntegration(PROJECT_ROOT, database))
         _render_plausible(PlausibleIntegration(database))
+        _render_partner_ads(sync_status)
         _render_failed_retry(database)
-        _render_sync_status(load_sync_status(database))
+        _render_sync_status(sync_status)
     finally:
         database.close()
+
+
+def _render_partner_ads(model: dict) -> None:
+    item = next(
+        (
+            candidate for candidate in model.get("items", [])
+            if candidate.get("key") == "partner_ads"
+        ),
+        {},
+    )
+    st.subheader("Partner Ads")
+    status = str(item.get("status") or "Ikke kørt endnu")
+    columns = st.columns(2)
+    columns[0].metric("Status", status)
+    columns[1].metric(
+        "Seneste succes",
+        format_datetime(item.get("last_success"))
+        if item.get("last_success") else "Ingen endnu",
+    )
+    st.caption(
+        "Partner Ads leverer salgs- og provisionsdata. Import og detaljer "
+        "findes på den tilknyttede detaljeside."
+    )
+    st.page_link(
+        "pages/10_Partner_Ads.py",
+        label="Se salg og importdetaljer",
+        icon=":material/payments:",
+    )
+    st.divider()
 
 
 def _render_plausible(integration: PlausibleIntegration) -> None:

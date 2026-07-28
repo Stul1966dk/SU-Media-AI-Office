@@ -87,17 +87,17 @@ def _decision_item(
     status = str(decision["status"])
     if status == "draft":
         stage = "draft"
-        status_label = "Kladde klar"
-        next_action = "Gennemgå og godkend opgavekladden."
-        target = "pages/9_SEO.py"
-        link_label = "Åbn kladden i SEO"
+        status_label = "Klar til godkendelse"
+        next_action = "Gennemgå opgaven og godkend den her."
+        target = "app.py"
+        link_label = "Godkend opgaven"
     elif status == "approved":
         stage = "approved"
-        status_label = "Afventer implementering"
+        status_label = "Klar til implementering"
         next_action = (
-            "Udfør den godkendte ændring på websitet og registrér den."
+            "Udfør ændringen på websitet og registrér den her."
         )
-        target = "pages/9_SEO.py"
+        target = "app.py"
         link_label = "Registrér implementeringen"
     elif experiment and experiment.get("status") == "ready_for_evaluation":
         stage = "ready_for_evaluation"
@@ -134,6 +134,10 @@ def _decision_item(
                 "planned_evaluation_date"
             )
         ),
+        "recommendation_key": decision["recommendation_key"],
+        "description": decision.get("description", ""),
+        "measured_cause": decision.get("measured_cause", ""),
+        "evidence": decision.get("evidence") or {},
     }
 
 
@@ -141,9 +145,7 @@ def _experiment_item(experiment: dict[str, Any]) -> dict[str, Any]:
     ready = experiment.get("status") == "ready_for_evaluation"
     return {
         "stage": "ready_for_evaluation" if ready else "measurement",
-        "status_label": (
-            "Klar til evaluering" if ready else "Under 28-dages måling"
-        ),
+        "status_label": "Klar til evaluering" if ready else "Under måling",
         "website": experiment["website_id"],
         "title": experiment.get("change_description") or "SEO-eksperiment",
         "target_url": experiment.get("target_url", ""),

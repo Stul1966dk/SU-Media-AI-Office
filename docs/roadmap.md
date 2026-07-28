@@ -436,3 +436,23 @@ hvilken konkret brugerhandling der kommer først, før appen foreslår nyt arbej
 Succeskriterium: En ny bruger lander på én konkret arbejdsflade, kan se det
 næste trin uden at lede og behøver kun åbne flere sider, når opgaven kræver
 specialiseret arbejde eller yderligere dokumentation.
+
+# Sprint 44.2 - Ét samlet opgaveflow
+
+- [x] Godkend en ny trafikanbefaling direkte på I dag uden et synligt
+  kladdemellemtrin.
+- [x] Bevar redigering, udsættelse og afvisning som sekundære handlinger.
+- [x] Vis godkendte opgaver som klar til implementering på samme side.
+- [x] Link direkte til den berørte webside og registrér den udførte ændring på
+  I dag.
+- [x] Start én 28-dages måling fra den registrerede ændring og vis derefter
+  måleperioden i det eksisterende overblik.
+- [x] Brug enkle brugerstatusser: Klar til godkendelse, Klar til
+  implementering, Under måling, Klar til evaluering og Afsluttet.
+- [x] Genlæs gemte anbefalingsbeslutninger sikkert efter Streamlit hot reload.
+- [x] Flyt Partner Ads fra sidebaren til Integrationer og behold detaljesiden
+  via et kontekstuelt link.
+
+Succeskriterium: Brugeren kan gå fra anbefaling til aktiv 28-dages måling via
+I dag uden at navigere gennem andre AI Office-sider; kun selve websitet åbnes
+for den manuelle ændring.

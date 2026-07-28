@@ -114,6 +114,27 @@ def get_decision(
     return result
 
 
+def get_decisions(database: Any) -> list[dict[str, Any]]:
+    """Return all decisions across current and stale Database classes."""
+    reader = getattr(
+        database, "get_traffic_recommendation_decisions", None
+    )
+    if reader:
+        return reader()
+    rows = _connection(database).execute(
+        """
+        SELECT * FROM traffic_recommendation_decisions
+        ORDER BY updated_at DESC, id DESC
+        """
+    ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["evidence"] = json.loads(item.pop("evidence_json"))
+        result.append(item)
+    return result
+
+
 def _connection(database: Any) -> Any:
     connection = getattr(database, "connection", None)
     if connection is None:

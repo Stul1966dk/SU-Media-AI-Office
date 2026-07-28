@@ -68,10 +68,6 @@ def render_sidebar(*, show_website_selector: bool = True) -> None:
                     ":material/cable:",
                 ),
                 (
-                    "pages/10_Partner_Ads.py", "Partner Ads",
-                    ":material/payments:",
-                ),
-                (
                     "pages/12_Systemstatus.py", "Systemstatus",
                     ":material/monitor_heart:",
                 ),
