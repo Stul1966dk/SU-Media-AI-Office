@@ -6,6 +6,11 @@ from datetime import date, datetime
 from typing import Any
 
 from core.seo_experiment_engine import SEOExperimentEngine
+from core.traffic_recommendation_store import (
+    find_open_task_by_title,
+    get_decision,
+    upsert_decision,
+)
 
 
 VALID_STATUSES = {
@@ -38,7 +43,8 @@ class TrafficRecommendationWorkflow:
             raise ValueError("Opgavekladden skal have en titel.")
         if not clean_description:
             raise ValueError("Opgavekladden skal have en beskrivelse.")
-        existing_task = self.database.find_open_task_by_title(
+        existing_task = find_open_task_by_title(
+            self.database,
             str(recommendation["website"]), clean_title
         )
         if existing_task:
@@ -183,10 +189,8 @@ class TrafficRecommendationWorkflow:
                 )
             },
         }
-        self.database.upsert_traffic_recommendation_decision(values)
-        return self.database.get_traffic_recommendation_decision(
-            values["recommendation_key"]
-        )
+        upsert_decision(self.database, values)
+        return get_decision(self.database, values["recommendation_key"])
 
     def _save_existing(
         self,
@@ -200,7 +204,7 @@ class TrafficRecommendationWorkflow:
             **(decision.get("evidence") or {}),
             **(evidence_updates or {}),
         }
-        self.database.upsert_traffic_recommendation_decision({
+        upsert_decision(self.database, {
             "recommendation_key": decision["recommendation_key"],
             "website_id": decision["website_id"],
             "task_type": decision["task_type"],
@@ -219,9 +223,7 @@ class TrafficRecommendationWorkflow:
         return self._required(str(decision["recommendation_key"]))
 
     def _required(self, recommendation_key: str) -> dict[str, Any]:
-        decision = self.database.get_traffic_recommendation_decision(
-            recommendation_key
-        )
+        decision = get_decision(self.database, recommendation_key)
         if decision is None:
             raise ValueError("Opgavekladden kunne ikke findes.")
         return decision

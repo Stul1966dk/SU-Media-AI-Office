@@ -16,9 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.search_console_service import SearchConsoleService
 from core.current_diagnosis_reader import read_latest_diagnosis
 from core.priority_scoring import score_priority_item
-from core.traffic_recommendation_workflow import (
-    TrafficRecommendationWorkflow,
-)
+import core.traffic_recommendation_workflow as traffic_workflow_module
 import core.traffic_recommendations as traffic_recommendations_module
 from dashboard.components.database import open_database
 from dashboard.components.errors import safe_error_detail
@@ -794,7 +792,8 @@ def _save_traffic_decision(
     """Persist one explicit UI decision and refresh the displayed state."""
     database = open_database()
     try:
-        workflow = TrafficRecommendationWorkflow(database)
+        workflow_module = importlib.reload(traffic_workflow_module)
+        workflow = workflow_module.TrafficRecommendationWorkflow(database)
         if status == "draft":
             workflow.create_draft(
                 recommendation, title=title, description=description

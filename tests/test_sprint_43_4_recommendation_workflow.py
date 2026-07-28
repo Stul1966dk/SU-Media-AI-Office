@@ -79,6 +79,29 @@ class RecommendationWorkflowTests(unittest.TestCase):
         self.assertEqual(1, count)
         self.assertEqual("Anden", result["title"])
 
+    def test_draft_works_with_database_class_from_before_hot_reload(self):
+        legacy_database = type(
+            "LegacyDatabase",
+            (),
+            {"connection": self.database.connection},
+        )()
+        workflow = TrafficRecommendationWorkflow(legacy_database)
+
+        result = workflow.create_draft(
+            RECOMMENDATION,
+            title="Ret title via kompatibilitetslag",
+            description="Gem kladden uden de nye Database-metoder.",
+        )
+
+        self.assertEqual("draft", result["status"])
+        self.assertEqual(
+            "Ret title via kompatibilitetslag", result["title"]
+        )
+        self.assertEqual(
+            result,
+            workflow._required(RECOMMENDATION["task_key"]),
+        )
+
     def test_snooze_and_reject_are_persisted(self):
         until = date.today() + timedelta(days=14)
         snoozed = self.workflow.snooze(RECOMMENDATION, until)
