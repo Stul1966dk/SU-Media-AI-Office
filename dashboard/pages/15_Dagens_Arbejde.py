@@ -125,6 +125,9 @@ def main() -> None:
             item for item in priority_tasks
             if item.get("task_type") in CONCRETE_TRAFFIC_TASKS
         ]
+        priority_tasks = traffic_recommendations_module.apply_measured_learning(
+            priority_tasks, database.get_seo_learning_entries()
+        )
         priority_tasks = _filter_decided_recommendations(
             priority_tasks, decisions,
         )
@@ -418,6 +421,11 @@ def _render_combined_traffic_task(
                 st.write(f"**Målt signal:** {item['measured_cause']}")
             if item.get("confidence"):
                 st.write(f"**Sikkerhed:** {item['confidence']}")
+            if item.get("learning_summary"):
+                st.write(
+                    f"**Læring fra tidligere målinger:** "
+                    f"{item['learning_summary']}"
+                )
         st.markdown("### Næste trin")
         _render_new_decision_actions(database, item)
     _render_priority_explanation(item)

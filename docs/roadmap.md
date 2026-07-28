@@ -474,3 +474,20 @@ for den manuelle ændring.
 Succeskriterium: Brugeren ved, hvilken side der ejer hvilken information, og
 kan altid fortsætte til den konkrete opgave uden at møde en parallel handling
 eller en blindgyde.
+
+# Sprint 44.4 - Ét samlet resultat- og læringsflow
+
+- [x] Saml aktive målinger, afsluttede resultater og dokumenteret læring på
+  Resultater.
+- [x] Vis først en enkel status med forbedret, uændret og forværret.
+- [x] Vis næste handling for hvert afsluttet resultat.
+- [x] Bevar før- og efterdata i fold-ud-sektioner.
+- [x] Vis dokumenterede læringsmønstre og deres datakvalitet som sekundær
+  information.
+- [x] Gør SEO Insights og SEO-læring til udfasede henvisningssider.
+- [x] Fjern SEO-læring fra navigationen.
+- [x] Bevar Resultater som den eneste brugerflade for målinger og læring.
+
+Succeskriterium: Brugeren kan følge hele kæden fra aktiv måling til konklusion
+og genbrugelig læring på én side og ved altid, om ændringen skal bevares,
+tilpasses, tilbageføres eller blot afvente flere data.

@@ -33,6 +33,66 @@ def build_traffic_recommendations(
     return recommendations
 
 
+def apply_measured_learning(
+    recommendations: list[dict[str, Any]],
+    learning_entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Enrich candidates with relevant measured outcomes from earlier work."""
+    enriched = []
+    improved = {"Tydeligt forbedret", "Forbedret", "Delvist forbedret"}
+    unsuccessful = {"Uændret", "Forværret"}
+    for recommendation in recommendations:
+        item = dict(recommendation)
+        change_type = _recommended_change_type(item)
+        relevant = [
+            entry for entry in learning_entries
+            if entry.get("change_type") == change_type
+        ]
+        same_url = [
+            entry for entry in relevant
+            if entry.get("target_url") == item.get("target_url")
+        ]
+        wins = sum(
+            entry.get("classification") in improved for entry in relevant
+        )
+        repeated_failures = sum(
+            entry.get("classification") in unsuccessful for entry in same_url
+        )
+        if relevant:
+            item["learning_evidence"] = {
+                "change_type": change_type,
+                "observations": len(relevant),
+                "improved": wins,
+                "same_url_failures": repeated_failures,
+            }
+            item["learning_summary"] = (
+                f"{len(relevant)} tidligere måling(er) af denne ændringstype; "
+                f"{wins} gav en forbedring."
+            )
+        if repeated_failures >= 2:
+            item["recommended_action"] = (
+                "Tidligere målinger på samme URL gav ikke effekt. Vælg en "
+                "anden ændringstype end den tidligere afprøvede, og brug "
+                "datagrundlaget nedenfor til at afgrænse den."
+            )
+            item["learning_summary"] = (
+                f"{repeated_failures} tidligere målinger af samme type på "
+                "denne URL var uændrede eller forværrede. Gentag derfor ikke "
+                "samme løsning."
+            )
+        enriched.append(item)
+    return enriched
+
+
+def _recommended_change_type(recommendation: dict[str, Any]) -> str:
+    cause = str(recommendation.get("measured_cause") or "")
+    if cause == "CTR-fald":
+        return "title_meta"
+    if cause == "Placeringsfald":
+        return "content_update"
+    return "content_update"
+
+
 def _combined(
     website: str, search: dict[str, Any], plausible: dict[str, Any]
 ) -> dict[str, Any]:

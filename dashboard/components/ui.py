@@ -79,10 +79,6 @@ def render_sidebar(*, show_website_selector: bool = True) -> None:
             "pages/0_Kom_godt_i_gang.py", "Kom godt i gang",
             ":material/route:",
         ),
-        (
-            "pages/16_SEO_Laering.py", "SEO-læring",
-            ":material/school:",
-        ),
     )
     active_page = _active_page_filename()
     try:

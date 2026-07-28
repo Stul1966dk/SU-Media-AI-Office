@@ -10,10 +10,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from dashboard.components.database import open_database
 from dashboard.components.formatting import format_date, format_status
 from dashboard.components.help_panel import render_help_panel
-from dashboard.components.ui import load_styles, render_sidebar
+from dashboard.components.ui import load_styles, render_next_step, render_sidebar
 
 
 def _result_totals(evaluations: list[dict]) -> tuple[int, int, float]:
@@ -227,7 +226,7 @@ def _recommended_action(
 
 
 def main() -> None:
-    """Show existing SEO totals without triggering writes or analysis."""
+    """Point old bookmarks to the unified result and learning surface."""
     st.set_page_config(
         page_title="SEO Insights", page_icon="insights", layout="wide"
     )
@@ -235,105 +234,23 @@ def main() -> None:
     render_sidebar()
     st.title("SEO Insights")
     render_help_panel(
-        purpose="Se resultater og læring fra afsluttede SEO-eksperimenter.",
-        requirements="Der skal være registrerede eksperimenter og evalueringer.",
-        actions="Brug overblikket til at vurdere resultater og næste handling.",
-        limitations="Siden er skrivebeskyttet og starter ingen analyser.",
+        purpose="Hjælp ældre bogmærker videre til det samlede resultatoverblik.",
+        requirements="Ingen.",
+        actions="Åbn Resultater for målinger, konklusioner og læring.",
+        limitations="Denne ældre side viser ikke længere et separat overblik.",
     )
-    st.write(
-        "Her samles resultater og læring fra afsluttede SEO-eksperimenter."
+    st.info(
+        "SEO Insights er nu samlet under Resultater, så du ikke skal lede "
+        "efter samme information på flere sider."
     )
-
-    database = open_database(read_only=True)
-    try:
-        evaluations = database.get_experiment_evaluations()
-        experiments = database.get_seo_experiments()
-        totals = (
-            len(database.get_all_websites()),
-            len(experiments),
-            len(evaluations),
-        )
-    finally:
-        database.close()
-
-    for column, (label, value) in zip(
-        st.columns(3),
-        zip(("Websites", "Eksperimenter", "Evalueringer"), totals),
-    ):
-        column.metric(label, value)
-
-    won, lost, average_ctr_change = _result_totals(evaluations)
-    for column, (label, value) in zip(
-        st.columns(3),
-        (
-            ("Vundne eksperimenter", won),
-            ("Tabte eksperimenter", lost),
-            (
-                "Gennemsnitlig CTR-ændring",
-                _format_ctr_change(average_ctr_change),
-            ),
+    render_next_step(
+        text=(
+            "Fortsæt til Resultater for at se aktive målinger, afsluttede "
+            "konklusioner og dokumenteret læring samlet."
         ),
-    ):
-        column.metric(label, value)
-
-    st.subheader("Hvad har vi lært?")
-    won_share, won_average, largest_improvement, awaiting = _learning_totals(
-        evaluations, experiments
+        path="pages/13_Eksperimenter.py",
+        label="Åbn Resultater",
     )
-    for column, (label, value) in zip(
-        st.columns(4),
-        (
-            ("Andel vundne eksperimenter", f"{won_share:.1f} %".replace(".", ",")),
-            (
-                "Gennemsnitlig CTR-forbedring blandt vundne eksperimenter",
-                _format_optional_ctr_change(won_average),
-            ),
-            (
-                "Største registrerede CTR-forbedring",
-                _format_optional_ctr_change(largest_improvement),
-            ),
-            ("Eksperimenter der afventer evaluering", awaiting),
-        ),
-    ):
-        column.metric(label, value)
-
-    st.subheader("AI-resumé")
-    st.write(" ".join(_summary_sentences(
-        len(evaluations), won, lost, won_share, won_average,
-        largest_improvement, awaiting
-    )))
-
-    active_experiments = sum(
-        item.get("status") not in {"completed", "cancelled", "archived"}
-        for item in experiments
-    )
-    st.subheader("Næste anbefalede handling")
-    st.info(_recommended_action(
-        len(evaluations), awaiting, active_experiments
-    ))
-
-    st.subheader("Resultatfordeling")
-    for column, (label, count, share) in zip(
-        st.columns(4), _result_distribution(evaluations)
-    ):
-        column.metric(label, count)
-        column.caption(
-            f"{str(f'{share:.1f}').replace('.', ',')} % af evalueringerne"
-        )
-
-    st.subheader("Website-performance")
-    website_rows = _website_performance(evaluations)
-    if not website_rows:
-        st.info("Ingen websites har afsluttede SEO-eksperimenter endnu.")
-    else:
-        st.dataframe(website_rows, width="stretch", hide_index=True)
-
-    st.subheader("Seneste evalueringer")
-    latest_rows = _latest_evaluation_rows(evaluations)
-    if not latest_rows:
-        st.info("Ingen afsluttede SEO-eksperimenter endnu.")
-    else:
-        st.dataframe(latest_rows, width="stretch", hide_index=True)
 
 
 if __name__ == "__main__":

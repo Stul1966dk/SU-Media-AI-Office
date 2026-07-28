@@ -3,6 +3,7 @@
 import sys
 from datetime import date, timedelta
 from pathlib import Path
+from statistics import mean
 from typing import Any
 
 import streamlit as st
@@ -18,7 +19,7 @@ from dashboard.components.database import open_database
 from dashboard.components.formatting import format_date, format_datetime
 from dashboard.components.help_panel import render_help_panel
 from dashboard.components.ui import (
-    load_styles, render_next_step, render_page_link, render_sidebar,
+    load_styles, render_next_step, render_sidebar,
 )
 
 
@@ -61,7 +62,7 @@ def main() -> None:
     render_help_panel(
         purpose="Følg aktive målinger og lær af afsluttede ændringer.",
         requirements="En konkret beslutning, URL-data og brugerens godkendelse.",
-        actions="Godkend, start, evaluér eller annullér planlagte eksperimenter.",
+        actions="Se hvad der måles, hvornår resultatet er klart, og hvad du bør gøre bagefter.",
         limitations="Siden ændrer aldrig et website og starter intet automatisk.",
     )
     render_next_step(
@@ -72,16 +73,13 @@ def main() -> None:
         path="app.py",
         label="Tilbage til I dag",
     )
-    render_page_link(
-        "pages/17_SEO_Insights.py",
-        "Se læring fra afsluttede målinger",
-    )
     database = open_database(read_only=True)
     try:
         experiments = database.get_seo_experiments()
+        evaluation_rows = database.get_experiment_evaluations()
         evaluations = {
             item["experiment_id"]: item
-            for item in database.get_experiment_evaluations()
+            for item in evaluation_rows
         }
         approved_changes = {
             item["experiment_id"]: item
@@ -92,6 +90,8 @@ def main() -> None:
             item["experiment_id"]: item
             for item in database.get_experiment_learnings()
         }
+        learning_entries = database.get_seo_learning_entries()
+        _render_result_overview(experiments, evaluation_rows)
         active = [
             item for item in experiments
             if item["status"] in {
@@ -103,12 +103,12 @@ def main() -> None:
             item for item in experiments
             if item["status"] in {"completed", "cancelled", "failed"}
         ]
-        st.subheader("Aktive eksperimenter")
+        st.subheader("Aktive målinger")
         if not active:
-            st.info("Ingen aktive eksperimenter endnu.")
+            st.info("Ingen aktive målinger. Start med den anbefalede opgave på I dag.")
         for experiment in active:
             _active_card(database, experiment)
-        st.subheader("Afsluttede eksperimenter")
+        st.subheader("Afsluttede resultater")
         if not completed:
             st.info("Ingen afsluttede eksperimenter endnu.")
         for experiment in completed:
@@ -129,8 +129,95 @@ def main() -> None:
                     _detail(experiment, learnings.get(experiment["id"]),
                             evaluations.get(experiment["id"]),
                             approved_changes.get(experiment["id"]))
+        _render_learning(learning_entries)
     finally:
         database.close()
+
+
+def _render_result_overview(
+    experiments: list[dict[str, Any]],
+    evaluations: list[dict[str, Any]],
+) -> None:
+    """Show the outcome users need before the underlying measurements."""
+    improvements = {"strong_improvement", "improvement"}
+    declines = {"strong_decline", "decline"}
+    active_statuses = {
+        "approved", "running", "waiting_for_data",
+        "ready_for_evaluation", "evaluating",
+    }
+    improved = sum(
+        item.get("result_status") in improvements for item in evaluations
+    )
+    unchanged = sum(
+        item.get("result_status") == "neutral" for item in evaluations
+    )
+    declined = sum(
+        item.get("result_status") in declines for item in evaluations
+    )
+    active = sum(item.get("status") in active_statuses for item in experiments)
+    columns = st.columns(4)
+    columns[0].metric("Aktive målinger", active)
+    columns[1].metric("Forbedret", improved)
+    columns[2].metric("Uændret", unchanged)
+    columns[3].metric("Forværret", declined)
+    st.caption(
+        "Resultatet bygger på gemte før- og efterperioder. Åbn "
+        "datagrundlaget på det enkelte resultat, hvis du vil se tallene."
+    )
+
+
+def _render_learning(
+    entries: list[dict[str, Any]],
+) -> None:
+    """Present reusable measured learning without creating another inbox."""
+    st.subheader("Dokumenteret læring")
+    if not entries:
+        st.info(
+            "Der er endnu ingen dokumenterede mønstre. Læring opstår først, "
+            "når en måling er afsluttet med tilstrækkelige data."
+        )
+        return
+    improved_labels = {
+        "Tydeligt forbedret", "Forbedret", "Delvist forbedret"
+    }
+    columns = st.columns(3)
+    columns[0].metric("Dokumenterede observationer", len(entries))
+    columns[1].metric(
+        "Forbedrede observationer",
+        sum(item["classification"] in improved_labels for item in entries),
+    )
+    columns[2].metric(
+        "Gennemsnitlig målt effekt",
+        f"{mean(float(item['effect_size']) for item in entries):+.1f} %",
+    )
+    st.write(
+        "Denne læring bruges som historisk evidens, når AI Office "
+        "prioriterer kommende anbefalinger."
+    )
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for item in entries:
+        key = (item["change_type"], item["page_type"])
+        grouped.setdefault(key, []).append(item)
+    with st.expander("Se dokumenterede mønstre og datakvalitet"):
+        for (change_type, page_type), rows in grouped.items():
+            count = len(rows)
+            effect = mean(float(item["effect_size"]) for item in rows)
+            evidence = (
+                "Understøttet mønster" if count >= 10
+                else "Foreløbigt mønster" if count >= 3
+                else "Enkelt observation"
+            )
+            st.write(f"**{change_type} på {page_type}**")
+            st.write(
+                f"{count} måling(er) · gennemsnitlig effekt {effect:+.1f} % "
+                f"· {evidence}"
+            )
+            st.caption(
+                "Datakvalitet: "
+                + ", ".join(sorted({
+                    str(item["data_quality"]) for item in rows
+                }))
+            )
 
 
 def _summary(item: dict[str, Any]) -> dict[str, Any]:

@@ -31,7 +31,7 @@ class SidebarNavigationTests(unittest.TestCase):
         for label in (
             "I dag", "Websites", "Resultater", "Portefølje",
             "Værktøjer", "Indstillinger", "Kom godt i gang",
-            "SEO-læring", "Integrationer",
+            "Integrationer",
         ):
             self.assertIn(label, source)
         primary_section = source.split("groups = (", 1)[0]
@@ -39,6 +39,7 @@ class SidebarNavigationTests(unittest.TestCase):
         self.assertNotIn("AI Analyst", primary_section)
         self.assertNotIn("Projekter", source)
         self.assertNotIn("Opgaver", source)
+        self.assertNotIn("SEO-læring", source)
         self.assertIn("set_navigation_group_state", source)
 
 
