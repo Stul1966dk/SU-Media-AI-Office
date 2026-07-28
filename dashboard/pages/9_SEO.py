@@ -18,6 +18,7 @@ from core.current_diagnosis_reader import read_latest_diagnosis
 from core.priority_scoring import score_priority_item
 import core.traffic_recommendation_workflow as traffic_workflow_module
 import core.traffic_recommendations as traffic_recommendations_module
+from core.traffic_recommendation_store import get_decision
 from dashboard.components.database import open_database
 from dashboard.components.errors import safe_error_detail
 from dashboard.components.formatting import format_date
@@ -152,12 +153,9 @@ def main() -> None:
         traffic_recommendation = _current_traffic_recommendation(
             search_diagnosis, plausible_diagnosis
         )
-        decision_reader = getattr(
-            database, "get_traffic_recommendation_decision", None
-        )
         recommendation_decision = (
-            decision_reader(traffic_recommendation["task_key"])
-            if traffic_recommendation and decision_reader else None
+            get_decision(database, traffic_recommendation["task_key"])
+            if traffic_recommendation else None
         )
     finally:
         database.close()
@@ -621,6 +619,11 @@ def _render_traffic_recommendation(
             "Der er ingen kvalificeret anbefaling fra begge datakilder endnu."
         )
         return
+    action_result = st.session_state.pop(
+        "seo_traffic_action_result", None
+    )
+    if action_result:
+        st.success(action_result)
     st.write(
         f"**Anbefalet handling:** "
         f"{recommendation.get('recommended_action') or recommendation['description']}"
@@ -703,7 +706,11 @@ def _render_traffic_recommendation(
                 height=160,
             )
             save_draft = st.form_submit_button(
-                "Gem opgavekladde", type="primary"
+                (
+                    "Opdater opgavekladde"
+                    if status == "draft" else "Gem opgavekladde"
+                ),
+                type="primary",
             )
         if save_draft:
             _save_traffic_decision(
@@ -817,6 +824,15 @@ def _save_traffic_decision(
         return
     finally:
         database.close()
+    messages = {
+        "draft": "Opgavekladden er gemt og klar til din godkendelse.",
+        "approved": "Opgavekladden er godkendt.",
+        "implemented": "Ændringen er registreret, og målingen er startet.",
+        "snoozed": "Anbefalingen er udsat 14 dage.",
+        "rejected": "Anbefalingen er afvist.",
+    }
+    st.session_state["seo_traffic_action_result"] = messages[status]
+    st.session_state["seo_requested_tab"] = "Årsagsanalyse"
     st.rerun()
 
 

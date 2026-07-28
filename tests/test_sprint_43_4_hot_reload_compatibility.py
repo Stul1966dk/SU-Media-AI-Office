@@ -1,6 +1,7 @@
 """Regression checks for Streamlit instances created before Sprint 43.4."""
 
 import unittest
+from pathlib import Path
 from unittest.mock import Mock
 
 from dashboard.components.data import load_dashboard_data
@@ -8,6 +9,25 @@ from dashboard.app import _apply_hot_reload_compatibility
 
 
 class HotReloadCompatibilityTests(unittest.TestCase):
+    def test_seo_page_reads_saved_draft_through_compatibility_store(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "dashboard"
+            / "pages"
+            / "9_SEO.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "get_decision(database, traffic_recommendation[\"task_key\"])",
+            source,
+        )
+        self.assertIn(
+            '"seo_traffic_action_result"', source
+        )
+        self.assertIn(
+            "Opgavekladden er gemt og klar til din godkendelse.", source
+        )
+
     def test_dashboard_entrypoint_shims_old_database_instance(self):
         class OldDatabase:
             pass
