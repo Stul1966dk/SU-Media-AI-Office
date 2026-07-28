@@ -31,7 +31,10 @@ def score_priority_item(
     task_type = str(item.get("task_type", ""))
     scores = {field: 0.0 for field in SCORE_FIELDS}
 
-    if task_type in {"plausible_decline", "combined_traffic_decline"}:
+    if task_type in {
+        "plausible_decline", "combined_traffic_decline",
+        "plausible_only_decline",
+    }:
         decline = max(0.0, -_number(item.get("plausible_change")))
         threshold = selected["thresholds"]["plausible_decline_pct"]
         if decline >= threshold:
@@ -42,7 +45,9 @@ def score_priority_item(
                 * weights["plausible_per_percentage_point"],
             )
 
-    if task_type in {"seo_health", "combined_traffic_decline"}:
+    if task_type in {
+        "seo_health", "combined_traffic_decline", "search_only_decline",
+    }:
         thresholds = selected["thresholds"]
         click_change = _optional_number(item.get("click_change"))
         if (

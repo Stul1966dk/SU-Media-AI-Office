@@ -146,6 +146,14 @@ def main() -> None:
         plausible_diagnosis = (
             plausible_reader(website_id) if plausible_reader else None
         )
+        traffic_recommendation = next((
+            item for item in database.get_priority_task_scores(limit=None)
+            if item.get("website") == website_id
+            and item.get("task_type") in {
+                "combined_traffic_decline", "search_only_decline",
+                "plausible_only_decline",
+            }
+        ), None)
     finally:
         database.close()
     if not current_rows:
@@ -182,6 +190,8 @@ def main() -> None:
         _render_search_console_diagnosis(search_diagnosis)
         st.divider()
         _render_plausible_diagnosis(plausible_diagnosis)
+        st.divider()
+        _render_traffic_recommendation(traffic_recommendation)
     with tabs[2]:
         _render_history(current_rows, health)
     with tabs[3]:
@@ -553,6 +563,38 @@ def _render_plausible_diagnosis(
     st.caption(
         "Klassifikationen er beregnet ud fra gemte besøgstal og bruger ikke AI."
     )
+
+def _render_traffic_recommendation(
+    recommendation: dict[str, Any] | None,
+) -> None:
+    """Show a persisted cross-source candidate without creating a task."""
+    st.subheader("Samlet opgaveanbefaling")
+    if not recommendation:
+        st.info(
+            "Der er ingen kvalificeret anbefaling fra begge datakilder endnu."
+        )
+        return
+    st.write(f"**Anbefalet handling:** {recommendation['description']}")
+    st.write(str(recommendation.get("explanation", "")))
+    columns = st.columns(3)
+    columns[0].metric("Prioritet", recommendation.get("priority", "Ukendt"))
+    columns[1].metric(
+        "Search Console",
+        f"{float(recommendation.get('click_change') or 0):+.1f} %",
+    )
+    columns[2].metric(
+        "Plausible",
+        f"{float(recommendation.get('plausible_change') or 0):+.1f} %",
+    )
+    if recommendation.get("target_url"):
+        st.link_button(
+            "Åbn berørt side", str(recommendation["target_url"])
+        )
+    st.caption(
+        "Dette er en read-only anbefaling. Der er ikke oprettet eller startet "
+        "en opgave."
+    )
+
 
 def _render_opportunities(
     current: dict[str, float], previous: dict[str, float],

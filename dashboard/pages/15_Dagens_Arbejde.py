@@ -113,16 +113,23 @@ def _render_combined_traffic_task(item: dict[str, Any]) -> None:
             f"**Search Console-ændring:** {item['search_console_change']}"
         )
         st.write(item["explanation"])
+        if item.get("measured_cause"):
+            st.write(f"**Målt signal:** {item['measured_cause']}")
+        if item.get("confidence"):
+            st.write(f"**Sikkerhed:** {item['confidence']}")
         st.page_link(
             item["target"],
-            label=f"Åbn Website Profile for {item['website']}",
+            label=item.get("link_label", f"Åbn analyse for {item['website']}"),
         )
     _render_priority_explanation(item)
 
 
 def _render_priority_task(item: dict[str, Any]) -> None:
     """Render the highest persisted task without exposing internal scores."""
-    if item.get("task_type") == "combined_traffic_decline":
+    if item.get("task_type") in {
+        "combined_traffic_decline", "search_only_decline",
+        "plausible_only_decline",
+    }:
         _render_combined_traffic_task(item)
         return
     with st.container(border=True):

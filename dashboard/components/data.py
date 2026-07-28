@@ -8,6 +8,7 @@ from typing import Any, Callable, TypeVar
 from core.database import Database
 from core.priority_config import PRIORITY_CONFIG
 from core.priority_scoring import score_priority_item, stable_priority_key
+from core.traffic_recommendations import build_traffic_recommendations
 
 
 T = TypeVar("T")
@@ -110,6 +111,12 @@ def load_dashboard_data(
                 ),
                 coverage=action_context["coverage"],
                 plausible_rows=action_context["plausible_daily"],
+                search_diagnoses=action_context.get(
+                    "search_diagnoses", []
+                ),
+                plausible_diagnoses=action_context.get(
+                    "plausible_diagnoses", []
+                ),
                 today=(now.date() if now else date.today()),
             )
         ),
@@ -135,6 +142,8 @@ def build_dashboard_priority_tasks(
     active_experiments: list[dict[str, Any]] | None = None,
     coverage: list[dict[str, Any]],
     plausible_rows: list[dict[str, Any]] | None = None,
+    search_diagnoses: list[dict[str, Any]] | None = None,
+    plausible_diagnoses: list[dict[str, Any]] | None = None,
     today: date | None = None,
     limit: int | None = 5,
 ) -> list[dict[str, Any]]:
@@ -142,13 +151,29 @@ def build_dashboard_priority_tasks(
     experiment_websites = {
         str(row.get("website", "")) for row in (active_experiments or [])
     }
-    combined_items = build_combined_traffic_tasks(
-        seo_sites=seo_sites,
-        plausible_rows=plausible_rows or [],
-        today=today,
+    diagnosed_items = build_traffic_recommendations(
+        search_diagnoses or [], plausible_diagnoses or []
     )
+    diagnosed_websites = {item["website"] for item in diagnosed_items}
+    combined_items = [
+        item for item in build_combined_traffic_tasks(
+            seo_sites=seo_sites,
+            plausible_rows=plausible_rows or [],
+            today=today,
+        )
+        if item["website"] not in diagnosed_websites
+    ]
     combined_websites = {item["website"] for item in combined_items}
-    items: list[dict[str, Any]] = list(combined_items)
+    items: list[dict[str, Any]] = [
+        {
+            **_action(
+                item["task_type"], item["description"], item["website"],
+                "pages/9_SEO.py", "Åbn årsagsanalyse",
+            ),
+            **item,
+        }
+        for item in diagnosed_items
+    ] + list(combined_items)
     for component, health in system_status.items():
         if not health.get("is_ok"):
             items.append(_action(
@@ -157,6 +182,8 @@ def build_dashboard_priority_tasks(
                 "", "pages/12_Systemstatus.py", "Åbn Systemstatus",
             ))
     for row in seo_sites:
+        if str(row.get("website", "")) in diagnosed_websites:
+            continue
         trend = str(row.get("trend", "")).lower()
         if trend in {"critical", "declining"}:
             critical = trend == "critical"
@@ -186,6 +213,8 @@ def build_dashboard_priority_tasks(
         plausible_rows or [], today=today
     ):
         if website in combined_websites:
+            continue
+        if website in diagnosed_websites:
             continue
         item = _action(
             "plausible_decline", "Plausible-trafikken er faldet.", website,

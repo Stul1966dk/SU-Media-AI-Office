@@ -471,6 +471,8 @@ class DataRefreshService:
             active_experiments=context.get("active_experiments", []),
             coverage=context.get("coverage", []),
             plausible_rows=context.get("plausible_daily", []),
+            search_diagnoses=context.get("search_diagnoses", []),
+            plausible_diagnoses=context.get("plausible_diagnoses", []),
             limit=None,
         )
         if website_ids is not None:

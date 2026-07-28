@@ -206,6 +206,12 @@ de seneste to komplette, ikke-overlappende 28-dages perioder fra databasen.
 Analysen klassificerer vækst, stabilitet og trafikfald med faste volumen- og
 støjgrænser, gemmes idempotent og foretager ingen API- eller AI-kald.
 
+`core.traffic_recommendations` kombinerer de seneste sammenlignelige Search
+Console- og Plausible-diagnoser. Den opretter højst én specifik kandidat pr.
+website, skelner mellem organisk, ikke-organisk og bekræftet samlet fald og
+sender kandidaten gennem den eksisterende deterministiske prioriteringsscore.
+Kandidaten vises read-only og opretter ikke en operationel opgave.
+
 ## SEO Manager
 
 `agents/seo_manager.py` er den første specialistagent. Den bruger 28-dages `SEOHealth` og ignorerer websites med status `phasing_out`, `archived` eller `cancelled`. Et recovery-projekt kræver dokumenteret forværring: score under 35, `critical` trend, mindst 25 procent klikfald eller mindst 15 procent klikfald kombineret med dårligere placering eller CTR.

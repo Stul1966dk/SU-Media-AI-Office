@@ -5468,13 +5468,49 @@ class Database:
             ORDER BY pm.website_id, pm.metric_date
             """
         ).fetchall()
+        search_diagnoses = self._latest_diagnosis_payloads(
+            "search_console_diagnoses"
+        )
+        plausible_diagnoses = self._latest_diagnosis_payloads(
+            "plausible_diagnoses"
+        )
         return {
             "experiments": [dict(row) for row in experiments],
             "active_experiments": [dict(row) for row in active_experiments],
             "coverage": [dict(row) for row in coverage],
             "seo_health": [dict(row) for row in seo_health],
             "plausible_daily": [dict(row) for row in plausible_daily],
+            "search_diagnoses": search_diagnoses,
+            "plausible_diagnoses": plausible_diagnoses,
         }
+
+    def _latest_diagnosis_payloads(
+        self, table: str
+    ) -> list[dict[str, Any]]:
+        """Return the newest active-site diagnosis from an allowed table."""
+        if table not in {
+            "search_console_diagnoses", "plausible_diagnoses"
+        }:
+            raise ValueError("Ukendt diagnosetabel")
+        rows = self._connection.execute(
+            f"""
+            SELECT d.analysis_json
+            FROM {table} d
+            JOIN websites w ON w.website = d.website_id
+            WHERE w.active = 1
+              AND w.status NOT IN (
+                  'inactive', 'phasing_out', 'archived', 'cancelled'
+              )
+              AND d.id = (
+                  SELECT d2.id FROM {table} d2
+                  WHERE d2.website_id = d.website_id
+                  ORDER BY d2.period_end DESC, d2.id DESC
+                  LIMIT 1
+              )
+            ORDER BY d.website_id
+            """
+        ).fetchall()
+        return [json.loads(str(row["analysis_json"])) for row in rows]
 
     def get_latest_seo_health_sites(
         self,

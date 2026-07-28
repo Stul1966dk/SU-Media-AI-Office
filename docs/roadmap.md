@@ -361,3 +361,16 @@ konkrete URL'er, søgeord og før/efter-tal uden at gætte ved lav datamængde.
 
 Succeskriterium: AI Office kan dokumentere, om udviklingen i Search Console
 også ledsages af et reelt fald i Plausible-besøgende.
+
+# Sprint 43.3 - Forklarlige opgaveanbefalinger
+
+- [x] Kombinér de seneste gemte 28-dages diagnoser pr. website.
+- [x] Skeln mellem kombineret, kun organisk og kun samlet trafikfald.
+- [x] Brug vigtigste berørte URL og målt årsag i anbefalingen.
+- [x] Erstat generiske dubletter med én specifik kandidat pr. website.
+- [x] Beregn og gem prioritet gennem det eksisterende scoringssystem.
+- [x] Vis anbefalingen read-only uden automatisk opgaveoprettelse.
+
+Succeskriterium: AI Office kan anbefale én konkret, prioriteret næste handling
+og forklare præcist, hvilke målte Search Console- og Plausible-signaler den
+bygger på.
