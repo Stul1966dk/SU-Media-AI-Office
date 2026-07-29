@@ -1412,9 +1412,20 @@ def _create_and_approve(
         workflow.approve_draft(str(decision["recommendation_key"]))
     except ValueError as error:
         st.error(str(error))
+    except Exception:
+        st.error(
+            "Forslaget kunne ikke godkendes på grund af en teknisk fejl. "
+            "Prøv igen, eller genindlæs siden."
+        )
     else:
+        if str(recommendation.get("task_key") or "").startswith(
+            "manual-test|"
+        ):
+            st.session_state.pop(FORCED_TEST_MODE_KEY, None)
+            st.session_state.pop(FORCED_TEST_WEBSITE_KEY, None)
         _finish_daily_action(
-            "Opgaven er godkendt. Udfør nu ændringen på websitet."
+            "Forslaget er godkendt. Næste trin er at udføre ændringen "
+            "på websitet."
         )
 
 
