@@ -545,3 +545,16 @@ fulde regression som en sammenhængende testversion.
 Succeskriterium: Brugeren kan på I dag se præcis, hvad der skal rettes, hvordan
 ændringen udføres, og hvad der skal kontrolleres, før ændringen registreres og
 28-dages målingen startes.
+
+# Sprint 45.1 - Kontrolleret drift med aktive websites
+
+- [x] Brug website-registerets aktive valg som fælles afgrænsning på I dag.
+- [x] Skjul gamle anbefalinger fra deaktiverede websites.
+- [x] Skjul igangværende arbejde og eksperimenter fra deaktiverede websites.
+- [x] Skjul nye prioriterede anbefalinger fra deaktiverede websites.
+- [x] Bevar historik og data, så et website kan aktiveres igen senere.
+- [x] Regressionstest af filtreringen på tværs af datakilder.
+- [x] Browsertest med brugerens aktuelle aktive website-udvalg.
+
+Succeskriterium: I dag foreslår og viser kun arbejde fra de websites, brugeren
+aktivt har valgt at arbejde med, uden at slette historik fra de øvrige.

@@ -86,12 +86,19 @@ def main() -> None:
             experiment_engine=SEOExperimentEngine(database),
         )
         websites = _active_websites(registry)
+        active_ids = {str(item["website"]) for item in websites}
         selected = _render_website_filter(websites)
         website_id = None if selected == ALL_WEBSITES else selected
-        decisions = importlib.reload(traffic_store_module).get_decisions(
-            database
+        decisions = _filter_active_site_rows(
+            importlib.reload(traffic_store_module).get_decisions(database),
+            active_ids,
+            website_field="website_id",
         )
-        experiments = database.get_seo_experiments()
+        experiments = _filter_active_site_rows(
+            database.get_seo_experiments(),
+            active_ids,
+            website_field="website_id",
+        )
         work_module = importlib.reload(traffic_work_module)
         work_overview = work_module.build_traffic_work_overview(
             decisions, experiments, website_id=website_id
@@ -126,6 +133,9 @@ def main() -> None:
             item for item in priority_tasks
             if item.get("task_type") in CONCRETE_TRAFFIC_TASKS
         ]
+        priority_tasks = _filter_active_site_rows(
+            priority_tasks, active_ids, website_field="website"
+        )
         priority_tasks = traffic_recommendations_module.apply_measured_learning(
             priority_tasks, database.get_seo_learning_entries()
         )
@@ -166,6 +176,19 @@ def _build_current_priority_tasks(**context: Any) -> list[dict[str, Any]]:
     importlib.reload(traffic_recommendations_module)
     current_data = importlib.reload(dashboard_data_module)
     return current_data.build_dashboard_priority_tasks(**context)
+
+
+def _filter_active_site_rows(
+    rows: list[dict[str, Any]],
+    active_ids: set[str],
+    *,
+    website_field: str,
+) -> list[dict[str, Any]]:
+    """Keep I dag strictly scoped to websites selected as active."""
+    return [
+        item for item in rows
+        if str(item.get(website_field) or "") in active_ids
+    ]
 
 
 def _current_diagnoses(
