@@ -151,6 +151,7 @@ class TitleOptimizer:
         return {
             "title": parser.title.strip(), "meta_description": parser.meta,
             "h1": parser.h1.strip(), "canonical": parser.canonical,
+            "content_excerpt": " ".join(parser.text).strip()[:3000],
             "word_count": len(re.findall(r"\b[\wæøåÆØÅ-]+\b",
                                          " ".join(parser.text))),
             "internal_links": internal_links,
@@ -180,7 +181,7 @@ class TitleOptimizer:
         self._log_response_structure(response.text, "initial")
         try:
             value = self._validate_json(response.text, candidate, page)
-            review = self.review_proposals(value)
+            review = self.review_proposals(value, page=page)
             if not review["approved"]:
                 raise TitleOptimizationValidationError(
                     "; ".join(review["errors"]), phase="review"
@@ -198,7 +199,7 @@ class TitleOptimizer:
             self._log_response_structure(repaired.text, "repair")
             try:
                 value = self._validate_json(repaired.text, candidate, page)
-                review = self.review_proposals(value)
+                review = self.review_proposals(value, page=page)
                 if not review["approved"]:
                     raise TitleOptimizationValidationError(
                         "Reviewer afviste reparationsforslaget: "
@@ -256,7 +257,9 @@ class TitleOptimizer:
             candidate, page, competitors
         )["meta_proposals"]
 
-    def review_proposals(self, value: dict[str, Any]) -> dict[str, Any]:
+    def review_proposals(
+        self, value: dict[str, Any], *, page: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         accepted_titles, accepted_title_indices = [], []
         accepted_metas, accepted_meta_indices = [], []
         rejected_titles, rejected_metas = [], []
@@ -264,10 +267,14 @@ class TitleOptimizer:
         seen_meta_openings: set[str] = set()
         overview_ctas = 0
         query = value["target_query"].lower().strip()
+        intent = (value.get("analysis") or {}).get("search_intent") or {}
         for index, proposal in enumerate(value["title_proposals"]):
             reviewed, reasons, corrections = self._review_one(
                 proposal, kind="title", query=query
             )
+            reasons.extend(self._grounding_issues(
+                reviewed["text"], page or {}, intent
+            ))
             normalized = reviewed["text"].casefold()
             if normalized in seen_titles:
                 reasons.append("Forslaget overlapper med et tidligere titleforslag.")
@@ -285,6 +292,9 @@ class TitleOptimizer:
             reviewed, reasons, corrections = self._review_one(
                 proposal, kind="meta", query=""
             )
+            reasons.extend(self._grounding_issues(
+                reviewed["text"], page or {}, intent
+            ))
             normalized = reviewed["text"].casefold()
             if normalized in seen_metas:
                 reasons.append(
@@ -392,6 +402,52 @@ class TitleOptimizer:
     def _meta_opening(text: str) -> str:
         words = re.findall(r"[\wæøå]+", str(text).casefold())
         return " ".join(words[:3])
+
+    @staticmethod
+    def _grounding_issues(
+        text: str,
+        page: dict[str, Any],
+        intent: dict[str, Any],
+    ) -> list[str]:
+        """Reject strong promises unsupported by page content or intent."""
+        # Legacy callers may review wording without supplying the page snapshot.
+        # Grounding requires evidence to compare against, so keep those reviews
+        # backwards compatible instead of treating absent context as a rejection.
+        if not page and not intent:
+            return []
+        normalized = str(text).casefold()
+        page_text = " ".join(str(page.get(field) or "") for field in (
+            "title", "meta_description", "h1", "content_excerpt",
+        )).casefold()
+        intent_type = str(intent.get("type") or "")
+        issues: list[str] = []
+        claims = (
+            (
+                ("sammenlign", "sammenligning", " vs "),
+                "comparison",
+                "Forslaget lover en sammenligning, som siden ikke dokumenterer.",
+            ),
+            (
+                ("beregn", "beregner", "test dit", "tjek dit resultat"),
+                "tool",
+                "Forslaget lover et værktøj, som siden ikke dokumenterer.",
+            ),
+            (
+                ("køb", "bestil", "læg i kurv", "shop"),
+                "transactional",
+                "Forslaget lover en købshandling, som siden ikke dokumenterer.",
+            ),
+        )
+        for markers, required_intent, message in claims:
+            if not any(marker in normalized for marker in markers):
+                continue
+            supported = (
+                intent_type == required_intent
+                or any(marker in page_text for marker in markers)
+            )
+            if not supported:
+                issues.append(message)
+        return issues
 
     @staticmethod
     def _adjust_recommendation(
@@ -630,7 +686,17 @@ class TitleOptimizer:
         schema = {
             "website": "", "target_url": "", "target_query": "",
             "current_title": "", "current_meta": "",
-            "analysis": {"problem": "", "evidence": [], "limitations": []},
+            "analysis": {
+                "problem": "", "evidence": [], "limitations": [],
+                "search_intent": {
+                    "type": "guide|comparison|tool|transactional|"
+                            "navigational|informational",
+                    "summary": "",
+                    "evidence": [],
+                    "confidence": 0,
+                    "ambiguous": False,
+                },
+            },
             "title_proposals": [{
                 "text": "", "reason": "", "strengths": [], "risks": []
             }],
@@ -649,6 +715,11 @@ class TitleOptimizer:
             "superlativer og udokumenterede påstande. Overskriv ikke den "
             "nuværende title eller meta. Titles og metabeskrivelser må aldrig "
             "omtale priser, beløb eller valuta, fordi priser ændrer sig. "
+            "Klassificér først søgeintentionen ud fra query, URL, title, H1 "
+            "og sideudsnit. Forklar kort brugerens mål og den konkrete evidens. "
+            "Forslagene skal bevare intentionen og må kun love indhold, "
+            "sammenligninger, værktøjer eller handlinger, som sideanalysen "
+            "dokumenterer. "
             "De tre metabeskrivelser skal have "
             "forskellige åbninger og handlingsord, som passer til sidens "
             "søgeintention. Brug højst 'Få overblik' i ét forslag og undgå "
@@ -672,7 +743,9 @@ class TitleOptimizer:
             "offentlige fakta. Metabeskrivelserne skal starte forskelligt, "
             "bruge varierede intent-baserede CTA'er og højst én må starte "
             'med "Få overblik". Fjern enhver omtale af priser, beløb og '
-            "valuta. Fejl: "
+            "valuta. Bevar eller reparer search_intent med type, summary, "
+            "evidence, confidence og ambiguous. Afvis løfter, der ikke findes "
+            "i sideanalysen. Fejl: "
             f"{type(error).__name__}: {str(error)[:180]}\n"
             f"Kandidat: {json.dumps(candidate, ensure_ascii=False)}\n"
             f"Side: {json.dumps(page, ensure_ascii=False)}\n"
@@ -809,6 +882,18 @@ class TitleOptimizer:
         for field, default in safe_defaults.items():
             if value.get(field) in (None, ""):
                 value[field] = default
+        if not isinstance(value["analysis"], dict):
+            value["analysis"] = safe_defaults["analysis"]
+        value["analysis"].setdefault("problem", "")
+        value["analysis"].setdefault("evidence", [])
+        value["analysis"].setdefault("limitations", [])
+        value["analysis"]["search_intent"] = (
+            TitleOptimizer._normalize_search_intent(
+                value["analysis"].get("search_intent"),
+                candidate,
+                page,
+            )
+        )
         value.update({
             "website": candidate["website"],
             "target_url": candidate["target_url"],
@@ -860,6 +945,102 @@ class TitleOptimizer:
                 value["analysis"]["limitations"]
             ]
         return value
+
+    @staticmethod
+    def _normalize_search_intent(
+        model_value: Any,
+        candidate: dict[str, Any],
+        page: dict[str, Any],
+    ) -> dict[str, Any]:
+        fallback = TitleOptimizer._infer_search_intent(candidate, page)
+        if not isinstance(model_value, dict):
+            return fallback
+        allowed = {
+            "guide", "comparison", "tool", "transactional",
+            "navigational", "informational",
+        }
+        intent_type = str(model_value.get("type") or "").strip().casefold()
+        if intent_type not in allowed:
+            return fallback
+        summary = str(model_value.get("summary") or "").strip()
+        evidence = model_value.get("evidence")
+        if not summary or not isinstance(evidence, list) or not evidence:
+            return fallback
+        try:
+            confidence = max(
+                0, min(100, int(float(model_value.get("confidence", 0))))
+            )
+        except (TypeError, ValueError):
+            confidence = fallback["confidence"]
+        return {
+            "type": intent_type,
+            "summary": summary,
+            "evidence": [
+                str(item).strip() for item in evidence
+                if str(item).strip()
+            ][:5],
+            "confidence": confidence,
+            "ambiguous": bool(
+                model_value.get("ambiguous") or confidence < 65
+            ),
+        }
+
+    @staticmethod
+    def _infer_search_intent(
+        candidate: dict[str, Any], page: dict[str, Any]
+    ) -> dict[str, Any]:
+        context = " ".join(str(value or "") for value in (
+            candidate.get("target_query"),
+            candidate.get("target_url"),
+            page.get("title"),
+            page.get("h1"),
+            page.get("content_excerpt"),
+        )).casefold()
+        groups = (
+            (
+                "tool", ("beregn", "beregner", "calculator", "test din"),
+                "Brugeren vil udføre en beregning eller test.",
+            ),
+            (
+                "comparison", ("sammenlign", " vs ", "testvinder", "bedste"),
+                "Brugeren vil sammenligne muligheder før et valg.",
+            ),
+            (
+                "guide", ("hvordan", "sådan", "guide", "trin for trin"),
+                "Brugeren vil have en praktisk forklaring eller vejledning.",
+            ),
+            (
+                "transactional", ("køb", "bestil", "shop", "læg i kurv"),
+                "Brugeren vil gennemføre eller forberede et køb.",
+            ),
+            (
+                "navigational", ("login", "kontakt", "kundeservice"),
+                "Brugeren vil finde en bestemt funktion eller destination.",
+            ),
+        )
+        for intent_type, markers, summary in groups:
+            matched = [marker.strip() for marker in markers if marker in context]
+            if matched:
+                return {
+                    "type": intent_type,
+                    "summary": summary,
+                    "evidence": [
+                        f"Query, URL eller sideindhold indeholder: "
+                        f"{', '.join(matched[:3])}."
+                    ],
+                    "confidence": 80 if len(matched) > 1 else 70,
+                    "ambiguous": False,
+                }
+        return {
+            "type": "informational",
+            "summary": "Brugeren søger viden om sidens primære emne.",
+            "evidence": [
+                "Der blev ikke fundet et stærkt guide-, sammenlignings-, "
+                "værktøjs-, købs- eller navigationssignal."
+            ],
+            "confidence": 55,
+            "ambiguous": True,
+        }
 
     @staticmethod
     def _normalize_mapping(

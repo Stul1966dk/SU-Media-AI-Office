@@ -428,6 +428,9 @@ class WorkQueueService:
                 "draft_id": draft["id"],
                 "implementation_content": {
                     "type": "title_meta",
+                    "search_intent": (
+                        (draft.get("analysis") or {}).get("search_intent") or {}
+                    ),
                     "current_title": draft["current_title"],
                     "new_title": draft["selected_title"],
                     "current_meta": draft["current_meta"],

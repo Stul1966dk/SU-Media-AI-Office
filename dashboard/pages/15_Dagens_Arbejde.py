@@ -1009,6 +1009,7 @@ def _render_recommendation(
         return
 
     _render_page_card(item, change)
+    _render_search_intent(item)
     _render_change_card(item, change)
     _render_reason_card(item)
 
@@ -1043,6 +1044,7 @@ def _render_implementation(
     if not _has_concrete_change(change):
         st.error("Den godkendte ændring er ufuldstændig og kan ikke implementeres.")
         return
+    _render_search_intent(item)
     _render_change_card(item, change)
     with st.container(border=True):
         st.subheader("Det skal du gøre nu")
@@ -1093,6 +1095,40 @@ def _render_change_card(
         st.write("**Ny metabeskrivelse**")
         st.code(change["approved_meta"], language=None, wrap_lines=True)
         st.caption("Kopiér metabeskrivelse med kopiér-ikonet i feltet.")
+
+
+def _render_search_intent(item: dict[str, Any]) -> None:
+    intent = (
+        (item.get("implementation") or {}).get("search_intent")
+        or (item.get("candidate") or {}).get("search_intent")
+        or {}
+    )
+    if not intent:
+        return
+    labels = {
+        "guide": "Guide og vejledning",
+        "comparison": "Sammenligning",
+        "tool": "Beregner eller værktøj",
+        "transactional": "Køb eller handling",
+        "navigational": "Navigation",
+        "informational": "Information",
+    }
+    with st.container(border=True):
+        st.subheader("Vurderet søgeintention")
+        st.write(
+            f"**{labels.get(str(intent.get('type')), 'Ukendt intention')}**"
+        )
+        st.write(str(intent.get("summary") or "Ingen forklaring gemt."))
+        confidence = int(intent.get("confidence") or 0)
+        st.caption(f"Sikkerhed: {confidence} %")
+        if intent.get("ambiguous") or confidence < 65:
+            st.warning(
+                "Søgeintentionen er tvetydig. Kontrollér vurderingen ekstra "
+                "grundigt, før du godkender forslaget."
+            )
+        with st.expander("Se evidens for søgeintentionen"):
+            for evidence in intent.get("evidence") or []:
+                st.write(f"- {evidence}")
 
 
 def _render_reason_card(item: dict[str, Any]) -> None:

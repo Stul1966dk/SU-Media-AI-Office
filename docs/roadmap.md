@@ -631,3 +631,20 @@ CTA'er frem for at gentage Få overblik på tværs af næsten alle opgaver.
 
 Succeskriterium: Ingen fremtidig title eller metabeskrivelse kan godkendes,
 hvis den omtaler priser, beløb eller valuta, som hurtigt kan blive forældet.
+
+# Sprint 45.7 - Søgeintention og dokumenterede løfter
+
+- [x] Klassificér søgeintentionen før generering af title og meta.
+- [x] Brug query, URL, nuværende title, H1 og sideindhold som evidens.
+- [x] Gem intentionstype, forklaring, evidens og sikkerhed sammen med kladden.
+- [x] Kræv, at forslagene bevarer sidens klassificerede søgeintention.
+- [x] Afvis løfter om sammenligning, værktøj eller køb, som siden ikke
+  dokumenterer.
+- [x] Markér tvetydig søgeintention ved lav sikkerhed.
+- [x] Vis vurderet søgeintention og evidens direkte i arbejdsflowet.
+- [x] Bevar kompatibilitet med ældre kladder uden en intention.
+- [x] Regressionstest klassifikation, grounding, dataflow og visning.
+
+Succeskriterium: Brugeren kan se, hvilken søgeintention AI'en har vurderet,
+inden et forslag godkendes, og title/meta må ikke love funktioner eller indhold,
+som ikke findes på siden.
