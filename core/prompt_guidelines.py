@@ -10,6 +10,7 @@ TASK_TYPES = {
     "title_meta": "Title og metabeskrivelse",
     "content_update": "Indholdsopdatering",
     "content_gap": "Content Gap",
+    "content_freshness": "Indholdsaktualitet",
     "internal_links": "Interne links",
     "technical_fix": "Teknisk forbedring",
     "schema": "Strukturerede data",

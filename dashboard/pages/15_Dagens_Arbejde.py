@@ -39,6 +39,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agents.title_optimizer import TitleOptimizer
 from core.ai_service import AIService
+from core.content_freshness import build_freshness_recommendations
 from core.daily_work_preparation import DailyWorkPreparationService
 from core.current_diagnosis_reader import read_latest_diagnoses
 from core.seo_experiment_engine import SEOExperimentEngine
@@ -168,11 +169,22 @@ def main() -> None:
         priority_tasks = _filter_unlocked_recommendations(
             database, priority_tasks
         )
+        content_by_website = _content_by_website(database, active_ids)
         priority_tasks = traffic_recommendations_module.expand_daily_work_types(
             priority_tasks,
-            content_urls_by_website=_content_urls_by_website(
-                database, active_ids
-            ),
+            content_urls_by_website={
+                website: [
+                    str(row.get("url") or row.get("link") or "")
+                    for row in rows
+                ]
+                for website, rows in content_by_website.items()
+            },
+        )
+        priority_tasks.extend(
+            _filter_unlocked_recommendations(
+                database,
+                build_freshness_recommendations(content_by_website),
+            )
         )
         priority_tasks = (
             traffic_recommendations_module.apply_post_analysis_guidance(
@@ -234,21 +246,17 @@ def _filter_active_site_rows(
     ]
 
 
-def _content_urls_by_website(
+def _content_by_website(
     database: Any, website_ids: set[str]
-) -> dict[str, list[str]]:
-    """Return the persisted page inventory used to qualify link candidates."""
-    result: dict[str, list[str]] = {}
+) -> dict[str, list[dict[str, Any]]]:
+    """Return persisted public content for recommendation qualification."""
+    result: dict[str, list[dict[str, Any]]] = {}
     for website_id in sorted(website_ids):
         try:
             rows = database.get_content(website_id)
         except Exception:
             rows = []
-        result[website_id] = [
-            str(row.get("url") or row.get("link") or "").strip()
-            for row in rows
-            if str(row.get("url") or row.get("link") or "").strip()
-        ]
+        result[website_id] = list(rows) if isinstance(rows, list) else []
     return result
 
 
@@ -1003,6 +1011,12 @@ def _render_combined_traffic_task(
                 st.write(f"**Målt signal:** {item['measured_cause']}")
             if item.get("confidence"):
                 st.write(f"**Sikkerhed:** {item['confidence']}")
+            if item.get("freshness_evidence"):
+                st.write("**Aktualitetssignaler:**")
+                for signal in item["freshness_evidence"].get("signals", []):
+                    st.write(f"- {signal.get('label')}")
+                    if signal.get("passage"):
+                        st.code(signal["passage"], language=None)
             if item.get("learning_summary"):
                 st.write(
                     f"**Læring fra tidligere målinger:** "
@@ -1162,7 +1176,9 @@ def _generate_deliverable(
         **item,
         "_prompt_guidelines": PromptGuidelines(database).text_for(
             (
-                "content_gap"
+                "content_freshness"
+                if item.get("freshness_evidence")
+                else "content_gap"
                 if item.get("forced_content_mode") == "content_gap"
                 else task_deliverables_module._deliverable_type(item)
             )
@@ -1527,7 +1543,7 @@ def _render_priority_task(
     """Render the highest persisted task without exposing internal scores."""
     if item.get("task_type") in {
         "combined_traffic_decline", "search_only_decline",
-        "plausible_only_decline",
+        "plausible_only_decline", "content_freshness",
     }:
         _render_combined_traffic_task(database, item)
         return

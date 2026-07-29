@@ -54,6 +54,10 @@ def render_sidebar(*, show_website_selector: bool = True) -> None:
                     "pages/5_Content_Explorer.py", "Content Explorer",
                     ":material/article:",
                 ),
+                (
+                    "pages/21_Indholdsaktualitet.py", "Indholdsaktualitet",
+                    ":material/update:",
+                ),
             ),
         ),
         (
