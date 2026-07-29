@@ -60,6 +60,37 @@ class _PublicHTML(HTMLParser):
             self.title += data
 
 
+class _ContentSections(HTMLParser):
+    """Preserve public headings and passages for grounded SEO suggestions."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sections: list[dict[str, str]] = []
+        self._tag = ""
+        self._text: list[str] = []
+
+    def handle_starttag(
+        self, tag: str, attrs: list[tuple[str, str | None]]
+    ) -> None:
+        if tag in {"h1", "h2", "h3", "p", "li"}:
+            self._tag = tag
+            self._text = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag != self._tag:
+            return
+        text = " ".join(self._text).strip()
+        if text:
+            self.sections.append({"element": tag, "text": text})
+        self._tag = ""
+        self._text = []
+
+    def handle_data(self, data: str) -> None:
+        text = unescape(data).strip()
+        if self._tag and text:
+            self._text.append(text)
+
+
 class WordPressConnector(BaseConnector):
     """Fetch public WordPress content; never authenticate or write remotely."""
 
@@ -240,6 +271,8 @@ class WordPressConnector(BaseConnector):
         internal = sum(self.domain in urlsplit(urljoin(self.site_url, link)).netloc
                        for link in links)
         text = self._plain_text(html)
+        section_parser = _ContentSections()
+        section_parser.feed(html[:2_000_000])
         embedded = item.get("_embedded", {})
         terms = embedded.get("wp:term", []) if isinstance(embedded, dict) else []
         categories, tags = [], []
@@ -255,7 +288,10 @@ class WordPressConnector(BaseConnector):
             "updated_at": item.get("modified", ""), "categories": categories,
             "tags": tags, "excerpt": self._plain_text(
                 self._rendered(item.get("excerpt"))
-            ), "word_count": len(text.split()),
+            ),
+            "content_text": text[:200_000],
+            "content_sections": section_parser.sections[:250],
+            "word_count": len(text.split()),
             "featured_image": media[0].get("source_url", "") if media else "",
             "internal_link_count": internal,
             "external_link_count": max(0, len(links) - internal),

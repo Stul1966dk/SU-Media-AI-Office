@@ -198,8 +198,51 @@ class ContentUpdateDeliverableTests(unittest.TestCase):
         replacement = result["replacement_content"]
         self.assertNotIn("klart svar om del kalender iphone", replacement)
         self.assertIn("Sådan deler du en kalender på iPhone", replacement)
-        self.assertIn("Åbn Kalender-appen", replacement)
+        self.assertIn("Åbn Kalenderappen", replacement)
+        self.assertNotIn("Kalender-appen", replacement)
         self.assertIn("Erstat den viste passage", result["content_location"])
+
+    def test_fallback_uses_exact_matching_heading_from_article(self) -> None:
+        result = fallback_task_deliverable(
+            {
+                "website": "helpdesken.dk",
+                "target_url": "https://helpdesken.dk/kalender/",
+                "target_query": "del kalender iphone",
+                "search_queries": [{
+                    "query": "hvordan laver man fælles kalender på iphone"
+                }],
+                "measured_cause": "Placeringsfald",
+            },
+            public_context=[{
+                "relation": "berørt side",
+                "content_sections": [
+                    {"element": "h2", "text": "Hold kalenderne adskilt"},
+                    {
+                        "element": "p",
+                        "text": "Kalenderne kan have forskellige farver.",
+                    },
+                    {
+                        "element": "h2",
+                        "text": (
+                            "Hvordan laver man en fælles kalender på iPhone?"
+                        ),
+                    },
+                    {
+                        "element": "p",
+                        "text": "Start med at oprette en ny kalender.",
+                    },
+                ],
+            }],
+        )
+
+        self.assertIn(
+            "under “Hvordan laver man en fælles kalender på iPhone?”",
+            result["content_location"],
+        )
+        self.assertEqual(
+            "Start med at oprette en ny kalender.",
+            result["current_content"],
+        )
 
     def test_fallback_marks_a_new_section_when_no_passage_exists(self) -> None:
         result = fallback_task_deliverable(
@@ -216,7 +259,10 @@ class ContentUpdateDeliverableTests(unittest.TestCase):
             "Ny sektion – ingen eksisterende tekst",
             result["current_content"],
         )
-        self.assertIn("Indsæt en ny sektion", result["content_location"])
+        self.assertEqual(
+            "Placeringen kan ikke fastslås uden artikelteksten.",
+            result["content_location"],
+        )
 
     def test_formatted_delivery_persists_structured_content(self) -> None:
         description = format_deliverable(content_payload())

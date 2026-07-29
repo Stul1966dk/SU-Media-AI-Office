@@ -48,7 +48,9 @@ def post(identifier: int, title: str = "Test") -> dict:
         "id": identifier, "title": {"rendered": title}, "slug": f"test-{identifier}",
         "link": f"https://wp.dk/test-{identifier}", "status": "publish",
         "date": "2026-01-01", "modified": "2026-01-02",
-        "content": {"rendered": "<p>Tre danske ord</p><a href='/intern'>I</a>"
+        "content": {"rendered": "<h2>Dansk overskrift</h2>"
+                                "<p>Tre danske ord i et afsnit</p>"
+                                "<a href='/intern'>I</a>"
                                 "<a href='https://other.dk'>E</a>"},
         "excerpt": {"rendered": "<p>Kort</p>"},
         "_embedded": {
@@ -124,6 +126,11 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual((1, 1), (item["internal_link_count"],
                                  item["external_link_count"]))
         self.assertEqual(["Nyheder"], item["categories"])
+        self.assertEqual(
+            {"element": "h2", "text": "Dansk overskrift"},
+            item["content_sections"][0],
+        )
+        self.assertIn("Tre danske ord", item["content_text"])
         self.assertTrue(all("auth" not in str(call).lower() for call in session.calls))
         self.assertTrue(all(call[1]["headers"]["Cookie"] == ""
                             for call in session.calls))
@@ -160,6 +167,9 @@ class ConnectorTests(unittest.TestCase):
         second = connector.import_content()
         self.assertEqual((21, 0), (first["changed"], second["changed"]))
         self.assertEqual(21, len(self.database.get_content_by_type("wp.dk", "page")))
+        stored = self.database.get_content_by_type("wp.dk", "page")[0]
+        self.assertTrue(stored["content_sections"])
+        self.assertIn("Tre danske ord", stored["content_text"])
         self.assertEqual(1, len(orchestrator.events))
         self.assertEqual("website_content_updated",
                          orchestrator.events[0].event_type)

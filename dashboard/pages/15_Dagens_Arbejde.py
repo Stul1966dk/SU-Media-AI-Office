@@ -1,6 +1,7 @@
 """The single, focused surface for today's reviewed SEO change."""
 
 import importlib
+import json
 import sys
 from datetime import date, timedelta
 from html import escape
@@ -1110,6 +1111,7 @@ def _generate_deliverable(
 ) -> tuple[dict[str, Any], bool]:
     """Generate from public context, with a safe usable fallback."""
     public_context = []
+    has_target_context = False
     if item.get("target_url"):
         try:
             current_page = _optimizer(database).analyze_current_snippet({
@@ -1119,10 +1121,49 @@ def _generate_deliverable(
                 "relation": "berørt side",
                 **current_page,
             })
+            has_target_context = bool(current_page.get("content_sections"))
         except Exception:
             pass
     try:
-        for row in database.get_content(item["website"])[:8]:
+        content_rows = database.get_content(item["website"])
+        if not has_target_context:
+            target = str(item.get("target_url") or "").rstrip("/").casefold()
+            for row in content_rows:
+                if not row.get("content_sections") and row.get(
+                    "content_sections_json"
+                ):
+                    try:
+                        row["content_sections"] = json.loads(
+                            row["content_sections_json"]
+                        )
+                    except (TypeError, ValueError):
+                        row["content_sections"] = []
+            stored_target = next(
+                (
+                    row for row in content_rows
+                    if str(row.get("url") or "").rstrip("/").casefold()
+                    == target
+                    and row.get("content_sections")
+                ),
+                None,
+            )
+            if stored_target:
+                public_context.append({
+                    "relation": "berørt side",
+                    "title": stored_target.get("title", ""),
+                    "url": stored_target.get("url", ""),
+                    "h1": next(
+                        (
+                            section.get("text", "")
+                            for section in stored_target["content_sections"]
+                            if section.get("element") == "h1"
+                        ),
+                        "",
+                    ),
+                    "content_excerpt": stored_target.get("content_text", ""),
+                    "content_sections": stored_target["content_sections"],
+                })
+        for row in content_rows[:8]:
             public_context.append({
                 "relation": "mulig relateret side",
                 "title": row.get("title", ""),
@@ -1286,11 +1327,20 @@ def _render_compact_content_approval(
     state_key: str,
 ) -> None:
     """Approve directly and keep duplicate editing fields collapsed."""
+    grounded = not str(deliverable.get("content_location") or "").startswith(
+        "Placeringen kan ikke fastslås"
+    )
+    if not grounded:
+        st.error(
+            "Forslaget kan ikke godkendes, før artikelteksten er hentet, "
+            "og en eksisterende placering er identificeret."
+        )
     if st.button(
         "Godkend forslag",
         type="primary",
         key=f"approve-content-direct-{item['task_key']}",
         help="Godkender det viste forslag uden at publicere noget.",
+        disabled=not grounded,
     ):
         _create_and_approve(
             database, item, title, format_deliverable(deliverable)

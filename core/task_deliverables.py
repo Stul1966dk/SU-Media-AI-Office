@@ -249,7 +249,7 @@ def _fallback_content_copy(natural_topic: str) -> str:
         return (
             "Sådan deler du en kalender på iPhone\n\n"
             "Du kan dele en kalender på iPhone med andre, så I kan se og "
-            "følge aftaler i den samme kalender. Åbn Kalender-appen, find "
+            "følge aftaler i den samme kalender. Åbn Kalenderappen, find "
             "den kalender, du vil dele, og vælg muligheden for at tilføje "
             "personer. Send invitationen til de ønskede deltagere, og "
             "kontrollér derefter, at de har adgang til den rigtige kalender."
@@ -260,6 +260,75 @@ def _fallback_content_copy(natural_topic: str) -> str:
         "sprog. Følg sidens dokumenterede fremgangsmåde trin for trin, og "
         "kontrollér resultatet, før ændringen publiceres."
     )
+
+
+def _select_relevant_passage(
+    sections: list[dict[str, Any]], queries: list[str]
+) -> tuple[str, str]:
+    """Select a real passage below the heading closest to Search Console intent."""
+    query_words = {
+        word
+        for query in queries
+        for word in re.findall(r"[\wæøå]+", query.casefold())
+        if len(word) > 2
+        and word not in {"hvordan", "man", "sin", "den", "det", "på"}
+    }
+    heading_candidates = [
+        (
+            index,
+            str(section.get("text") or "").strip(),
+            (
+                len(
+                query_words.intersection(
+                    re.findall(
+                        r"[\wæøå]+",
+                        str(section.get("text") or "").casefold(),
+                    )
+                )
+                )
+                + (
+                    2
+                    if str(section.get("text") or "").casefold().startswith(
+                        "hvordan "
+                    )
+                    else 0
+                )
+                + (
+                    1
+                    if "fælles" in str(section.get("text") or "").casefold()
+                    else 0
+                )
+                - (
+                    2
+                    if str(section.get("text") or "").casefold().startswith(
+                        "faq "
+                    )
+                    else 0
+                )
+            ),
+        )
+        for index, section in enumerate(sections)
+        if section.get("element") in {"h1", "h2", "h3"}
+        and str(section.get("text") or "").strip()
+    ]
+    best_heading = max(
+        heading_candidates,
+        key=lambda value: (value[2], value[0]),
+        default=(-1, "", 0),
+    )
+    start_index, heading, score = best_heading
+    if score <= 0:
+        start_index, heading = -1, ""
+    passage = next(
+        (
+            str(section.get("text") or "").strip()
+            for section in sections[start_index + 1:]
+            if section.get("element") in {"p", "li"}
+            and len(str(section.get("text") or "").strip()) >= 20
+        ),
+        "",
+    )
+    return passage, heading
 
 
 def fallback_task_deliverable(
@@ -310,30 +379,13 @@ def fallback_task_deliverable(
             {},
         )
         sections = page.get("content_sections") or []
-        passage_index = next(
-            (
-                index for index, section in enumerate(sections)
-                if section.get("element") in {"p", "li"}
-                and len(str(section.get("text") or "").strip()) >= 20
-            ),
-            None,
-        )
-        passage = (
-            str(sections[passage_index].get("text") or "")
-            if passage_index is not None
-            else ""
-        )
-        preceding_heading = next(
-            (
-                str(section.get("text") or "").strip()
-                for section in reversed(
-                    sections[:passage_index] if passage_index is not None
-                    else []
-                )
-                if section.get("element") in {"h1", "h2", "h3"}
-                and str(section.get("text") or "").strip()
-            ),
-            "",
+        evidence_queries = [
+            str(row.get("query") or "").strip()
+            for row in (recommendation.get("search_queries") or [])
+            if row.get("query")
+        ] or [query]
+        passage, preceding_heading = _select_relevant_passage(
+            sections, evidence_queries
         )
         current = str(
             passage
@@ -341,11 +393,6 @@ def fallback_task_deliverable(
             or page.get("content_excerpt")
             or ""
         ).strip()[:600]
-        evidence_queries = [
-            str(row.get("query") or "").strip()
-            for row in (recommendation.get("search_queries") or [])
-            if row.get("query")
-        ] or [query]
         natural_topic = _natural_danish_topic(evidence_queries, query)
         heading = str(
             preceding_heading or page.get("h1") or natural_topic
@@ -356,15 +403,10 @@ def fallback_task_deliverable(
                 f"Erstat den viste passage i den første relevante sektion "
                 f"under “{heading}”."
             )
-            replacement = (
-                f"{current}\n\n{finished_copy}"
-            ).strip()
+            replacement = finished_copy
         else:
             current = "Ny sektion – ingen eksisterende tekst"
-            location = (
-                f"Indsæt en ny sektion efter introduktionen under "
-                f"“{heading}”."
-            )
+            location = "Placeringen kan ikke fastslås uden artikelteksten."
             replacement = finished_copy
         return {
             "deliverable_type": "content_update",
@@ -648,6 +690,10 @@ eksisterende passage skal content_location entydigt sige "Erstat denne passage",
 current_content skal være et ordret citat, og replacement_content skal være den
 færdige erstatning. Hvis ingen passage kan dokumenteres, må du ikke foregive en:
 angiv i stedet en præcis placering for en ny sektion.
+Brug naturlig dansk retskrivning og sammenskriv danske sammensatte ord.
+Undgå engelskinspirerede bindestreger som "Kalender-appen"; skriv eksempelvis
+"Kalenderappen". Brug kun en bindestreg, når dansk retskrivning faktisk kræver
+den.
 Find først det konkrete content gap ved at sammenholde Search Console-søgeord,
 den berørte side og de relaterede eksisterende sider. Vælg præcis én type:
 existing_section, new_category, new_article eller new_blog_post. Brug kun en ny

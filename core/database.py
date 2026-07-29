@@ -1415,6 +1415,9 @@ class Database:
                 source_updated_at TEXT NOT NULL,
                 category_json TEXT NOT NULL,
                 tag_json TEXT NOT NULL,
+                excerpt TEXT NOT NULL DEFAULT '',
+                content_text TEXT NOT NULL DEFAULT '',
+                content_sections_json TEXT NOT NULL DEFAULT '[]',
                 word_count INTEGER NOT NULL,
                 featured_image TEXT NOT NULL,
                 internal_link_count INTEGER NOT NULL,
@@ -1427,6 +1430,22 @@ class Database:
             )
             """
         )
+        columns = {
+            str(row["name"])
+            for row in self._connection.execute(
+                "PRAGMA table_info(website_content)"
+            ).fetchall()
+        }
+        additions = {
+            "excerpt": "TEXT NOT NULL DEFAULT ''",
+            "content_text": "TEXT NOT NULL DEFAULT ''",
+            "content_sections_json": "TEXT NOT NULL DEFAULT '[]'",
+        }
+        for name, definition in additions.items():
+            if name not in columns:
+                self._connection.execute(
+                    f"ALTER TABLE website_content ADD COLUMN {name} {definition}"
+                )
 
     def save_content(self, content: dict[str, Any]) -> str:
         """Create or update public content only when its stable hash changes."""
@@ -1449,15 +1468,19 @@ class Database:
                 INSERT INTO website_content (
                     website_id, content_type, content_id, title, slug, url,
                     status, published_at, source_updated_at, category_json,
-                    tag_json, word_count, featured_image, internal_link_count,
+                    tag_json, excerpt, content_text, content_sections_json,
+                    word_count, featured_image, internal_link_count,
                     external_link_count, raw_hash, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(website_id, content_type, content_id) DO UPDATE SET
                     title=excluded.title, slug=excluded.slug, url=excluded.url,
                     status=excluded.status, published_at=excluded.published_at,
                     source_updated_at=excluded.source_updated_at,
                     category_json=excluded.category_json,
-                    tag_json=excluded.tag_json, word_count=excluded.word_count,
+                    tag_json=excluded.tag_json, excerpt=excluded.excerpt,
+                    content_text=excluded.content_text,
+                    content_sections_json=excluded.content_sections_json,
+                    word_count=excluded.word_count,
                     featured_image=excluded.featured_image,
                     internal_link_count=excluded.internal_link_count,
                     external_link_count=excluded.external_link_count,
@@ -1471,6 +1494,12 @@ class Database:
                     content.get("updated_at", ""),
                     json.dumps(content.get("categories", []), ensure_ascii=False),
                     json.dumps(content.get("tags", []), ensure_ascii=False),
+                    content.get("excerpt", ""),
+                    content.get("content_text", ""),
+                    json.dumps(
+                        content.get("content_sections", []),
+                        ensure_ascii=False,
+                    ),
                     int(content.get("word_count", 0)),
                     content.get("featured_image", ""),
                     int(content.get("internal_link_count", 0)),
@@ -1536,6 +1565,9 @@ class Database:
         item = dict(row)
         item["categories"] = json.loads(item.pop("category_json"))
         item["tags"] = json.loads(item.pop("tag_json"))
+        item["content_sections"] = json.loads(
+            item.pop("content_sections_json", "[]") or "[]"
+        )
         item["content_updated_at"] = item.pop("source_updated_at")
         return item
 
