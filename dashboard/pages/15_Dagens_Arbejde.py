@@ -1358,7 +1358,16 @@ def _refresh_sparse_internal_link_content(
         if str(row.get("content_type") or "post").casefold()
         in {"post", "page"}
     ]
-    if len(existing) >= 10:
+    state_reader = getattr(database, "get_integration_state", None)
+    sitemap_state = (
+        state_reader(f"sitemap:{website_id}") if callable(state_reader) else {}
+    ) or {}
+    sitemap_content_count = sum(
+        str(row.get("content_type") or "") in {"post", "page", "url"}
+        for row in sitemap_state.get("urls", [])
+    )
+    expected_content = max(10, sitemap_content_count)
+    if len(existing) >= expected_content:
         return False
     connector = connector_type(website_id=website_id, database=database)
     try:

@@ -22,6 +22,7 @@ from core.integration_retry import (
     FailedIntegrationRetryService, retry_plan,
 )
 from core.refresh_status import result_status, status_label
+from core.sitemap_catalog import SitemapCatalog
 from integrations.search_console import SearchConsoleAuthenticationError
 from integrations.plausible_integration import PlausibleIntegration
 from integrations.search_console_integration import SearchConsoleIntegration
@@ -56,6 +57,7 @@ def main() -> None:
     database = open_database()
     try:
         sync_status = load_sync_status(database)
+        _render_sitemaps(database)
         _render_search_console(SearchConsoleIntegration(PROJECT_ROOT, database))
         _render_plausible(PlausibleIntegration(database))
         _render_partner_ads(sync_status)
@@ -63,6 +65,70 @@ def main() -> None:
         _render_sync_status(sync_status)
     finally:
         database.close()
+
+
+def _render_sitemaps(database) -> None:
+    st.subheader("Sitemaps")
+    st.caption(
+        "Gem ét sitemap pr. website. AI Office følger også sitemap-indeks og "
+        "bruger URL-kataloget til indholdsoverblik og interne links."
+    )
+    websites = [
+        str(item["website"]) for item in database.get_all_websites()
+        if item.get("active")
+        and item.get("status") not in {
+            "phasing_out", "archived", "cancelled"
+        }
+    ]
+    if not websites:
+        st.info("Der er ingen aktive websites.")
+        return
+    website_id = st.selectbox(
+        "Website til sitemap", websites, key="sitemap_website"
+    )
+    catalog = SitemapCatalog(database)
+    state = catalog.get(website_id)
+    discovery = database.get_website_discovery_profile(website_id) or {}
+    default_url = (
+        state.get("sitemap_url")
+        or discovery.get("sitemap_url")
+        or f"https://{website_id}/sitemap_index.xml"
+    )
+    sitemap_url = st.text_input(
+        "Sitemap-adresse",
+        value=default_url,
+        key=f"sitemap_url:{website_id}",
+        help=(
+            "Indsæt sitemap.xml eller sitemap_index.xml. Adressen skal "
+            "tilhøre det valgte website."
+        ),
+    )
+    if st.button("Gem og hent sitemap", type="primary"):
+        try:
+            state = catalog.sync(website_id, sitemap_url)
+        except Exception as error:
+            st.error(f"Sitemap kunne ikke hentes: {error}")
+        else:
+            st.success(
+                f"{state['url_count']} URL’er er gemt fra "
+                f"{state['sitemaps_read']} sitemap-filer."
+            )
+    if state:
+        columns = st.columns(3)
+        columns[0].metric("URL’er", int(state.get("url_count", 0)))
+        columns[1].metric("Sitemap-filer", int(state.get("sitemaps_read", 0)))
+        columns[2].metric(
+            "Seneste hentning",
+            format_datetime(state.get("synced_at"))
+            if state.get("synced_at") else "Aldrig",
+        )
+        with st.expander("Se fundne URL’er"):
+            st.dataframe(
+                state.get("urls", []),
+                width="stretch",
+                hide_index=True,
+            )
+    st.divider()
 
 
 def _render_partner_ads(model: dict) -> None:
