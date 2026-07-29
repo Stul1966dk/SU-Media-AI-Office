@@ -361,6 +361,10 @@ class TitleOptimizer:
             reasons.append(f"{label} er længere end {maximum} tegn.")
         if cls._spam(text):
             reasons.append(f"{label} indeholder spam eller superlativer.")
+        if cls._mentions_price(text):
+            reasons.append(
+                f"{label} må ikke omtale priser, beløb eller valuta."
+            )
         if kind == "title" and query and not cls._query_relevant(text, query):
             reasons.append("Titlen matcher ikke det primære søgeord tilstrækkeligt.")
         return reviewed, reasons, corrections
@@ -610,6 +614,15 @@ class TitleOptimizer:
         )
 
     @staticmethod
+    def _mentions_price(text: str) -> bool:
+        return bool(re.search(
+            r"\bpris(?:er|en|erne)?\b"
+            r"|\b\d+(?:[.,]\d+)?\s*(?:kr\.?|dkk|eur|usd)\b"
+            r"|[€£$]",
+            str(text).casefold(),
+        ))
+
+    @staticmethod
     def _prompt(
         candidate: dict[str, Any], page: dict[str, Any],
         competitors: dict[str, Any],
@@ -634,7 +647,9 @@ class TitleOptimizer:
             "dansk. Returnér præcis tre forskellige title-forslag og tre "
             "forskellige metabeskrivelser. Undgå clickbait, keyword stuffing, "
             "superlativer og udokumenterede påstande. Overskriv ikke den "
-            "nuværende title eller meta. De tre metabeskrivelser skal have "
+            "nuværende title eller meta. Titles og metabeskrivelser må aldrig "
+            "omtale priser, beløb eller valuta, fordi priser ændrer sig. "
+            "De tre metabeskrivelser skal have "
             "forskellige åbninger og handlingsord, som passer til sidens "
             "søgeintention. Brug højst 'Få overblik' i ét forslag og undgå "
             "det helt, hvis en mere præcis handling findes. CTA-retninger "
@@ -656,7 +671,8 @@ class TitleOptimizer:
             "og tre meta descriptions. Bevar website, URL, query og de "
             "offentlige fakta. Metabeskrivelserne skal starte forskelligt, "
             "bruge varierede intent-baserede CTA'er og højst én må starte "
-            'med "Få overblik". Fejl: '
+            'med "Få overblik". Fjern enhver omtale af priser, beløb og '
+            "valuta. Fejl: "
             f"{type(error).__name__}: {str(error)[:180]}\n"
             f"Kandidat: {json.dumps(candidate, ensure_ascii=False)}\n"
             f"Side: {json.dumps(page, ensure_ascii=False)}\n"

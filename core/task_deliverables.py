@@ -54,6 +54,10 @@ def validate_task_deliverable(text: str) -> dict[str, Any]:
     value["recommended_option"] = str(value["recommended_option"]).strip()
     if deliverable_type == "title_meta":
         title, meta = split_title_meta_option(value["recommended_option"])
+        if mentions_price(title) or mentions_price(meta):
+            raise ValueError(
+                "Title og meta må ikke omtale priser, beløb eller valuta."
+            )
         value["recommended_option"] = format_title_meta_option(title, meta)
     value["rationale"] = str(value["rationale"]).strip()
     return value
@@ -253,6 +257,15 @@ def format_title_meta_option(title: str, meta: str) -> str:
     return f"Title: {prefer_pipe_separator(title)}\nMeta: {str(meta).strip()}"
 
 
+def mentions_price(text: str) -> bool:
+    return bool(re.search(
+        r"\bpris(?:er|en|erne)?\b"
+        r"|\b\d+(?:[.,]\d+)?\s*(?:kr\.?|dkk|eur|usd)\b"
+        r"|[€£$]",
+        str(text).casefold(),
+    ))
+
+
 def _prompt(
     recommendation: dict[str, Any],
     public_context: list[dict[str, Any]],
@@ -275,7 +288,8 @@ analyse. Intet må publiceres automatisk. Brug kun den givne evidens, markér
 usikkerhed, og bevar sidens søgeintention.
 Ved title_meta skal title og meta stå på hver sin linje som "Title: ..." og
 "Meta: ...". Brug altid " | " som separator i titles; brug ikke kolon som
-title-separator.
+title-separator. Titles og metabeskrivelser må aldrig omtale priser, konkrete
+beløb eller valuta, fordi oplysningerne hurtigt bliver forældede.
 
 Opgavetype: {deliverable_type}
 Data: {json.dumps(payload, ensure_ascii=False)}

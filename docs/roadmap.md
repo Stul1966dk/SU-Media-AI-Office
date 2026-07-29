@@ -617,3 +617,17 @@ kan straks se præcis, hvilken ændring den enkelte 28-dages måling følger.
 
 Succeskriterium: Fremtidige metabeskrivelser bruger relevante og varierede
 CTA'er frem for at gentage Få overblik på tværs af næsten alle opgaver.
+
+# Sprint 45.6 - Prisfri titles og metabeskrivelser
+
+- [x] Forbyd prisomtale i begge AI-prompts for title/meta.
+- [x] Fjern prisomtale eksplicit i AI-reparationsprompten.
+- [x] Afvis ordene pris og priser i både title og meta.
+- [x] Afvis konkrete beløb med kr., DKK, EUR og USD.
+- [x] Afvis almindelige valutasymboler.
+- [x] Bevar sammenligninger af modeller og funktioner uden prisbudskaber.
+- [x] Regressionstest prompts, reviewer og den generelle leverancepipeline.
+- [x] Gennemfør obligatorisk Streamlit hot-reload-kontrol.
+
+Succeskriterium: Ingen fremtidig title eller metabeskrivelse kan godkendes,
+hvis den omtaler priser, beløb eller valuta, som hurtigt kan blive forældet.
