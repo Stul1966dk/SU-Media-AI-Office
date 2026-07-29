@@ -574,3 +574,17 @@ aktivt har valgt at arbejde med, uden at slette historik fra de øvrige.
 
 Succeskriterium: Brugeren kan kopiere title og meta med én handling pr. felt,
 ser kun den aktuelle opgave på I dag og starter altid næste opgave fra toppen.
+
+# Sprint 45.3 - Automatisk Streamlit hot-reload-port
+
+- [x] Simulér et allerede indlæst modul, der mangler nyligt tilføjede
+  funktioner.
+- [x] Regressionstest at I dag genindlæser modulet før funktionerne bindes.
+- [x] Gør testen obligatorisk efter ændringer i `core/` og `dashboard/`.
+- [x] Kræv genindlæsning af den allerede kørende Streamlit-side.
+- [x] Kræv kontrol af både synlige runtime-fejl og browserens fejllog.
+- [x] Forbyd rapportering af live hot-reload-kontrol, hvis appen ikke kører.
+
+Succeskriterium: En rettelse må ikke afleveres alene på baggrund af friske
+testprocesser; den kørende Streamlit-proces skal også kunne genindlæse siden
+uden gamle modulreferencer eller runtime-fejl.
