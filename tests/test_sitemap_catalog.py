@@ -6,10 +6,14 @@ from core.sitemap_catalog import SitemapCatalog
 
 
 class Response:
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, *, error: bool = False) -> None:
         self.content = text.encode("utf-8")
+        self.error = error
 
     def raise_for_status(self) -> None:
+        if self.error:
+            import requests
+            raise requests.HTTPError("Ikke fundet")
         return None
 
 
@@ -19,7 +23,11 @@ class Session:
         self.headers = {}
 
     def get(self, url, **_kwargs):
-        return Response(self.responses[url])
+        value = self.responses.get(url)
+        return (
+            value if isinstance(value, Response)
+            else Response(value or "", error=value is None)
+        )
 
 
 class Database:
@@ -75,6 +83,31 @@ class SitemapCatalogTests(unittest.TestCase):
                 "https://site.dk/post_tag-sitemap.xml"
             ),
         )
+
+    def test_auto_sync_uses_standard_index_without_manual_input(self) -> None:
+        database = Database()
+        session = Session({
+            "https://site.dk/sitemap_index.xml": (
+                "<urlset><url><loc>https://site.dk/side/</loc></url></urlset>"
+            ),
+        })
+
+        result = SitemapCatalog(database, session=session).auto_sync("site.dk")
+
+        self.assertEqual("found", result["status"])
+        self.assertEqual(
+            "https://site.dk/sitemap_index.xml", result["sitemap_url"]
+        )
+
+    def test_auto_sync_saves_not_found_state(self) -> None:
+        database = Database()
+
+        result = SitemapCatalog(
+            database, session=Session({})
+        ).auto_sync("site.dk")
+
+        self.assertEqual("not_found", result["status"])
+        self.assertEqual(2, len(result["attempted_urls"]))
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ import sys
 import os
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlsplit
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -70,8 +71,8 @@ def main() -> None:
 def _render_sitemaps(database) -> None:
     st.subheader("Sitemaps")
     st.caption(
-        "Gem ét sitemap pr. website. AI Office følger også sitemap-indeks og "
-        "bruger URL-kataloget til indholdsoverblik og interne links."
+        "AI Office finder normalt sitemap-indekset automatisk og følger alle "
+        "undersitemaps."
     )
     websites = [
         str(item["website"]) for item in database.get_all_websites()
@@ -89,31 +90,46 @@ def _render_sitemaps(database) -> None:
     catalog = SitemapCatalog(database)
     state = catalog.get(website_id)
     discovery = database.get_website_discovery_profile(website_id) or {}
-    default_url = (
-        state.get("sitemap_url")
-        or discovery.get("sitemap_url")
-        or f"https://{website_id}/sitemap_index.xml"
-    )
-    sitemap_url = st.text_input(
-        "Sitemap-adresse",
-        value=default_url,
-        key=f"sitemap_url:{website_id}",
-        help=(
-            "Indsæt sitemap.xml eller sitemap_index.xml. Adressen skal "
-            "tilhøre det valgte website."
-        ),
-    )
-    if st.button("Gem og hent sitemap", type="primary"):
-        try:
-            state = catalog.sync(website_id, sitemap_url)
-        except Exception as error:
-            st.error(f"Sitemap kunne ikke hentes: {error}")
-        else:
-            st.success(
-                f"{state['url_count']} URL’er er gemt fra "
-                f"{state['sitemaps_read']} sitemap-filer."
+    if not state:
+        with st.spinner("Leder efter sitemap…"):
+            state = catalog.auto_sync(
+                website_id,
+                str(discovery.get("sitemap_url") or "")
+                if discovery.get("sitemap_status") == "ok" else "",
             )
-    if state:
+    found = state.get("status") != "not_found" and bool(
+        state.get("sitemap_url")
+    )
+    if found:
+        sitemap_path = urlsplit(str(state["sitemap_url"])).path or "/"
+        st.success(f"Jeg har fundet et sitemap på {sitemap_path}")
+        if st.button("Hent sitemap igen"):
+            try:
+                state = catalog.sync(website_id, str(state["sitemap_url"]))
+            except Exception as error:
+                st.error(f"Sitemap kunne ikke hentes: {error}")
+            else:
+                st.rerun()
+    else:
+        st.warning(
+            "Jeg kan ikke finde et sitemap på /sitemap_index.xml. "
+            "Vil du indtaste en anden URL til sidens sitemap?"
+        )
+        with st.expander("Indtast en anden sitemap-URL"):
+            sitemap_url = st.text_input(
+                "Sitemap-adresse",
+                value="",
+                key=f"sitemap_url:{website_id}",
+                help="Adressen skal tilhøre det valgte website.",
+            )
+            if st.button("Gem og hent den angivne URL", type="primary"):
+                try:
+                    state = catalog.sync(website_id, sitemap_url)
+                except Exception as error:
+                    st.error(f"Sitemap kunne ikke hentes: {error}")
+                else:
+                    st.rerun()
+    if found:
         columns = st.columns(3)
         columns[0].metric("URL’er", int(state.get("url_count", 0)))
         columns[1].metric("Sitemap-filer", int(state.get("sitemaps_read", 0)))

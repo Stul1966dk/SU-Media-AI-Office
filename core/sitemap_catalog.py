@@ -27,6 +27,36 @@ class SitemapCatalog:
             f"sitemap:{website_id}"
         ) or {}
 
+    def auto_sync(
+        self, website_id: str, suggested_url: str = ""
+    ) -> dict[str, Any]:
+        candidates = [
+            suggested_url,
+            f"https://{website_id}/sitemap_index.xml",
+            f"https://{website_id}/sitemap.xml",
+        ]
+        attempted: list[str] = []
+        for candidate in dict.fromkeys(
+            value.strip() for value in candidates if value.strip()
+        ):
+            attempted.append(candidate)
+            try:
+                return self.sync(website_id, candidate)
+            except (requests.RequestException, ET.ParseError, ValueError):
+                continue
+        state = {
+            "website_id": website_id,
+            "status": "not_found",
+            "attempted_urls": attempted,
+            "synced_at": datetime.now().astimezone().isoformat(
+                timespec="seconds"
+            ),
+            "url_count": 0,
+            "urls": [],
+        }
+        self.database.set_integration_state(f"sitemap:{website_id}", state)
+        return state
+
     def sync(self, website_id: str, sitemap_url: str) -> dict[str, Any]:
         website = self._host(website_id)
         root_url = str(sitemap_url or "").strip()
@@ -67,6 +97,7 @@ class SitemapCatalog:
                     break
         state = {
             "website_id": website_id,
+            "status": "found",
             "sitemap_url": root_url,
             "synced_at": datetime.now().astimezone().isoformat(
                 timespec="seconds"
