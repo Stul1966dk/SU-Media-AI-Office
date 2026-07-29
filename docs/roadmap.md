@@ -588,3 +588,17 @@ ser kun den aktuelle opgave på I dag og starter altid næste opgave fra toppen.
 Succeskriterium: En rettelse må ikke afleveres alene på baggrund af friske
 testprocesser; den kørende Streamlit-proces skal også kunne genindlæse siden
 uden gamle modulreferencer eller runtime-fejl.
+
+# Sprint 45.4 - Mere læsbare resultater
+
+- [x] Reducér størrelsen på metric-værdier globalt på alle sider.
+- [x] Reducér metric-typografien yderligere på små skærme.
+- [x] Vis den implementerede ændring direkte efter måleperioden.
+- [x] Vis title og metabeskrivelse som separate kopierbare felter.
+- [x] Brug den registrerede ændringsbeskrivelse for øvrige opgavetyper.
+- [x] Fjern den overflødige fold-ud-sektion Se ændring.
+- [x] Bevar udvikling og teknisk datagrundlag som fold-ud-sektioner.
+- [x] Gennemfør automatisk hot-reload-test og live browserkontrol.
+
+Succeskriterium: Resultatkortene kan skimmes uden dominerende tal, og brugeren
+kan straks se præcis, hvilken ændring den enkelte 28-dages måling følger.

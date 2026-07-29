@@ -27,6 +27,15 @@
     padding: 1rem;
 }
 
+[data-testid="stMetricValue"] {
+    font-size: 1.35rem;
+    line-height: 1.35;
+}
+
+[data-testid="stMetricLabel"] {
+    font-size: 0.82rem;
+}
+
 .status-card {
     align-items: center;
     background: #121821;
@@ -69,5 +78,9 @@ div[data-testid="stButton"] > button {
     [data-testid="stMetric"],
     .status-card {
         min-height: auto;
+    }
+
+    [data-testid="stMetricValue"] {
+        font-size: 1.15rem;
     }
 }

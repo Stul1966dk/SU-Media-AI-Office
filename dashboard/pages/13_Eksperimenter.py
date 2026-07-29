@@ -371,6 +371,7 @@ def _active_card(database: Any, item: dict[str, Any]) -> None:
             "Næste evaluering" if insufficient else "Evalueres",
             format_date(evaluation) if evaluation else "Ukendt",
         )
+        _render_visible_change(item, implemented_change)
         measurement_complete = day_number >= total_days
         measurement_remaining = max(0, total_days - day_number)
         progress_text = (
@@ -408,8 +409,6 @@ def _active_card(database: Any, item: dict[str, Any]) -> None:
             )
         with st.expander("Se udvikling"):
             _development(database, item, snapshots)
-        with st.expander("Se ændring"):
-            st.write(item["change_description"])
         with st.expander("Se datagrundlag"):
             approved_rows = database.get_approved_changes(
                 experiment_id=item["id"]
@@ -419,6 +418,35 @@ def _active_card(database: Any, item: dict[str, Any]) -> None:
                 evaluation_rows[0] if evaluation_rows else None,
                 approved_rows[0] if approved_rows else None,
             )
+
+
+def _render_visible_change(
+    item: dict[str, Any], approved_change: dict[str, Any]
+) -> None:
+    """Show the exact measured change without requiring an expander."""
+    st.markdown("#### Implementeret ændring")
+    if (
+        item.get("experiment_type") == "title_meta"
+        and approved_change
+    ):
+        st.write("**Ny title**")
+        st.code(
+            approved_change.get("approved_title") or "Ikke registreret",
+            language=None,
+            wrap_lines=True,
+        )
+        st.write("**Ny metabeskrivelse**")
+        st.code(
+            approved_change.get("approved_meta") or "Ikke registreret",
+            language=None,
+            wrap_lines=True,
+        )
+        return
+    st.write(
+        item.get("change_description")
+        or approved_change.get("reason")
+        or "Ændringen er ikke beskrevet."
+    )
 
 
 def _development(
