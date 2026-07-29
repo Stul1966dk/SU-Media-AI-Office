@@ -92,6 +92,80 @@ class InternalLinkDeliverableTests(unittest.TestCase):
 
         self.assertEqual("Hvordan deler man en kalender?", excerpt)
 
+    def test_candidate_must_share_a_meaningful_topic(self) -> None:
+        page = load_daily_work()
+
+        rows = page._rank_internal_link_candidates(
+            {
+                "target_url": TARGET,
+                "target_query": "hvordan opretter man en Gmail konto",
+            },
+            [
+                {
+                    "url": "https://site.dk/kalender/",
+                    "title": "Fælles kalender på iPhone",
+                    "excerpt": "Del kalenderen med familien.",
+                },
+                {
+                    "url": SOURCE,
+                    "title": "Sådan logger du ind på Gmail",
+                    "excerpt": "Få adgang til din Gmail konto.",
+                },
+            ],
+            is_locked=lambda _url: False,
+        )
+
+        self.assertEqual([SOURCE], [row["url"] for row in rows])
+
+    def test_candidate_with_active_experiment_is_excluded(self) -> None:
+        page = load_daily_work()
+
+        rows = page._rank_internal_link_candidates(
+            {
+                "target_url": TARGET,
+                "target_query": "Gmail konto",
+            },
+            [{
+                "url": SOURCE,
+                "title": "Gmail login og konto",
+                "excerpt": "Administrér din Gmail konto.",
+            }],
+            is_locked=lambda url: url == SOURCE,
+        )
+
+        self.assertEqual([], rows)
+
+    def test_generation_stops_when_no_safe_source_exists(self) -> None:
+        page = load_daily_work()
+
+        class FakeDatabase:
+            def get_content(self, _website):
+                return [{
+                    "url": "https://site.dk/kalender/",
+                    "title": "Fælles kalender",
+                    "excerpt": "Del kalenderen med familien.",
+                }]
+
+            def get_seo_experiments(self, **_kwargs):
+                return []
+
+            def get_title_optimization_drafts(self):
+                return []
+
+            def get_seo_url_status(self, _url):
+                return []
+
+        with self.assertRaisesRegex(
+            page.NoSafeInternalLinkError,
+            "ingen emnemæssigt relevant kildeside",
+        ):
+            page._generate_deliverable(FakeDatabase(), {
+                "website": "site.dk",
+                "target_url": TARGET,
+                "target_query": "Gmail konto",
+                "experiment_type": "internal_links",
+            })
+
     def test_ai_uses_documented_source_and_target(self) -> None:
         ai = FakeAI()
         result = generate_task_deliverable(

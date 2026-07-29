@@ -23,6 +23,12 @@ CONCRETE_TRAFFIC_TASKS = {
     "search_only_decline",
     "plausible_only_decline",
 }
+
+
+class NoSafeInternalLinkError(ValueError):
+    """Raised when no relevant and unlocked internal-link source exists."""
+
+
 EXPERIMENT_TYPE_LABELS = {
     "Indholdsopdatering": "content_update",
     "Title og metabeskrivelse": "title_meta",
@@ -885,10 +891,14 @@ def _render_legacy_approved_instruction(
                 "på websitet, før du selv udfører det."
             ),
         ):
-            with st.spinner("AI Office udarbejder arbejdsinstruksen…"):
-                deliverable, used_fallback = _generate_deliverable(
-                    database, _recommendation_from_work_item(item)
-                )
+            try:
+                with st.spinner("AI Office udarbejder arbejdsinstruksen…"):
+                    deliverable, used_fallback = _generate_deliverable(
+                        database, _recommendation_from_work_item(item)
+                    )
+            except ValueError as error:
+                st.warning(str(error))
+                return
             st.session_state[state_key] = deliverable
             st.session_state[f"{state_key}:fallback"] = used_fallback
             st.rerun()
@@ -1181,10 +1191,14 @@ def _render_new_decision_actions(
     key = str(item["task_key"])
     state_key = f"task-deliverable:{key}"
     if state_key not in st.session_state:
-        with st.spinner("AI Office udarbejder det konkrete forslag…"):
-            deliverable, used_fallback = _generate_deliverable(
-                database, item
-            )
+        try:
+            with st.spinner("AI Office udarbejder det konkrete forslag…"):
+                deliverable, used_fallback = _generate_deliverable(
+                    database, item
+                )
+        except ValueError as error:
+            st.warning(str(error))
+            return
         st.session_state[state_key] = deliverable
         st.session_state[f"{state_key}:fallback"] = used_fallback
     deliverable = st.session_state[state_key]
@@ -1276,13 +1290,28 @@ def _generate_deliverable(
                     "content_excerpt": stored_target.get("content_text", ""),
                     "content_sections": stored_target["content_sections"],
                 })
-        for row in content_rows[:8]:
+        candidate_rows = content_rows
+        if item.get("experiment_type") == "internal_links":
+            candidate_rows = _rank_internal_link_candidates(
+                item,
+                content_rows,
+                is_locked=SEOExperimentEngine(database).is_url_locked,
+            )
+            if not candidate_rows:
+                raise NoSafeInternalLinkError(
+                    "AI Office fandt ingen emnemæssigt relevant kildeside, "
+                    "som samtidig er fri for aktive opgaver eller målinger. "
+                    "Der vises derfor ikke et usikkert linkforslag."
+                )
+        for row in candidate_rows[:8]:
             public_context.append({
                 "relation": "mulig relateret side",
                 "title": row.get("title", ""),
                 "url": row.get("url") or row.get("link") or "",
                 "excerpt": _usable_content_excerpt(row),
             })
+    except NoSafeInternalLinkError:
+        raise
     except Exception:
         pass
     load_dotenv(PROJECT_ROOT / ".env", override=False)
@@ -1308,6 +1337,55 @@ def _usable_content_excerpt(row: dict[str, Any]) -> str:
     if broken_letter and content_text:
         excerpt = content_text
     return excerpt[:500]
+
+
+def _rank_internal_link_candidates(
+    item: dict[str, Any],
+    rows: list[dict[str, Any]],
+    *,
+    is_locked: Any,
+) -> list[dict[str, Any]]:
+    """Return only topically relevant, unlocked internal-link sources."""
+    target_url = _normalized_page_url(str(item.get("target_url") or ""))
+    target_material = " ".join(str(item.get(key) or "") for key in (
+        "target_query", "description", "title", "recommended_action",
+    ))
+    target_terms = _meaningful_link_terms(target_material)
+    ranked: list[tuple[int, dict[str, Any]]] = []
+    for row in rows:
+        url = str(row.get("url") or row.get("link") or "")
+        if not url or _normalized_page_url(url) == target_url:
+            continue
+        if is_locked(url):
+            continue
+        source_material = " ".join((
+            str(row.get("title") or ""),
+            _usable_content_excerpt(row),
+        ))
+        overlap = target_terms & _meaningful_link_terms(source_material)
+        if not overlap:
+            continue
+        ranked.append((len(overlap), row))
+    ranked.sort(key=lambda candidate: candidate[0], reverse=True)
+    return [row for _, row in ranked]
+
+
+def _meaningful_link_terms(value: str) -> set[str]:
+    stopwords = {
+        "artikel", "bedste", "brug", "bruger", "find", "guide", "guiden",
+        "hjælp", "hvordan", "hvad", "hvorfor", "ikke", "kan", "komplet",
+        "lav", "laver", "læs", "man", "med", "mere", "opret", "oprette",
+        "opretter", "side", "sådan", "til", "trin", "vælg",
+    }
+    return {
+        word
+        for word in re.findall(r"[0-9a-zæøå]+", str(value).casefold())
+        if len(word) >= 3 and word not in stopwords
+    }
+
+
+def _normalized_page_url(value: str) -> str:
+    return str(value or "").strip().rstrip("/").casefold()
 
 
 def _render_deliverable_for_approval(
