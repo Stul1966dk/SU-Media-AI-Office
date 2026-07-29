@@ -602,3 +602,18 @@ uden gamle modulreferencer eller runtime-fejl.
 
 Succeskriterium: Resultatkortene kan skimmes uden dominerende tal, og brugeren
 kan straks se præcis, hvilken ændring den enkelte 28-dages måling følger.
+
+# Sprint 45.5 - Varierede metabeskrivelser
+
+- [x] Match CTA-retningen til guide-, sammenlignings- og værktøjsintention.
+- [x] Variér CTA-retningen deterministisk for øvrige sidetyper.
+- [x] Kræv forskellige åbninger og handlingsord i de tre forslag.
+- [x] Tillad højst ét forslag med åbningen Få overblik.
+- [x] Foretræk en mere præcis handling, når sidens intent gør det muligt.
+- [x] Kontrollér også CTA-variationen i AI-reparationsprompten.
+- [x] Reviewer-afvis gentagne metaåbninger i samme forslagssæt.
+- [x] Bevar allerede implementerede ændringer og igangværende målinger.
+- [x] Regressionstest intents, prompts og reviewer.
+
+Succeskriterium: Fremtidige metabeskrivelser bruger relevante og varierede
+CTA'er frem for at gentage Få overblik på tværs af næsten alle opgaver.

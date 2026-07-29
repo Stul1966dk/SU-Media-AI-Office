@@ -261,6 +261,8 @@ class TitleOptimizer:
         accepted_metas, accepted_meta_indices = [], []
         rejected_titles, rejected_metas = [], []
         seen_titles, seen_metas = set(), set()
+        seen_meta_openings: set[str] = set()
+        overview_ctas = 0
         query = value["target_query"].lower().strip()
         for index, proposal in enumerate(value["title_proposals"]):
             reviewed, reasons, corrections = self._review_one(
@@ -288,12 +290,26 @@ class TitleOptimizer:
                 reasons.append(
                     "Forslaget overlapper med en tidligere metabeskrivelse."
                 )
+            opening = self._meta_opening(reviewed["text"])
+            if opening and opening in seen_meta_openings:
+                reasons.append(
+                    "Metabeskrivelsen starter som et tidligere forslag."
+                )
+            uses_overview = normalized.startswith("få overblik")
+            if uses_overview and overview_ctas:
+                reasons.append(
+                    'Kun ét forslag må bruge CTA-starten "Få overblik".'
+                )
             if reasons:
                 rejected_metas.append({
                     "index": index, "proposal": proposal, "reasons": reasons,
                 })
             else:
                 seen_metas.add(normalized)
+                if opening:
+                    seen_meta_openings.add(opening)
+                if uses_overview:
+                    overview_ctas += 1
                 if corrections:
                     reviewed["reviewer_corrections"] = corrections
                 accepted_metas.append(reviewed)
@@ -367,6 +383,11 @@ class TitleOptimizer:
         normalized = text.casefold()
         matches = sum(word in normalized for word in words)
         return matches >= max(1, (len(words) + 1) // 2)
+
+    @staticmethod
+    def _meta_opening(text: str) -> str:
+        words = re.findall(r"[\wæøå]+", str(text).casefold())
+        return " ".join(words[:3])
 
     @staticmethod
     def _adjust_recommendation(
@@ -607,12 +628,17 @@ class TitleOptimizer:
             "confidence": 0, "expected_effect": "",
             "measurement_method": "",
         }
+        cta_guidance = TitleOptimizer._cta_guidance(candidate, page)
         return (
             "Returnér kun gyldig JSON efter dette schema. Skriv almindeligt "
             "dansk. Returnér præcis tre forskellige title-forslag og tre "
             "forskellige metabeskrivelser. Undgå clickbait, keyword stuffing, "
             "superlativer og udokumenterede påstande. Overskriv ikke den "
-            "nuværende title eller meta. Schema: "
+            "nuværende title eller meta. De tre metabeskrivelser skal have "
+            "forskellige åbninger og handlingsord, som passer til sidens "
+            "søgeintention. Brug højst 'Få overblik' i ét forslag og undgå "
+            "det helt, hvis en mere præcis handling findes. CTA-retninger "
+            f"til netop denne side: {', '.join(cta_guidance)}. Schema: "
             + json.dumps(schema, ensure_ascii=False)
             + "\nKandidat: " + json.dumps(candidate, ensure_ascii=False)
             + "\nOffentlig sideanalyse: " + json.dumps(page, ensure_ascii=False)
@@ -628,12 +654,69 @@ class TitleOptimizer:
         return (
             "Reparer svaret én gang. Returnér kun JSON med præcis tre titles "
             "og tre meta descriptions. Bevar website, URL, query og de "
-            "offentlige fakta. Fejl: "
+            "offentlige fakta. Metabeskrivelserne skal starte forskelligt, "
+            "bruge varierede intent-baserede CTA'er og højst én må starte "
+            'med "Få overblik". Fejl: '
             f"{type(error).__name__}: {str(error)[:180]}\n"
             f"Kandidat: {json.dumps(candidate, ensure_ascii=False)}\n"
             f"Side: {json.dumps(page, ensure_ascii=False)}\n"
             "Ugyldigt svar:\n" + invalid
         )
+
+    @staticmethod
+    def _cta_guidance(
+        candidate: dict[str, Any], page: dict[str, Any]
+    ) -> list[str]:
+        """Return varied CTA directions matched to likely search intent."""
+        context = " ".join(str(value or "") for value in (
+            candidate.get("target_query"),
+            candidate.get("target_url"),
+            page.get("title"),
+            page.get("h1"),
+        )).casefold()
+        groups = (
+            (
+                ("sammenlign", "bedste", "pris", "billig", "model"),
+                [
+                    "Sammenlign mulighederne",
+                    "Se forskellene",
+                    "Find den løsning der passer",
+                ],
+            ),
+            (
+                ("beregn", "test", "tjek", "måler", "calculator"),
+                [
+                    "Prøv beregningen",
+                    "Tjek dit resultat",
+                    "Se hvad tallene betyder",
+                ],
+            ),
+            (
+                ("sådan", "guide", "hvordan", "trin", "opret"),
+                [
+                    "Følg guiden",
+                    "Se hvordan du gør",
+                    "Lær de vigtigste trin",
+                ],
+            ),
+        )
+        for keywords, directions in groups:
+            if any(keyword in context for keyword in keywords):
+                return directions
+        directions = [
+            "Læs den konkrete vejledning",
+            "Find det relevante svar",
+            "Se dine muligheder",
+            "Bliv klogere på valget",
+            "Gå direkte til anbefalingerne",
+            "Få overblik over emnet",
+        ]
+        seed = sum(ord(character) for character in context)
+        start = seed % len(directions)
+        return [
+            directions[(start + offset) % len(directions)]
+            for offset in range(3)
+        ]
 
     @staticmethod
     def _validate_json(
