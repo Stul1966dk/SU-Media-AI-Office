@@ -57,6 +57,7 @@ generate_task_deliverable = task_deliverables_module.generate_task_deliverable
 prefer_pipe_separator = task_deliverables_module.prefer_pipe_separator
 split_title_meta_option = task_deliverables_module.split_title_meta_option
 validate_content_change = task_deliverables_module.validate_content_change
+validate_internal_link = task_deliverables_module.validate_internal_link
 
 
 def _optimizer(database: Any) -> TitleOptimizer:
@@ -422,6 +423,15 @@ def _render_deliverable_option(deliverable: dict[str, Any]) -> None:
     ):
         _render_content_update(deliverable)
         return
+    if (
+        deliverable.get("deliverable_type") == "internal_links"
+        and all(deliverable.get(field) for field in (
+            "source_url", "destination_url", "anchor_text", "link_location",
+            "current_sentence", "linked_sentence",
+        ))
+    ):
+        _render_internal_link(deliverable)
+        return
     if deliverable.get("deliverable_type") != "title_meta":
         st.success(deliverable["recommended_option"])
         st.caption("Teksten kan markeres og kopieres direkte.")
@@ -467,6 +477,41 @@ def _render_content_update(deliverable: dict[str, Any]) -> None:
     st.caption("Brug kopiér-knappen i feltet med den nye tekst.")
     st.write("**Søgeintention**")
     st.write(str(deliverable.get("search_intent") or "Ikke angivet"))
+
+
+def _render_internal_link(deliverable: dict[str, Any]) -> None:
+    st.write("**Kildeside – her skal linket indsættes**")
+    st.markdown(
+        f"[{deliverable['source_url']}]({deliverable['source_url']})"
+    )
+    st.write("**Destinationsside – linket skal pege hertil**")
+    st.markdown(
+        f"[{deliverable['destination_url']}]"
+        f"({deliverable['destination_url']})"
+    )
+    st.write("**Placering på kildesiden**")
+    st.info(str(deliverable["link_location"]))
+    st.write("**Nuværende passage**")
+    st.code(
+        str(deliverable["current_sentence"]),
+        language=None,
+        wrap_lines=True,
+    )
+    st.write("**Ankertekst**")
+    st.code(
+        str(deliverable["anchor_text"]),
+        language=None,
+        wrap_lines=True,
+    )
+    st.write("**Færdig passage med link**")
+    st.code(
+        str(deliverable["linked_sentence"]),
+        language=None,
+        wrap_lines=True,
+    )
+    st.caption(
+        "Kopiér den færdige passage, og link kun den viste ankertekst."
+    )
 
 
 def _render_legacy_approved_instruction(
@@ -620,6 +665,36 @@ def _parse_approved_deliverable(
                 ),
                 "search_intent": section(
                     "Søgeintention:", "Begrundelse:"
+                ),
+            })
+    if result["deliverable_type"] == "internal_links":
+        optional_headings = (
+            "Kildeside:", "Destinationsside:", "Ankertekst:",
+            "Placering på kildesiden:", "Nuværende passage:",
+            "Passage med link:",
+        )
+        if all(heading in description for heading in optional_headings):
+            result.update({
+                "recommended_option": section(
+                    "Anbefalet løsning:", "Kildeside:"
+                ),
+                "source_url": section(
+                    "Kildeside:", "Destinationsside:"
+                ),
+                "destination_url": section(
+                    "Destinationsside:", "Ankertekst:"
+                ),
+                "anchor_text": section(
+                    "Ankertekst:", "Placering på kildesiden:"
+                ),
+                "link_location": section(
+                    "Placering på kildesiden:", "Nuværende passage:"
+                ),
+                "current_sentence": section(
+                    "Nuværende passage:", "Passage med link:"
+                ),
+                "linked_sentence": section(
+                    "Passage med link:", "Begrundelse:"
                 ),
             })
     return result
@@ -873,6 +948,48 @@ def _render_deliverable_for_approval(
                 "replacement_content": edited_replacement,
                 "search_intent": edited_intent,
             }
+        elif deliverable["deliverable_type"] == "internal_links":
+            edited_source = st.text_input(
+                "Kildeside",
+                value=deliverable["source_url"],
+                help="Den eksisterende side, hvor linket skal indsættes.",
+            )
+            edited_destination = st.text_input(
+                "Destinationsside",
+                value=deliverable["destination_url"],
+                help="Den dokumenterede målside, som linket skal pege på.",
+            )
+            edited_anchor = st.text_input(
+                "Ankertekst",
+                value=deliverable["anchor_text"],
+            )
+            edited_location = st.text_input(
+                "Placering på kildesiden",
+                value=deliverable["link_location"],
+            )
+            edited_current = st.text_area(
+                "Nuværende passage",
+                value=deliverable["current_sentence"],
+                height=120,
+            )
+            edited_linked = st.text_area(
+                "Færdig passage med link",
+                value=deliverable["linked_sentence"],
+                height=150,
+                help=(
+                    "Kopiér passagen, og opret linket på den angivne "
+                    "ankertekst."
+                ),
+            )
+            edited_solution = edited_linked
+            reviewed_fields = {
+                "source_url": edited_source,
+                "destination_url": edited_destination,
+                "anchor_text": edited_anchor,
+                "link_location": edited_location,
+                "current_sentence": edited_current,
+                "linked_sentence": edited_linked,
+            }
         else:
             edited_solution = st.text_area(
                 "Anbefalet løsning",
@@ -896,6 +1013,15 @@ def _render_deliverable_for_approval(
         if reviewed["deliverable_type"] == "content_update":
             try:
                 validate_content_change(reviewed)
+            except ValueError as error:
+                st.error(str(error))
+                return
+        if reviewed["deliverable_type"] == "internal_links":
+            try:
+                validate_internal_link(
+                    reviewed,
+                    expected_target_url=str(item.get("target_url") or ""),
+                )
             except ValueError as error:
                 st.error(str(error))
                 return

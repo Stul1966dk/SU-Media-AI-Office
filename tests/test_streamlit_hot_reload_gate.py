@@ -20,6 +20,7 @@ class StreamlitHotReloadGateTests(unittest.TestCase):
             "prefer_pipe_separator",
             "split_title_meta_option",
             "validate_content_change",
+            "validate_internal_link",
         )
         for name in required:
             self.assertTrue(hasattr(task_deliverables, name))

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 
 DELIVERABLE_TYPES = {
@@ -23,10 +24,25 @@ def generate_task_deliverable(
     response = ai_service.generate_response(
         _prompt(recommendation, public_context or [])
     )
-    return validate_task_deliverable(response.text)
+    context = public_context or []
+    return validate_task_deliverable(
+        response.text,
+        expected_target_url=str(recommendation.get("target_url") or ""),
+        allowed_source_urls=[
+            str(row.get("url") or "")
+            for row in context
+            if row.get("relation") == "mulig relateret side"
+            and row.get("url")
+        ],
+    )
 
 
-def validate_task_deliverable(text: str) -> dict[str, Any]:
+def validate_task_deliverable(
+    text: str,
+    *,
+    expected_target_url: str = "",
+    allowed_source_urls: list[str] | None = None,
+) -> dict[str, Any]:
     """Validate and normalize a model-produced work draft."""
     cleaned = text.strip()
     if cleaned.startswith("```"):
@@ -62,6 +78,13 @@ def validate_task_deliverable(text: str) -> dict[str, Any]:
     elif deliverable_type == "content_update":
         validate_content_change(value)
         value["recommended_option"] = value["replacement_content"]
+    elif deliverable_type == "internal_links":
+        validate_internal_link(
+            value,
+            expected_target_url=expected_target_url,
+            allowed_source_urls=allowed_source_urls,
+        )
+        value["recommended_option"] = value["linked_sentence"]
     value["rationale"] = str(value["rationale"]).strip()
     return value
 
@@ -91,6 +114,56 @@ def validate_content_change(value: dict[str, Any]) -> None:
         raise ValueError(
             "Indholdsopdateringen beder brugeren skrive teksten selv."
         )
+
+
+def validate_internal_link(
+    value: dict[str, Any],
+    *,
+    expected_target_url: str = "",
+    allowed_source_urls: list[str] | None = None,
+) -> None:
+    """Require one verifiable source-to-destination internal link."""
+    required = (
+        "source_url", "destination_url", "anchor_text", "link_location",
+        "current_sentence", "linked_sentence",
+    )
+    for field in required:
+        if not str(value.get(field) or "").strip():
+            raise ValueError(
+                f"Det interne linkforslag mangler det konkrete felt {field}."
+            )
+        value[field] = str(value[field]).strip()
+    for field in ("source_url", "destination_url"):
+        parsed = urlsplit(value[field])
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError(
+                f"Det interne linkforslag har en ugyldig URL i {field}."
+            )
+    source = _normalized_url(value["source_url"])
+    destination = _normalized_url(value["destination_url"])
+    if source == destination:
+        raise ValueError("Kildesiden og destinationssiden skal være forskellige.")
+    if expected_target_url and destination != _normalized_url(
+        expected_target_url
+    ):
+        raise ValueError(
+            "Destinationssiden matcher ikke opgavens dokumenterede målside."
+        )
+    allowed = {
+        _normalized_url(url) for url in (allowed_source_urls or []) if url
+    }
+    if allowed and source not in allowed:
+        raise ValueError(
+            "Kildesiden findes ikke blandt de dokumenterede relaterede sider."
+        )
+    if value["anchor_text"].casefold() not in value["linked_sentence"].casefold():
+        raise ValueError(
+            "Ankerteksten skal fremgå ordret af den færdige linksætning."
+        )
+
+
+def _normalized_url(value: str) -> str:
+    return str(value or "").strip().rstrip("/").casefold()
 
 
 def fallback_task_deliverable(
@@ -185,13 +258,33 @@ def fallback_task_deliverable(
             ],
         }
     if deliverable_type == "internal_links":
+        related = next(
+            (
+                row for row in (public_context or [])
+                if row.get("relation") == "mulig relateret side"
+                and row.get("url")
+                and _normalized_url(str(row["url"]))
+                != _normalized_url(url)
+            ),
+            {},
+        )
+        source_url = str(related.get("url") or "")
+        current = str(
+            related.get("excerpt")
+            or "Ingen sikker eksisterende passage kunne identificeres."
+        ).strip()[:500]
+        anchor = f"guide til {query}"
+        linked = f"{current.rstrip('.')} – læs også vores {anchor}."
         return {
             "deliverable_type": "internal_links",
             "summary": f"Et konkret internt linkudkast til {url}.",
-            "recommended_option": (
-                f"Link til {url} fra de mest relevante eksisterende sider "
-                f"med ankerteksten “{query}” eller en naturlig variation."
-            ),
+            "recommended_option": linked,
+            "source_url": source_url,
+            "destination_url": url,
+            "anchor_text": anchor,
+            "link_location": "I den viste eksisterende passage på kildesiden.",
+            "current_sentence": current,
+            "linked_sentence": linked,
             "alternatives": [
                 f"Ankertekst: {query}",
                 f"Ankertekst: guide til {query}",
@@ -199,8 +292,9 @@ def fallback_task_deliverable(
             ],
             "rationale": "Interne links skal styrke relevans og navigation.",
             "implementation_steps": [
-                "Vælg 2–3 kontekstuelt relevante kildesider fra udkastet.",
-                "Indsæt ét naturligt link i en eksisterende relevant passage.",
+                "Åbn den konkrete kildeside.",
+                "Find den angivne passage og erstat den med linksætningen.",
+                "Link kun den angivne ankertekst til destinationssiden.",
             ],
             "validation_checks": [
                 "Kildesiden og destinationssiden handler om samme emne.",
@@ -285,11 +379,29 @@ def format_deliverable(deliverable: dict[str, Any]) -> str:
             f"Ny tekst:\n{deliverable['replacement_content']}\n\n"
             f"Søgeintention:\n{deliverable['search_intent']}\n\n"
         )
+    link_sections = ""
+    structured_link_fields = (
+        "source_url", "destination_url", "anchor_text", "link_location",
+        "current_sentence", "linked_sentence",
+    )
+    if (
+        deliverable["deliverable_type"] == "internal_links"
+        and all(deliverable.get(field) for field in structured_link_fields)
+    ):
+        link_sections = (
+            f"Kildeside:\n{deliverable['source_url']}\n\n"
+            f"Destinationsside:\n{deliverable['destination_url']}\n\n"
+            f"Ankertekst:\n{deliverable['anchor_text']}\n\n"
+            f"Placering på kildesiden:\n{deliverable['link_location']}\n\n"
+            f"Nuværende passage:\n{deliverable['current_sentence']}\n\n"
+            f"Passage med link:\n{deliverable['linked_sentence']}\n\n"
+        )
     return (
         f"Leverancetype: {deliverable['deliverable_type']}\n\n"
         f"{deliverable['summary']}\n\n"
         f"Anbefalet løsning:\n{deliverable['recommended_option']}\n\n"
         f"{content_sections}"
+        f"{link_sections}"
         f"Begrundelse:\n{deliverable['rationale']}\n\n"
         f"Alternativer:\n{alternatives}\n\n"
         f"Implementering:\n{steps}\n\n"
@@ -369,6 +481,24 @@ er nødvendig, skriv "Ny sektion – ingen eksisterende tekst" som current_conte
   "current_content": "ordret eksisterende passage eller markering af ny sektion",
   "replacement_content": "færdig tekst til direkte indsættelse",
   "search_intent": "kort konkret beskrivelse af brugerens intention",
+"""
+    if deliverable_type == "internal_links":
+        content_requirements = """
+Ved internal_links skal du vælge præcis én faktisk kildeside fra rækkerne med
+relationen "mulig relateret side". destination_url skal være opgavens url.
+Kildeside og destination skal være forskellige. Citér den eksisterende passage
+fra kildesidens excerpt, angiv den præcise placering, vælg én naturlig
+ankertekst, og lever hele den færdige sætning, som brugeren kan indsætte.
+Ankerteksten skal stå ordret i linked_sentence. Opfind aldrig en URL, passage
+eller side, og bed ikke brugeren om selv at finde en kildeside.
+"""
+        content_schema = """
+  "source_url": "eksisterende URL fra en mulig relateret side",
+  "destination_url": "opgavens dokumenterede mål-URL",
+  "anchor_text": "den præcise tekst, der skal linkes",
+  "link_location": "præcis placering eller afsnit på kildesiden",
+  "current_sentence": "ordret eksisterende passage fra kildesiden",
+  "linked_sentence": "færdig passage med ankerteksten indarbejdet",
 """
     return f"""
 Du er arbejdsassistent i en dansk SEO-app. Producer selve arbejdsudkastet;

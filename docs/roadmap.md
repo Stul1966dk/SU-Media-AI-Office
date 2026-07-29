@@ -666,3 +666,22 @@ som ikke findes på siden.
 Succeskriterium: En ny indholdsopgave må ikke nøjes med at bede brugeren
 opdatere en side. Den skal udpege stedet og levere den færdige tekst, som kan
 kontrolleres, kopieres, implementeres manuelt og efterfølgende måles.
+
+# Sprint 45.9 - Konkrete interne links
+
+- [x] Vælg kildesiden blandt faktiske relaterede sider fra Content Explorer.
+- [x] Brug opgavens dokumenterede mål-URL som destinationsside.
+- [x] Kræv, at kildeside og destinationsside er forskellige.
+- [x] Kræv en præcis ankertekst og placering på kildesiden.
+- [x] Vis den eksisterende passage fra kildesidens indhold.
+- [x] Lever en færdig passage, hvor ankerteksten indgår ordret.
+- [x] Afvis opdigtede kildesider, forkerte destinationer og manglende ankre.
+- [x] Vis begge URL'er som klikbare links før godkendelse og implementering.
+- [x] Giv ankertekst og færdig passage separate kopiér-felter.
+- [x] Gem alle linkdetaljer gennem godkendelses- og målingsflowet.
+- [x] Bevar kompatibilitet med ældre, generiske interne-link-opgaver.
+- [x] Regressionstest AI-kontrakt, fallback, validering, lagring og visning.
+
+Succeskriterium: En intern-link-opgave skal fortælle præcis, hvilken eksisterende
+side der skal redigeres, hvilken side linket skal pege på, hvilken tekst der
+skal linkes, og hvordan den færdige passage skal se ud.
