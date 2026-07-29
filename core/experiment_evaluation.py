@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from core.ai_service import AIService, AIServiceError
+from core.prompt_guidelines import PromptGuidelines
 
 
 EVALUATION_VERSION = 1
@@ -310,6 +311,9 @@ class ExperimentEvaluationService:
                 "status": result, "status_label": RESULT_LABELS[result],
                 "metrics": metrics, "forbehold": caveats,
             }, ensure_ascii=False)
+        )
+        prompt = PromptGuidelines(self.database).apply(
+            prompt, "experiment_evaluation"
         )
         try:
             text = self.ai_service.generate_response(prompt).text.strip()

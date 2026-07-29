@@ -56,7 +56,7 @@ def main() -> None:
     finally:
         database.close()
     st.subheader("Administration")
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.markdown("### Integrationer")
         st.caption("Forbindelser, API-nøgler og tilknyttede konti.")
@@ -69,6 +69,12 @@ def main() -> None:
         st.markdown("### Systemstatus")
         st.caption("Driftsstatus for appens services og datakilder.")
         render_page_link("pages/12_Systemstatus.py", "Åbn Systemstatus")
+    with col4:
+        st.markdown("### AI-retningslinjer")
+        st.caption("Se prompts og administrér regler for AI-funktionerne.")
+        render_page_link(
+            "pages/20_AI_Retningslinjer.py", "Åbn AI-retningslinjer"
+        )
 
 
 if __name__ == "__main__":

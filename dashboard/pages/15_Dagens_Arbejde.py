@@ -44,6 +44,7 @@ from core.ai_service import AIService
 from core.daily_work_preparation import DailyWorkPreparationService
 from core.current_diagnosis_reader import read_latest_diagnoses
 from core.seo_experiment_engine import SEOExperimentEngine
+from core.prompt_guidelines import PromptGuidelines
 from core.website_registry import WebsiteRegistry
 from connectors.wordpress_connector import WordPressConnector
 from core.work_queue_service import WorkQueueService
@@ -1326,9 +1327,21 @@ def _generate_deliverable(
     except Exception:
         pass
     load_dotenv(PROJECT_ROOT / ".env", override=False)
+    guided_item = {
+        **item,
+        "_prompt_guidelines": PromptGuidelines(database).text_for(
+            (
+                "content_gap"
+                if item.get("forced_content_mode") == "content_gap"
+                else task_deliverables_module._deliverable_type(item)
+            )
+        ),
+    }
     try:
         return generate_task_deliverable(
-            item, ai_service=AIService(), public_context=public_context
+            guided_item,
+            ai_service=AIService(),
+            public_context=public_context,
         ), False
     except Exception:
         fallback = fallback_task_deliverable(

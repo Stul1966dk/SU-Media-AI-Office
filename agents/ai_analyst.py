@@ -12,6 +12,7 @@ from core.ai_service import AIResponse, AIService
 from core.database import Database
 from core.knowledge_engine import KnowledgeEngine
 from core.seo_history import SEOHistory
+from core.prompt_guidelines import PromptGuidelines
 from core.task_engine import TaskEngine
 
 
@@ -198,6 +199,9 @@ class AIAnalyst:
                 analysis_type,
                 context,
                 retry=attempt == 1,
+            )
+            prompt = PromptGuidelines(self.database).apply(
+                prompt, "ai_analysis"
             )
             response = self.ai_service.generate_response(prompt)
             responses.append(response)

@@ -8,6 +8,7 @@ from typing import Any
 
 from core.ai_service import AIResponse, AIService
 from core.database import Database
+from core.prompt_guidelines import PromptGuidelines
 from core.executive_intelligence import ExecutiveIntelligence, GENERIC_ACTIONS
 
 
@@ -203,7 +204,9 @@ class AIExecutive:
         ranked = self.rank_opportunities(context)
         proposed = [self.recommend_next_action(x)
                     for x in self.select_focus_areas(ranked)]
-        prompt = self._prompt(context, proposed)
+        prompt = PromptGuidelines(self.database).apply(
+            self._prompt(context, proposed), "executive_briefing"
+        )
         response = self.ai_service.generate_response(prompt)
         responses: list[AIResponse] = [response]
         self._log_response_structure(response.text, "initial")
@@ -215,7 +218,10 @@ class AIExecutive:
                 type(initial_error).__name__, str(initial_error),
             )
             repair = self.ai_service.generate_response(
-                self._repair_prompt(response.text, initial_error)
+                PromptGuidelines(self.database).apply(
+                    self._repair_prompt(response.text, initial_error),
+                    "executive_briefing",
+                )
             )
             responses.append(repair)
             self._log_response_structure(repair.text, "repair")

@@ -831,6 +831,14 @@ eller side, og bed ikke brugeren om selv at finde en kildeside.
   "current_sentence": "ordret eksisterende passage fra kildesiden",
   "linked_sentence": "færdig passage med ankerteksten indarbejdet",
 """
+    user_guidelines = str(
+        recommendation.get("_prompt_guidelines") or ""
+    ).strip()
+    guideline_section = (
+        "\n\nBRUGERADMINISTREREDE RETNINGSLINJER "
+        "(skal overholdes):\n" + user_guidelines
+        if user_guidelines else ""
+    )
     return f"""
 Du er arbejdsassistent i en dansk SEO-app. Producer selve arbejdsudkastet;
 bed aldrig brugeren om selv at skrive forslagene eller lave den indledende
@@ -856,6 +864,7 @@ Svar kun med gyldig JSON:
   "implementation_steps": ["præcis manuel handling 1", "præcis manuel handling 2"],
   "validation_checks": ["kontrolpunkt 1", "kontrolpunkt 2"]
 }}
+{guideline_section}
 """.strip()
 
 

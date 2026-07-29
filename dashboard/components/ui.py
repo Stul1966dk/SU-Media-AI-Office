@@ -68,6 +68,10 @@ def render_sidebar(*, show_website_selector: bool = True) -> None:
                     ":material/cable:",
                 ),
                 (
+                    "pages/20_AI_Retningslinjer.py", "AI-retningslinjer",
+                    ":material/psychology:",
+                ),
+                (
                     "pages/12_Systemstatus.py", "Systemstatus",
                     ":material/monitor_heart:",
                 ),

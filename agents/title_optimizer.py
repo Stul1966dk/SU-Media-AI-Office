@@ -13,6 +13,7 @@ import requests
 from core.action_logging import log_action
 from core.decision_engine import DecisionEngine
 from core.seo_experiment_engine import SEOExperimentEngine
+from core.prompt_guidelines import PromptGuidelines
 from core.workflow_status import DRAFT_TRANSITIONS, validate_transition
 
 
@@ -191,7 +192,10 @@ class TitleOptimizer:
     ) -> dict[str, Any]:
         """Generate, validate, review, and at most once repair proposals."""
         response = self.ai_service.generate_response(
-            self._prompt(candidate, page, competitors)
+            PromptGuidelines(self.database).apply(
+                self._prompt(candidate, page, competitors),
+                "title_meta",
+            )
         )
         self._log_response_structure(response.text, "initial")
         try:
@@ -209,7 +213,10 @@ class TitleOptimizer:
                 type(error).__name__, str(error)[:300],
             )
             repaired = self.ai_service.generate_response(
-                self._repair_prompt(response.text, error, candidate, page)
+                PromptGuidelines(self.database).apply(
+                    self._repair_prompt(response.text, error, candidate, page),
+                    "title_meta",
+                )
             )
             self._log_response_structure(repaired.text, "repair")
             try:
