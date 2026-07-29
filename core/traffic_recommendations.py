@@ -5,6 +5,51 @@ from __future__ import annotations
 from typing import Any
 
 
+DAILY_WORK_TYPE_SETTINGS = {
+    "title_meta": {
+        "description": "Forbered en title/meta-forbedring.",
+        "recommended_action": (
+            "Lever en ny title og metabeskrivelse, som matcher sidens "
+            "søgeintention og det dokumenterede CTR-potentiale."
+        ),
+        "experiment_type": "title_meta",
+        "forced_content_mode": "",
+        "score_adjustment": 0.0,
+    },
+    "content_update": {
+        "description": "Forbered en konkret indholdsopdatering.",
+        "recommended_action": (
+            "Find den vigtigste mangel på den eksisterende side og lever "
+            "den færdige tekst med en præcis placering."
+        ),
+        "experiment_type": "content_update",
+        "forced_content_mode": "existing_section",
+        "score_adjustment": 0.0,
+    },
+    "content_gap": {
+        "description": "Undersøg og udfyld et dokumenteret Content Gap.",
+        "recommended_action": (
+            "Brug søgeord og sideindhold til at finde et manglende emne. "
+            "Lever enten en relevant ny sektion eller et afgrænset forslag "
+            "til nyt indhold uden dubletter eller kannibalisering."
+        ),
+        "experiment_type": "content_update",
+        "forced_content_mode": "content_gap",
+        "score_adjustment": -0.25,
+    },
+    "internal_links": {
+        "description": "Forbered et relevant internt link.",
+        "recommended_action": (
+            "Find en emnemæssigt relevant og ledig kildeside. Lever præcis "
+            "placering, naturlig ankertekst og den færdige passage med link."
+        ),
+        "experiment_type": "internal_links",
+        "forced_content_mode": "",
+        "score_adjustment": -0.5,
+    },
+}
+
+
 def build_traffic_recommendations(
     search_diagnoses: list[dict[str, Any]],
     plausible_diagnoses: list[dict[str, Any]],
@@ -31,6 +76,68 @@ def build_traffic_recommendations(
         elif plausible_decline:
             recommendations.append(_plausible_only(website, search, plausible))
     return recommendations
+
+
+def expand_daily_work_types(
+    recommendations: list[dict[str, Any]],
+    *,
+    content_urls_by_website: dict[str, list[str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Turn measured traffic opportunities into eligible work-type candidates.
+
+    The measured signal still decides suitability. CTR decline produces a
+    title/meta candidate. Position decline produces content, Content Gap and,
+    when another indexed page exists, internal-link candidates. Each variant
+    receives its own key so rejecting one type does not suppress the others.
+    """
+    urls_by_site = content_urls_by_website or {}
+    expanded: list[dict[str, Any]] = []
+    for recommendation in recommendations:
+        cause = str(recommendation.get("measured_cause") or "")
+        if cause == "CTR-fald":
+            work_types = ["title_meta"]
+        elif cause == "Placeringsfald":
+            work_types = ["content_update"]
+            if recommendation.get("search_queries"):
+                work_types.append("content_gap")
+            target = _normalize_url(recommendation.get("target_url"))
+            other_urls = {
+                _normalize_url(url)
+                for url in urls_by_site.get(
+                    str(recommendation.get("website") or ""), []
+                )
+                if _normalize_url(url)
+            } - {target}
+            if other_urls:
+                work_types.append("internal_links")
+        else:
+            work_types = ["content_update"]
+        for index, work_type in enumerate(work_types):
+            setting = DAILY_WORK_TYPE_SETTINGS[work_type]
+            item = dict(recommendation)
+            original_key = str(item.get("task_key") or "")
+            if index:
+                item["task_key"] = f"{original_key}|{work_type}"
+            item.update({
+                "daily_work_type": work_type,
+                "description": setting["description"],
+                "recommended_action": setting["recommended_action"],
+                "experiment_type": setting["experiment_type"],
+                "forced_content_mode": setting["forced_content_mode"],
+                "total_score": round(
+                    float(item.get("total_score") or 0)
+                    + float(setting["score_adjustment"]),
+                    2,
+                ),
+            })
+            expanded.append(item)
+    return sorted(
+        expanded,
+        key=lambda item: (
+            -float(item.get("total_score") or 0),
+            str(item.get("task_key") or ""),
+        ),
+    )
 
 
 def apply_measured_learning(
@@ -85,12 +192,19 @@ def apply_measured_learning(
 
 
 def _recommended_change_type(recommendation: dict[str, Any]) -> str:
+    explicit = str(recommendation.get("daily_work_type") or "")
+    if explicit:
+        return explicit
     cause = str(recommendation.get("measured_cause") or "")
     if cause == "CTR-fald":
         return "title_meta"
     if cause == "Placeringsfald":
         return "content_update"
     return "content_update"
+
+
+def _normalize_url(value: Any) -> str:
+    return str(value or "").strip().rstrip("/").casefold()
 
 
 def _combined(

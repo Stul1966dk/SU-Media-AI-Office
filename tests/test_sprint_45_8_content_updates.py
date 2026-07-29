@@ -285,22 +285,12 @@ class ContentUpdateDeliverableTests(unittest.TestCase):
         self.assertIn('"Ny færdig tekst",', source)
         self.assertIn("validate_content_change(reviewed)", source)
 
-    def test_forced_test_ends_after_proposal_is_approved(self) -> None:
+    def test_temporary_forced_test_state_is_removed(self) -> None:
         source = DAILY_WORK.read_text(encoding="utf-8")
-        approval = source.split(
-            "def _create_and_approve(", 1
-        )[1].split("def _recommendation_from_work_item(", 1)[0]
 
-        self.assertIn('startswith(\n            "manual-test|"', approval)
-        self.assertIn(
-            "st.session_state.pop(FORCED_TEST_MODE_KEY, None)",
-            approval,
-        )
-        self.assertIn(
-            "st.session_state.pop(FORCED_TEST_WEBSITE_KEY, None)",
-            approval,
-        )
-        self.assertIn("Forslaget er godkendt. Næste trin", approval)
+        self.assertNotIn("manual-test|", source)
+        self.assertNotIn("FORCED_TEST_MODE_KEY", source)
+        self.assertNotIn("FORCED_TEST_WEBSITE_KEY", source)
 
 
 if __name__ == "__main__":

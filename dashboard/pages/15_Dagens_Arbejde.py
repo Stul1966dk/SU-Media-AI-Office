@@ -16,8 +16,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ALL_WEBSITES = "Alle websites"
 FILTER_SESSION_KEY = "daily_work_website_filter"
 FILTER_WIDGET_KEY = "daily_work_website_filter_widget"
-FORCED_TEST_MODE_KEY = "daily_work_forced_test_mode"
-FORCED_TEST_WEBSITE_KEY = "daily_work_forced_test_website"
 CONCRETE_TRAFFIC_TASKS = {
     "combined_traffic_decline",
     "search_only_decline",
@@ -120,10 +118,6 @@ def main() -> None:
         selected = _render_website_filter(websites)
         website_id = None if selected == ALL_WEBSITES else selected
         _render_daily_summary(database, websites)
-        if _render_forced_test_panel(
-            database, websites, selected_website=website_id
-        ):
-            return
         decisions = _filter_active_site_rows(
             importlib.reload(traffic_store_module).get_decisions(database),
             active_ids,
@@ -174,6 +168,12 @@ def main() -> None:
         priority_tasks = _filter_unlocked_recommendations(
             database, priority_tasks
         )
+        priority_tasks = traffic_recommendations_module.expand_daily_work_types(
+            priority_tasks,
+            content_urls_by_website=_content_urls_by_website(
+                database, active_ids
+            ),
+        )
         priority_tasks = traffic_recommendations_module.apply_measured_learning(
             priority_tasks, database.get_seo_learning_entries()
         )
@@ -216,204 +216,6 @@ def _build_current_priority_tasks(**context: Any) -> list[dict[str, Any]]:
     return current_data.build_dashboard_priority_tasks(**context)
 
 
-def _render_forced_test_panel(
-    database: Any,
-    websites: list[dict[str, Any]],
-    *,
-    selected_website: str | None,
-) -> bool:
-    """Temporarily bypass normal ranking to test a concrete work type."""
-    website_ids = [str(row["website"]) for row in websites]
-    if not website_ids:
-        return False
-    active_mode = st.session_state.get(FORCED_TEST_MODE_KEY)
-    with st.expander(
-        "Udviklerværktøjer · midlertidig test",
-        expanded=bool(active_mode),
-    ):
-        st.caption(
-            "Fremtvinger én datagrundet testopgave i denne session. "
-            "Intet publiceres automatisk."
-        )
-        default_website = (
-            selected_website
-            or st.session_state.get(FORCED_TEST_WEBSITE_KEY)
-            or website_ids[0]
-        )
-        if default_website not in website_ids:
-            default_website = website_ids[0]
-        test_website = st.selectbox(
-            "Website til test",
-            website_ids,
-            index=website_ids.index(default_website),
-            key="forced_test_website_selector",
-        )
-        st.session_state[FORCED_TEST_WEBSITE_KEY] = test_website
-        columns = st.columns(3)
-        choices = (
-            ("content_update", "Test indholdsopdatering"),
-            ("internal_links", "Test interne links"),
-            ("content_gap", "Test content gap"),
-        )
-        for column, (mode, label) in zip(columns, choices):
-            if column.button(label, key=f"force-test-{mode}"):
-                st.session_state[FORCED_TEST_MODE_KEY] = mode
-                st.rerun()
-        if active_mode:
-            labels = {
-                "content_update": "Indholdsopdatering",
-                "internal_links": "Interne links",
-                "content_gap": "Content gap",
-            }
-            st.warning(
-                f"Testtilstand er aktiv: {labels.get(active_mode, active_mode)}."
-            )
-            if st.button("Afslut testtilstand", key="stop-forced-test"):
-                st.session_state.pop(FORCED_TEST_MODE_KEY, None)
-                st.rerun()
-    if not active_mode:
-        return False
-    recommendation = _forced_test_recommendation(
-        database,
-        website_id=str(
-            st.session_state.get(FORCED_TEST_WEBSITE_KEY) or website_ids[0]
-        ),
-        mode=str(active_mode),
-    )
-    if recommendation is None:
-        st.error(
-            "Der er ingen ledig side med tilstrækkelige data til denne test. "
-            "Sider med en aktiv måling foreslås ikke, før målingen er afsluttet."
-        )
-        return True
-    _render_combined_traffic_task(database, recommendation)
-    return True
-
-
-def _forced_test_recommendation(
-    database: Any,
-    *,
-    website_id: str,
-    mode: str,
-) -> dict[str, Any] | None:
-    """Build a session-only recommendation from persisted public evidence."""
-    diagnosis_rows = read_latest_diagnoses(
-        database, [website_id], kind="search"
-    )
-    diagnosis = diagnosis_rows[0] if diagnosis_rows else {}
-    experiments = SEOExperimentEngine(database)
-    loss_pages = [
-        row
-        for row in (diagnosis.get("loss_pages") or [])
-        if row.get("page_url")
-        and not experiments.is_url_locked(str(row["page_url"]))
-    ]
-    page = next(
-        (row for row in loss_pages if row.get("page_url")),
-        {},
-    )
-    try:
-        content_rows = database.get_content(website_id)
-    except Exception:
-        content_rows = []
-    target_url = str(page.get("page_url") or "")
-    if not target_url:
-        target_url = str(
-            next(
-                (
-                    row.get("url") or row.get("link")
-                    for row in content_rows
-                    if row.get("url") or row.get("link")
-                    if not experiments.is_url_locked(str(
-                        row.get("url") or row.get("link")
-                    ))
-                ),
-                "",
-            )
-        )
-    if not target_url:
-        return None
-    queries = [
-        {
-            "query": str(row.get("query") or ""),
-            "click_loss": int(row.get("click_loss") or 0),
-        }
-        for row in (page.get("queries") or [])[:10]
-        if row.get("query")
-    ]
-    if not queries:
-        queries = [{
-            "query": str(page.get("target_query") or "sidens primære emne"),
-            "click_loss": 0,
-        }]
-    settings = {
-        "content_update": {
-            "experiment_type": "content_update",
-            "forced_content_mode": "existing_section",
-            "title": "Test en konkret indholdsopdatering.",
-            "action": (
-                "Find et manglende svar på den eksisterende side og lever "
-                "den færdige tekst til indsættelse."
-            ),
-        },
-        "internal_links": {
-            "experiment_type": "internal_links",
-            "forced_content_mode": "",
-            "title": "Test et konkret internt link.",
-            "action": (
-                "Vælg en eksisterende relateret kildeside og lever "
-                "anker, placering og færdig linksætning."
-            ),
-        },
-        "content_gap": {
-            "experiment_type": "content_update",
-            "forced_content_mode": "content_gap",
-            "title": "Test et dokumenteret content gap.",
-            "action": (
-                "Find et manglende emne og vurder, om det kræver kategori, "
-                "artikel, blogindlæg eller en eksisterende sektion."
-            ),
-        },
-    }
-    setting = settings.get(mode)
-    if setting is None:
-        return None
-    return {
-        "task_key": f"manual-test|{mode}|{website_id}|{target_url}",
-        "task_type": "combined_traffic_decline",
-        "website": website_id,
-        "target_url": target_url,
-        "target_query": queries[0]["query"],
-        "search_queries": queries,
-        "measured_cause": (
-            str(page.get("cause") or "Manuel test med gemte data")
-        ),
-        "description": setting["title"],
-        "recommended_action": setting["action"],
-        "experiment_type": setting["experiment_type"],
-        "forced_content_mode": setting["forced_content_mode"],
-        "priority": "Test",
-        "plausible_change": 0.0,
-        "search_console_change": (
-            f"{len(queries)} gemte søgeord anvendes som testgrundlag"
-        ),
-        "explanation": (
-            "Opgaven er fremtvunget til brugerprøve og bygger på gemte "
-            "Search Console-data samt offentligt sideindhold."
-        ),
-        "confidence": "test",
-        "completion_criterion": (
-            "Den konkrete AI-leverance er gennemgået og kan godkendes eller "
-            "kasseres."
-        ),
-        "measurement_method": (
-            "Ved implementering registreres ændringen i det normale "
-            "28-dages målingsflow."
-        ),
-        "estimated_minutes": 20,
-    }
-
-
 def _filter_active_site_rows(
     rows: list[dict[str, Any]],
     active_ids: set[str],
@@ -425,6 +227,24 @@ def _filter_active_site_rows(
         item for item in rows
         if str(item.get(website_field) or "") in active_ids
     ]
+
+
+def _content_urls_by_website(
+    database: Any, website_ids: set[str]
+) -> dict[str, list[str]]:
+    """Return the persisted page inventory used to qualify link candidates."""
+    result: dict[str, list[str]] = {}
+    for website_id in sorted(website_ids):
+        try:
+            rows = database.get_content(website_id)
+        except Exception:
+            rows = []
+        result[website_id] = [
+            str(row.get("url") or row.get("link") or "").strip()
+            for row in rows
+            if str(row.get("url") or row.get("link") or "").strip()
+        ]
+    return result
 
 
 def _filter_unlocked_recommendations(
@@ -1684,11 +1504,6 @@ def _create_and_approve(
             "Prøv igen, eller genindlæs siden."
         )
     else:
-        if str(recommendation.get("task_key") or "").startswith(
-            "manual-test|"
-        ):
-            st.session_state.pop(FORCED_TEST_MODE_KEY, None)
-            st.session_state.pop(FORCED_TEST_WEBSITE_KEY, None)
         _finish_daily_action(
             "Forslaget er godkendt. Næste trin er at udføre ændringen "
             "på websitet."

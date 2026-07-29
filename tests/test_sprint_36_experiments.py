@@ -213,8 +213,8 @@ class Sprint36ExperimentTests(unittest.TestCase):
             "🟢 Markér som implementeret",
             [button.label for button in app.button],
         )
-        self.assertEqual(
-            ["Udviklerværktøjer · midlertidig test"],
+        self.assertNotIn(
+            "Udviklerværktøjer · midlertidig test",
             [expander.label for expander in app.expander],
         )
         normal_buttons = [
