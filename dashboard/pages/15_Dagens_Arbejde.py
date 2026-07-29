@@ -2,6 +2,7 @@
 
 import importlib
 import json
+import re
 import sys
 from datetime import date, timedelta
 from html import escape
@@ -1280,9 +1281,7 @@ def _generate_deliverable(
                 "relation": "mulig relateret side",
                 "title": row.get("title", ""),
                 "url": row.get("url") or row.get("link") or "",
-                "excerpt": str(
-                    row.get("excerpt") or row.get("content") or ""
-                )[:500],
+                "excerpt": _usable_content_excerpt(row),
             })
     except Exception:
         pass
@@ -1295,6 +1294,20 @@ def _generate_deliverable(
         return fallback_task_deliverable(
             item, public_context=public_context
         ), True
+
+
+def _usable_content_excerpt(row: dict[str, Any]) -> str:
+    """Prefer intact article text when a stored excerpt has broken letters."""
+    excerpt = str(row.get("excerpt") or row.get("content") or "").strip()
+    content_text = str(row.get("content_text") or "").strip()
+    broken_letter = re.search(
+        r"(?<=[A-Za-zÆØÅæøå])\?(?=[A-Za-zÆØÅæøå])"
+        r"|(?<![A-Za-zÆØÅæøå])[A-Za-zÆØÅæøå]\?(?=\s|$)",
+        excerpt,
+    )
+    if broken_letter and content_text:
+        excerpt = content_text
+    return excerpt[:500]
 
 
 def _render_deliverable_for_approval(

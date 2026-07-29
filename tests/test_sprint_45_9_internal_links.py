@@ -63,6 +63,35 @@ def load_daily_work():
 
 
 class InternalLinkDeliverableTests(unittest.TestCase):
+    def test_daily_context_replaces_broken_excerpt_with_article_text(
+        self,
+    ) -> None:
+        page = load_daily_work()
+
+        excerpt = page._usable_content_excerpt({
+            "excerpt": (
+                "Opret en f?lles kalender p? iPhone og del den med b?rnene."
+            ),
+            "content_text": (
+                "Opret en fælles kalender på iPhone og del den med børnene."
+            ),
+        })
+
+        self.assertEqual(
+            "Opret en fælles kalender på iPhone og del den med børnene.",
+            excerpt,
+        )
+
+    def test_daily_context_keeps_valid_question_mark(self) -> None:
+        page = load_daily_work()
+
+        excerpt = page._usable_content_excerpt({
+            "excerpt": "Hvordan deler man en kalender?",
+            "content_text": "En anden længere tekst.",
+        })
+
+        self.assertEqual("Hvordan deler man en kalender?", excerpt)
+
     def test_ai_uses_documented_source_and_target(self) -> None:
         ai = FakeAI()
         result = generate_task_deliverable(
