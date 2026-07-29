@@ -334,13 +334,28 @@ def _render_draft_decision(
 def _render_approved_decision(
     database: Any, item: dict[str, Any]
 ) -> None:
+    deliverable = _parse_approved_deliverable(item)
+    if deliverable:
+        _render_approved_instruction(deliverable)
+    else:
+        _render_legacy_approved_instruction(database, item)
+        return
+
     if item.get("target_url"):
         st.link_button(
             "Åbn siden, der skal ændres",
             str(item["target_url"]),
             help="Åbner websitet i en ny fane. AI Office ændrer intet selv.",
         )
-    with st.form(f"implement-daily-{item['recommendation_key']}"):
+
+    st.markdown("### Når du har udført ændringen")
+    st.caption(
+        "Registrér først ændringen her, når den godkendte arbejdsinstruks "
+        "er udført og gemt på websitet."
+    )
+    with st.form(
+        f"implement-daily-{item['recommendation_key']}", border=True
+    ):
         default_change_type = _approved_change_type(item)
         change_type = st.selectbox(
             "Hvilken type ændring udførte du?",
@@ -355,6 +370,7 @@ def _render_approved_decision(
                 "AI Office har indsat den godkendte løsning. Tilpas kun "
                 "teksten, hvis du implementerede noget andet."
             ),
+            height=140,
         )
         implemented = st.form_submit_button(
             "Registrér ændring og start 28-dages måling",
@@ -375,6 +391,91 @@ def _render_approved_decision(
                 "Ændringen er registreret, og målingen er startet"
                 + (f" frem til {due}." if due else ".")
             )
+
+
+def _render_approved_instruction(deliverable: dict[str, Any]) -> None:
+    st.markdown("### Godkendt arbejdsinstruks")
+    st.write(deliverable["summary"])
+    st.write("**Det skal du rette**")
+    st.success(deliverable["recommended_option"])
+    st.caption("Teksten kan markeres og kopieres direkte.")
+    st.write("**Sådan udfører du ændringen**")
+    for index, step in enumerate(deliverable["implementation_steps"], 1):
+        st.write(f"{index}. {step}")
+    st.write("**Kontrollér før du registrerer ændringen**")
+    for check in deliverable["validation_checks"]:
+        st.write(f"- {check}")
+    with st.expander("Se begrundelse og alternativer"):
+        st.write(f"**Begrundelse:** {deliverable['rationale']}")
+        if deliverable["alternatives"]:
+            st.write("**Alternative løsninger:**")
+            for index, alternative in enumerate(
+                deliverable["alternatives"], 1
+            ):
+                st.write(f"{index}. {alternative}")
+
+
+def _render_legacy_approved_instruction(
+    database: Any, item: dict[str, Any]
+) -> None:
+    key = str(item["recommendation_key"])
+    state_key = f"approved-deliverable:{key}"
+    st.warning(
+        "Denne opgave blev godkendt i en ældre version og mangler en "
+        "konkret arbejdsinstruks. Generér instruktionen, før du ændrer siden."
+    )
+    with st.expander("Se den gamle, overordnede beskrivelse"):
+        st.write(str(item.get("description") or "Ingen beskrivelse gemt."))
+    if state_key not in st.session_state:
+        if st.button(
+            "Lav konkret arbejdsinstruks",
+            type="primary",
+            key=f"repair-approved-{key}",
+            help=(
+                "AI Office udarbejder det konkrete forslag. Intet ændres "
+                "på websitet, før du selv udfører det."
+            ),
+        ):
+            with st.spinner("AI Office udarbejder arbejdsinstruksen…"):
+                deliverable, used_fallback = _generate_deliverable(
+                    database, _recommendation_from_work_item(item)
+                )
+            st.session_state[state_key] = deliverable
+            st.session_state[f"{state_key}:fallback"] = used_fallback
+            st.rerun()
+        return
+
+    deliverable = st.session_state[state_key]
+    if st.session_state.get(f"{state_key}:fallback"):
+        st.warning(
+            "AI-forbindelsen var ikke tilgængelig. Instruksen er lavet med "
+            "faste regler og bør kontrolleres ekstra grundigt."
+        )
+    _render_approved_instruction(deliverable)
+    if st.button(
+        "Gem som godkendt arbejdsinstruks",
+        type="primary",
+        key=f"save-approved-plan-{key}",
+    ):
+        try:
+            _workflow(database).update_approved_plan(
+                key, description=format_deliverable(deliverable)
+            )
+        except ValueError as error:
+            st.error(str(error))
+        else:
+            st.session_state.pop(state_key, None)
+            st.session_state.pop(f"{state_key}:fallback", None)
+            _finish_daily_action(
+                "Arbejdsinstruksen er gemt. Du kan nu udføre ændringen."
+            )
+    if st.button(
+        "Lav et nyt forslag",
+        key=f"regenerate-approved-{key}",
+    ):
+        st.session_state.pop(state_key, None)
+        st.session_state.pop(f"{state_key}:fallback", None)
+        st.rerun()
 
 
 def _approved_change_type(item: dict[str, Any]) -> str:
@@ -400,11 +501,63 @@ def _approved_change_type(item: dict[str, Any]) -> str:
 
 
 def _approved_solution(item: dict[str, Any]) -> str:
-    description = str(item.get("description") or "")
-    marker = "Anbefalet løsning:\n"
-    if marker not in description:
-        return ""
-    return description.split(marker, 1)[1].split("\n\nBegrundelse:", 1)[0]
+    deliverable = _parse_approved_deliverable(item)
+    return deliverable["recommended_option"] if deliverable else ""
+
+
+def _parse_approved_deliverable(
+    item: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Read the structured deliverable persisted in a task description."""
+    description = str(item.get("description") or "").strip()
+    headings = (
+        "Anbefalet løsning:", "Begrundelse:", "Alternativer:",
+        "Implementering:", "Kontrol før godkendelse:",
+    )
+    if not all(heading in description for heading in headings):
+        return None
+
+    def section(start: str, end: str | None) -> str:
+        content = description.split(start, 1)[1]
+        return content.split(end, 1)[0].strip() if end else content.strip()
+
+    summary = description.split("Anbefalet løsning:", 1)[0]
+    summary = summary.split("\n\n", 1)[-1].strip()
+    alternatives = _strip_list_markers(section(
+        "Alternativer:", "Implementering:"
+    ))
+    steps = _strip_list_markers(section(
+        "Implementering:", "Kontrol før godkendelse:"
+    ))
+    checks = _strip_list_markers(section(
+        "Kontrol før godkendelse:", None
+    ))
+    return {
+        "summary": summary,
+        "recommended_option": section(
+            "Anbefalet løsning:", "Begrundelse:"
+        ),
+        "rationale": section("Begrundelse:", "Alternativer:"),
+        "alternatives": alternatives,
+        "implementation_steps": steps,
+        "validation_checks": checks,
+    }
+
+
+def _strip_list_markers(value: str) -> list[str]:
+    rows = []
+    for raw in value.splitlines():
+        row = raw.strip()
+        if not row:
+            continue
+        if row.startswith("- "):
+            row = row[2:]
+        else:
+            prefix, separator, remainder = row.partition(". ")
+            if separator and prefix.isdigit():
+                row = remainder
+        rows.append(row)
+    return rows
 
 
 def _recommendation_from_work_item(

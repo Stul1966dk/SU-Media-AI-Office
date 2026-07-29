@@ -528,3 +528,20 @@ selv begynde med at skrive forslagene eller udføre den indledende analyse.
 Succeskriterium: Appens synlige brugerflader åbner uden runtime-fejl, brugeren
 efterlades ikke uden et næste trin, og hele opgave- og måleflowet består den
 fulde regression som en sammenhængende testversion.
+
+# Sprint 44.7 - Godkendt arbejdsinstruks på I dag
+
+- [x] Vis den godkendte konkrete løsning før linket til websitet.
+- [x] Vis implementeringstrin og kontrolpunkter direkte i arbejdsflowet.
+- [x] Skjul begrundelse og alternativer som sekundær information.
+- [x] Adskil tydeligt arbejdsinstruksen fra registreringen bagefter.
+- [x] Udfyld registreringsfeltet med den godkendte løsning.
+- [x] Registrér ikke en ældre opgave, før den har en konkret instruktion.
+- [x] Tilbyd AI-generering og sikker lagring af en ny arbejdsinstruks til
+  ældre godkendelser.
+- [x] Regressionstest både ældre og strukturerede godkendelser.
+- [x] Browsertest den eksisterende espresso-opgave uden runtime-fejl.
+
+Succeskriterium: Brugeren kan på I dag se præcis, hvad der skal rettes, hvordan
+ændringen udføres, og hvad der skal kontrolleres, før ændringen registreres og
+28-dages målingen startes.

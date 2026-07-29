@@ -74,6 +74,25 @@ class TrafficRecommendationWorkflow:
             },
         )
 
+    def update_approved_plan(
+        self, recommendation_key: str, *, description: str
+    ) -> dict[str, Any]:
+        """Replace a legacy approved plan with a concrete reviewed deliverable."""
+        decision = self._required(recommendation_key)
+        if decision["status"] != "approved":
+            raise ValueError("Kun en godkendt opgave kan få ny arbejdsinstruks.")
+        clean_description = description.strip()
+        if "Anbefalet løsning:\n" not in clean_description:
+            raise ValueError("Arbejdsinstruksen mangler en anbefalet løsning.")
+        return self._save_existing(
+            decision,
+            status="approved",
+            description=clean_description,
+            evidence_updates={
+                "approved_plan_updated_at": self._timestamp(),
+            },
+        )
+
     def mark_implemented(
         self,
         recommendation_key: str,
