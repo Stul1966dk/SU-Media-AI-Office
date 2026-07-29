@@ -164,6 +164,26 @@ class TrafficRecommendationWorkflow:
             snoozed_until=until.isoformat(),
         )
 
+    def snooze_decision(
+        self, recommendation_key: str, until: date
+    ) -> dict[str, Any]:
+        """Temporarily remove an existing draft or approval from I dag."""
+        if until <= date.today():
+            raise ValueError("Udsættelsesdatoen skal ligge i fremtiden.")
+        decision = self._required(recommendation_key)
+        if decision["status"] not in {"draft", "approved", "snoozed"}:
+            raise ValueError(
+                "Kun en kladde eller godkendt opgave kan udsættes."
+            )
+        return self._save_existing(
+            decision,
+            status="snoozed",
+            evidence_updates={
+                "snoozed_at": self._timestamp(),
+            },
+            snoozed_until=until.isoformat(),
+        )
+
     def reject(
         self, recommendation: dict[str, Any]
     ) -> dict[str, Any]:
@@ -219,6 +239,7 @@ class TrafficRecommendationWorkflow:
         status: str,
         description: str | None = None,
         evidence_updates: dict[str, Any] | None = None,
+        snoozed_until: str | None = None,
     ) -> dict[str, Any]:
         evidence = {
             **(decision.get("evidence") or {}),
@@ -237,7 +258,7 @@ class TrafficRecommendationWorkflow:
             ),
             "priority": decision["priority"],
             "status": status,
-            "snoozed_until": None,
+            "snoozed_until": snoozed_until,
             "evidence": evidence,
         })
         return self._required(str(decision["recommendation_key"]))

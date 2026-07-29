@@ -125,6 +125,27 @@ class RecommendationWorkflowTests(unittest.TestCase):
                 RECOMMENDATION, date.today() - timedelta(days=1)
             )
 
+    def test_approved_decision_can_be_snoozed_without_losing_content(self):
+        decision = self.workflow.create_draft(
+            RECOMMENDATION,
+            title="Bevar denne titel",
+            description="Bevar denne konkrete arbejdsinstruks.",
+        )
+        self.workflow.approve_draft(decision["recommendation_key"])
+        until = date.today() + timedelta(days=14)
+
+        snoozed = self.workflow.snooze_decision(
+            decision["recommendation_key"], until
+        )
+
+        self.assertEqual("snoozed", snoozed["status"])
+        self.assertEqual(until.isoformat(), snoozed["snoozed_until"])
+        self.assertEqual("Bevar denne titel", snoozed["title"])
+        self.assertEqual(
+            "Bevar denne konkrete arbejdsinstruks.",
+            snoozed["description"],
+        )
+
     def test_existing_open_task_blocks_duplicate_draft(self):
         database = Mock()
         database.find_open_task_by_title.return_value = {"id": 7}

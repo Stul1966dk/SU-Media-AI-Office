@@ -141,6 +141,15 @@ class ApprovedInstructionTests(unittest.TestCase):
             "Indsæt dette konkrete afsnit.",
             app.text_area[0].value,
         )
+        labels = [button.label for button in app.button]
+        self.assertTrue(any(
+            label.startswith("Udsæt til ") for label in labels
+        ))
+        self.assertIn("Vælg en anden opgave", labels)
+        visible_markdown = " ".join(
+            item.value for item in app.markdown
+        )
+        self.assertIn("Tilbage til Portefølje", visible_markdown)
 
     def test_workflow_can_upgrade_only_an_approved_plan(self) -> None:
         self._approved("Generel gammel beskrivelse.")

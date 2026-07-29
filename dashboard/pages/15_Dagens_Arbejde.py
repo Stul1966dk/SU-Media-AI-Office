@@ -49,7 +49,11 @@ import core.traffic_recommendation_store as traffic_store_module
 import core.traffic_recommendation_workflow as traffic_workflow_module
 import core.traffic_recommendations as traffic_recommendations_module
 import core.traffic_work_overview as traffic_work_module
-from dashboard.components.ui import load_styles, render_sidebar
+from dashboard.components.ui import (
+    load_styles,
+    render_page_link,
+    render_sidebar,
+)
 from dashboard.components.website_selector import set_selected_website
 
 task_deliverables_module = importlib.reload(task_deliverables_module)
@@ -575,6 +579,8 @@ def _render_approved_decision(
             help="Åbner websitet i en ny fane. AI Office ændrer intet selv.",
         )
 
+    _render_approved_escape_actions(database, item)
+
     st.markdown("### Når du har udført ændringen")
     st.caption(
         "Registrér først ændringen her, når den godkendte arbejdsinstruks "
@@ -618,6 +624,80 @@ def _render_approved_decision(
                 "Ændringen er registreret, og målingen er startet"
                 + (f" frem til {due}." if due else ".")
             )
+
+
+def _render_approved_escape_actions(
+    database: Any, item: dict[str, Any]
+) -> None:
+    """Never trap the user inside an approved task."""
+    st.markdown("### Vil du arbejde videre med noget andet?")
+    st.caption(
+        "Du kan udsætte opgaven uden at miste det godkendte forslag."
+    )
+    postpone_until = _recommended_postpone_date(
+        database, str(item.get("target_url") or "")
+    )
+    postpone_column, another_column, portfolio_column = st.columns(3)
+    if postpone_column.button(
+        f"Udsæt til {postpone_until.strftime('%d.%m.%Y')}",
+        key=f"postpone-approved-{item['recommendation_key']}",
+        help=(
+            "Skjuler opgaven indtil den aktive måling på siden er afsluttet. "
+            "Det godkendte forslag bevares."
+        ),
+    ):
+        try:
+            _workflow(database).snooze_decision(
+                str(item["recommendation_key"]), postpone_until
+            )
+        except ValueError as error:
+            st.error(str(error))
+        else:
+            _finish_daily_action(
+                f"Opgaven er udsat til {postpone_until.strftime('%d.%m.%Y')}."
+            )
+    if another_column.button(
+        "Vælg en anden opgave",
+        key=f"choose-other-{item['recommendation_key']}",
+        help=(
+            "Skjuler denne opgave til i morgen og viser den næste ledige "
+            "opgave."
+        ),
+    ):
+        tomorrow = date.today() + timedelta(days=1)
+        try:
+            _workflow(database).snooze_decision(
+                str(item["recommendation_key"]), tomorrow
+            )
+        except ValueError as error:
+            st.error(str(error))
+        else:
+            _finish_daily_action(
+                "Opgaven er gemt til senere. Her er den næste ledige opgave."
+            )
+    with portfolio_column:
+        render_page_link(
+            "pages/19_Portefolje.py",
+            label="Tilbage til Portefølje",
+        )
+
+
+def _recommended_postpone_date(database: Any, target_url: str) -> date:
+    """Prefer the active experiment's evaluation date over a fixed delay."""
+    active = database.get_seo_experiments(
+        target_url=target_url,
+        statuses=("approved", "running", "waiting_for_data",
+                  "ready_for_evaluation"),
+    )
+    dates = [
+        date.fromisoformat(str(item["planned_evaluation_date"]))
+        for item in active
+        if item.get("planned_evaluation_date")
+    ]
+    future_dates = [value for value in dates if value > date.today()]
+    return min(future_dates) if future_dates else date.today() + timedelta(
+        days=14
+    )
 
 
 def _render_approved_instruction(deliverable: dict[str, Any]) -> None:
