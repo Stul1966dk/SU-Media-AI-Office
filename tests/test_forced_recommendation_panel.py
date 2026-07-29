@@ -24,6 +24,9 @@ def load_daily_work():
 class FakeDatabase:
     connection = None
 
+    def __init__(self, locked_urls=None):
+        self.locked_urls = set(locked_urls or [])
+
     def get_latest_search_console_diagnosis(self, website_id):
         return {
             "website_id": website_id,
@@ -33,6 +36,13 @@ class FakeDatabase:
                 "queries": [{
                     "query": "test søgeord",
                     "click_loss": 9,
+                }],
+            }, {
+                "page_url": f"https://{website_id}/alternativ/",
+                "cause": "CTR-fald",
+                "queries": [{
+                    "query": "alternativt søgeord",
+                    "click_loss": 5,
                 }],
             }],
         }
@@ -48,6 +58,17 @@ class FakeDatabase:
                 "title": "Kildeside",
             },
         ]
+
+    def get_seo_experiments(self, *, target_url=None, statuses=None, **_kwargs):
+        if target_url in self.locked_urls:
+            return [{"target_url": target_url, "status": "waiting_for_data"}]
+        return []
+
+    def get_title_optimization_drafts(self):
+        return []
+
+    def get_seo_url_status(self, _target_url):
+        return []
 
 
 class ForcedRecommendationPanelTests(unittest.TestCase):
@@ -79,6 +100,31 @@ class ForcedRecommendationPanelTests(unittest.TestCase):
         self.assertIn("Afslut testtilstand", source)
         self.assertIn("FORCED_TEST_MODE_KEY", source)
         self.assertNotIn("set_setting", source)
+
+    def test_locked_page_is_skipped_for_forced_recommendation(self) -> None:
+        page = load_daily_work()
+        result = page._forced_test_recommendation(
+            FakeDatabase({"https://site.dk/maal/"}),
+            website_id="site.dk",
+            mode="content_update",
+        )
+
+        self.assertEqual(
+            "https://site.dk/alternativ/", result["target_url"]
+        )
+        self.assertEqual("alternativt søgeord", result["target_query"])
+
+    def test_no_forced_recommendation_when_every_target_is_locked(self) -> None:
+        page = load_daily_work()
+        database = FakeDatabase({
+            "https://site.dk/maal/",
+            "https://site.dk/alternativ/",
+            "https://site.dk/kilde/",
+        })
+
+        self.assertIsNone(page._forced_test_recommendation(
+            database, website_id="site.dk", mode="content_update"
+        ))
 
     def test_forced_mode_constrains_the_ai_prompt(self) -> None:
         base = {

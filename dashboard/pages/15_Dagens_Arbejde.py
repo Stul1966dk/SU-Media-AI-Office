@@ -157,6 +157,9 @@ def main() -> None:
         priority_tasks = _filter_active_site_rows(
             priority_tasks, active_ids, website_field="website"
         )
+        priority_tasks = _filter_unlocked_recommendations(
+            database, priority_tasks
+        )
         priority_tasks = traffic_recommendations_module.apply_measured_learning(
             priority_tasks, database.get_seo_learning_entries()
         )
@@ -265,8 +268,8 @@ def _render_forced_test_panel(
     )
     if recommendation is None:
         st.error(
-            "Der er ikke nok gemt Search Console- og sideindhold til denne "
-            "test. Vælg et andet aktivt website eller opdatér data."
+            "Der er ingen ledig side med tilstrækkelige data til denne test. "
+            "Sider med en aktiv måling foreslås ikke, før målingen er afsluttet."
         )
         return True
     _render_combined_traffic_task(database, recommendation)
@@ -284,7 +287,13 @@ def _forced_test_recommendation(
         database, [website_id], kind="search"
     )
     diagnosis = diagnosis_rows[0] if diagnosis_rows else {}
-    loss_pages = diagnosis.get("loss_pages") or []
+    experiments = SEOExperimentEngine(database)
+    loss_pages = [
+        row
+        for row in (diagnosis.get("loss_pages") or [])
+        if row.get("page_url")
+        and not experiments.is_url_locked(str(row["page_url"]))
+    ]
     page = next(
         (row for row in loss_pages if row.get("page_url")),
         {},
@@ -301,6 +310,9 @@ def _forced_test_recommendation(
                     row.get("url") or row.get("link")
                     for row in content_rows
                     if row.get("url") or row.get("link")
+                    if not experiments.is_url_locked(str(
+                        row.get("url") or row.get("link")
+                    ))
                 ),
                 "",
             )
@@ -398,6 +410,19 @@ def _filter_active_site_rows(
     return [
         item for item in rows
         if str(item.get(website_field) or "") in active_ids
+    ]
+
+
+def _filter_unlocked_recommendations(
+    database: Any, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Never offer a new change on a URL that is already being measured."""
+    experiments = SEOExperimentEngine(database)
+    return [
+        item
+        for item in rows
+        if not item.get("target_url")
+        or not experiments.is_url_locked(str(item["target_url"]))
     ]
 
 
