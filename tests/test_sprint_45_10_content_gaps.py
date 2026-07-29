@@ -8,6 +8,7 @@ from pathlib import Path
 from core.task_deliverables import (
     _prompt,
     format_deliverable,
+    validate_content_novelty,
     validate_task_deliverable,
 )
 from core.traffic_recommendations import build_traffic_recommendations
@@ -67,6 +68,48 @@ def payload(opportunity_type="new_article", **changes):
 
 
 class ContentGapTests(unittest.TestCase):
+    def test_rejects_text_already_present_in_current_article(self) -> None:
+        value = payload()
+
+        with self.assertRaisesRegex(ValueError, "allerede"):
+            validate_content_novelty(value, public_context=[{
+                "relation": "berørt side",
+                "content_sections": [{
+                    "element": "p",
+                    "text": value["replacement_content"],
+                }],
+            }])
+
+    def test_rejects_text_duplicated_on_another_page(self) -> None:
+        value = payload()
+
+        with self.assertRaisesRegex(ValueError, "allerede"):
+            validate_content_novelty(value, public_context=[{
+                "relation": "mulig relateret side",
+                "url": "https://site.dk/anden-side/",
+                "excerpt": value["replacement_content"],
+            }])
+
+    def test_rejects_copy_without_documented_topic(self) -> None:
+        value = payload(replacement_content=(
+            "En løbejakke beskytter mod vind og regn under træningen. "
+            "Vælg en model med ventilation, reflekser og god bevægelsesfrihed."
+        ))
+
+        with self.assertRaisesRegex(ValueError, "søgeintentionen"):
+            validate_content_novelty(value, public_context=[])
+
+    def test_accepts_new_relevant_copy(self) -> None:
+        value = payload()
+
+        validate_content_novelty(value, public_context=[{
+            "relation": "berørt side",
+            "content_sections": [{
+                "element": "p",
+                "text": "Kalenderen kan deles med andre personer.",
+            }],
+        }])
+
     def test_new_article_requires_complete_brief_and_finished_copy(self) -> None:
         result = validate_task_deliverable(json.dumps(
             payload(), ensure_ascii=False

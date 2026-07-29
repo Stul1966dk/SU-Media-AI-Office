@@ -72,6 +72,7 @@ generate_task_deliverable = task_deliverables_module.generate_task_deliverable
 prefer_pipe_separator = task_deliverables_module.prefer_pipe_separator
 split_title_meta_option = task_deliverables_module.split_title_meta_option
 validate_content_change = task_deliverables_module.validate_content_change
+validate_content_novelty = task_deliverables_module.validate_content_novelty
 validate_internal_link = task_deliverables_module.validate_internal_link
 
 
@@ -1308,7 +1309,12 @@ def _generate_deliverable(
                     "som samtidig er fri for aktive opgaver eller målinger. "
                     "Der vises derfor ikke et usikkert linkforslag."
                 )
-        for row in candidate_rows[:8]:
+        context_rows = (
+            candidate_rows[:8]
+            if item.get("experiment_type") == "internal_links"
+            else candidate_rows
+        )
+        for row in context_rows:
             public_context.append({
                 "relation": "mulig relateret side",
                 "title": row.get("title", ""),
@@ -1325,9 +1331,14 @@ def _generate_deliverable(
             item, ai_service=AIService(), public_context=public_context
         ), False
     except Exception:
-        return fallback_task_deliverable(
+        fallback = fallback_task_deliverable(
             item, public_context=public_context
-        ), True
+        )
+        if fallback["deliverable_type"] == "content_update":
+            validate_content_novelty(
+                fallback, public_context=public_context
+            )
+        return fallback, True
 
 
 def _usable_content_excerpt(row: dict[str, Any]) -> str:

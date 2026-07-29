@@ -25,7 +25,7 @@ def generate_task_deliverable(
         _prompt(recommendation, public_context or [])
     )
     context = public_context or []
-    return validate_task_deliverable(
+    deliverable = validate_task_deliverable(
         response.text,
         expected_target_url=str(recommendation.get("target_url") or ""),
         allowed_source_urls=[
@@ -35,6 +35,12 @@ def generate_task_deliverable(
             and row.get("url")
         ],
     )
+    if deliverable["deliverable_type"] == "content_update":
+        validate_content_novelty(
+            deliverable,
+            public_context=context,
+        )
+    return deliverable
 
 
 def validate_task_deliverable(
@@ -145,6 +151,85 @@ def validate_content_change(value: dict[str, Any]) -> None:
         value["outline"] = [
             str(row).strip() for row in outline if str(row).strip()
         ]
+
+
+def validate_content_novelty(
+    value: dict[str, Any],
+    *,
+    public_context: list[dict[str, Any]],
+) -> None:
+    """Reject irrelevant or substantially duplicated website copy."""
+    replacement = str(value.get("replacement_content") or "")
+    replacement_tokens = _content_tokens(replacement)
+    topic_material = " ".join((
+        str(value.get("missing_topic") or ""),
+        str(value.get("search_intent") or ""),
+        " ".join(str(item) for item in value.get("evidence_queries") or []),
+    ))
+    topic_tokens = _content_tokens(topic_material) - CONTENT_STOPWORDS
+    meaningful_replacement = replacement_tokens - CONTENT_STOPWORDS
+    if topic_tokens and not topic_tokens & meaningful_replacement:
+        raise ValueError(
+            "Den foreslåede tekst matcher ikke det dokumenterede emne eller "
+            "søgeintentionen."
+        )
+    normalized_replacement = _normalized_content_text(replacement)
+    for row in public_context:
+        existing = _context_content(row)
+        if not existing:
+            continue
+        normalized_existing = _normalized_content_text(existing)
+        if (
+            len(normalized_replacement) >= 80
+            and normalized_replacement in normalized_existing
+        ):
+            raise ValueError(
+                "Den foreslåede tekst findes allerede i websiteindholdet."
+            )
+        existing_tokens = _content_tokens(existing)
+        if len(replacement_tokens) < 8 or len(existing_tokens) < 8:
+            continue
+        similarity = len(replacement_tokens & existing_tokens) / max(
+            1, len(replacement_tokens | existing_tokens)
+        )
+        if similarity >= 0.82:
+            raise ValueError(
+                "Den foreslåede tekst ligner eksisterende websiteindhold "
+                "for meget."
+            )
+
+
+CONTENT_STOPWORDS = {
+    "alle", "anden", "andre", "at", "den", "der", "det", "din", "dit",
+    "du", "eller", "en", "er", "et", "for", "fra", "har", "i", "ikke",
+    "kan", "med", "og", "om", "på", "se", "sig", "som", "til", "ved",
+}
+
+
+def _normalized_content_text(value: str) -> str:
+    return " ".join(re.findall(
+        r"[0-9a-zæøå]+", str(value or "").casefold()
+    ))
+
+
+def _content_tokens(value: str) -> set[str]:
+    return set(_normalized_content_text(value).split())
+
+
+def _context_content(row: dict[str, Any]) -> str:
+    sections = row.get("content_sections") or []
+    section_text = " ".join(
+        str(item.get("text") or "")
+        for item in sections
+        if isinstance(item, dict)
+    )
+    return " ".join((
+        str(row.get("title") or ""),
+        str(row.get("h1") or ""),
+        str(row.get("content_excerpt") or ""),
+        str(row.get("excerpt") or ""),
+        section_text,
+    )).strip()
 
 
 def validate_internal_link(
