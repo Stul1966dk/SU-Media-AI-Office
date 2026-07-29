@@ -102,7 +102,7 @@ class TaskDeliverableTests(unittest.TestCase):
 
         self.assertNotIn("Lav konkret arbejdsudkast", action_source)
         self.assertIn("AI Office udarbejder det konkrete forslag", action_source)
-        self.assertIn("AI's konkrete forslag", action_source)
+        self.assertIn('st.markdown("### Forslag")', action_source)
         self.assertIn("Godkend forslag", action_source)
         self.assertNotIn('"Godkend opgave"', action_source)
         self.assertIn("analyze_current_snippet", source)

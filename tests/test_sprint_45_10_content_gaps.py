@@ -208,8 +208,8 @@ class ContentGapTests(unittest.TestCase):
         self.assertIn("Ny artikel", source)
         self.assertIn("Nyt blogindlæg", source)
         self.assertIn("Manglende emne", source)
-        self.assertIn("Dublet- og kannibaliseringskontrol", source)
-        self.assertIn("Disposition – ét punkt pr. linje", source)
+        self.assertIn("**Dubletkontrol:**", source)
+        self.assertIn('st.write("**Disposition**")', source)
 
 
 if __name__ == "__main__":

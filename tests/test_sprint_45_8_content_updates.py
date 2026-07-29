@@ -230,9 +230,12 @@ class ContentUpdateDeliverableTests(unittest.TestCase):
         source = DAILY_WORK.read_text(encoding="utf-8")
 
         self.assertIn("def _render_content_update(", source)
+        self.assertIn("def _render_compact_content_approval(", source)
         self.assertIn('st.write("**Placering på siden**")', source)
         self.assertIn("**Erstat denne eksisterende tekst**", source)
         self.assertIn("**Med denne færdige tekst**", source)
+        self.assertIn('with st.expander("Redigér før godkendelse")', source)
+        self.assertIn('"approve-content-direct-', source)
         self.assertIn('"Ny færdig tekst",', source)
         self.assertIn("validate_content_change(reviewed)", source)
 

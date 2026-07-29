@@ -658,17 +658,10 @@ def _render_content_update(deliverable: dict[str, Any]) -> None:
         "new_article": "Ny artikel",
         "new_blog_post": "Nyt blogindlæg",
     }
-    st.write("**Anbefalet indholdstype**")
-    st.info(labels.get(
+    st.caption(labels.get(
         str(deliverable.get("content_opportunity_type")),
         "Ukendt indholdstype",
     ))
-    st.write(f"**Manglende emne:** {deliverable.get('missing_topic')}")
-    st.write(
-        "**Search Console-evidens:** "
-        + ", ".join(deliverable.get("evidence_queries") or [])
-    )
-    st.write(f"**Dubletkontrol:** {deliverable.get('duplication_check')}")
     if deliverable.get("content_opportunity_type") != "existing_section":
         st.write("**Foreslået titel**")
         st.code(
@@ -690,16 +683,13 @@ def _render_content_update(deliverable: dict[str, Any]) -> None:
     is_new_section = str(deliverable.get("current_content") or "").startswith(
         "Ny sektion"
     )
-    st.write(
-        "**Ny sektion – der er ingen tekst, som skal erstattes**"
-        if is_new_section
-        else "**Erstat denne eksisterende tekst**"
-    )
-    st.code(
-        str(deliverable.get("current_content") or "Ikke identificeret"),
-        language=None,
-        wrap_lines=True,
-    )
+    if not is_new_section:
+        st.write("**Erstat denne eksisterende tekst**")
+        st.code(
+            str(deliverable.get("current_content") or "Ikke identificeret"),
+            language=None,
+            wrap_lines=True,
+        )
     st.write(
         "**Indsæt denne nye tekst**"
         if is_new_section
@@ -715,8 +705,14 @@ def _render_content_update(deliverable: dict[str, Any]) -> None:
         wrap_lines=True,
     )
     st.caption("Brug kopiér-knappen i feltet med den nye tekst.")
-    st.write("**Søgeintention**")
-    st.write(str(deliverable.get("search_intent") or "Ikke angivet"))
+    with st.expander("Se datagrundlag"):
+        st.write(f"**Manglende emne:** {deliverable.get('missing_topic')}")
+        st.write(
+            "**Search Console-evidens:** "
+            + ", ".join(deliverable.get("evidence_queries") or [])
+        )
+        st.write(f"**Søgeintention:** {deliverable.get('search_intent')}")
+        st.write(f"**Dubletkontrol:** {deliverable.get('duplication_check')}")
 
 
 def _render_internal_link(deliverable: dict[str, Any]) -> None:
@@ -1028,31 +1024,20 @@ def _render_combined_traffic_task(
 ) -> None:
     with st.container(border=True):
         st.subheader(item["description"])
-        st.write(f"**Prioritet:** {item['priority']}")
-        st.write(f"**Website:** {item['website']}")
-        if item.get("target_url"):
-            st.write("**Side der skal rettes:**")
-            st.markdown(
-                f"[{item['target_url']}]({item['target_url']})"
-            )
-        st.markdown("### Det forbereder AI Office")
-        st.write(item.get("recommended_action") or item["description"])
-        st.info(
-            "Du skal ikke selv udarbejde forslaget. AI Office viser det "
-            "konkrete forslag nedenfor, så du kan kontrollere, redigere "
-            "og godkende det."
-        )
-        if item.get("completion_criterion"):
-            st.write(
-                f"**Færdig når:** {item['completion_criterion']}"
-            )
-        if item.get("measurement_method"):
-            st.write(f"**Måling:** {item['measurement_method']}")
+        details = [str(item["website"]), str(item["priority"])]
         if item.get("estimated_minutes"):
-            st.write(
-                f"**Forventet tid:** {item['estimated_minutes']} minutter"
+            details.append(f"{item['estimated_minutes']} minutter")
+        st.caption(" · ".join(details))
+        if item.get("target_url"):
+            st.markdown(
+                f"**Side:** [{item['target_url']}]({item['target_url']})"
             )
-        with st.expander("Se datagrundlag og forklaring"):
+        with st.expander("Se opgaveforklaring og måling"):
+            st.write(item.get("recommended_action") or item["description"])
+            if item.get("completion_criterion"):
+                st.write(f"**Færdig når:** {item['completion_criterion']}")
+            if item.get("measurement_method"):
+                st.write(f"**Måling:** {item['measurement_method']}")
             st.write(
                 "**Plausible-ændring:** "
                 f"{float(item['plausible_change']):.1f} %".replace(".", ",")
@@ -1071,7 +1056,6 @@ def _render_combined_traffic_task(
                     f"**Læring fra tidligere målinger:** "
                     f"{item['learning_summary']}"
                 )
-        st.markdown("### Næste trin")
         _render_new_decision_actions(database, item)
     _render_priority_explanation(item)
 
@@ -1168,24 +1152,26 @@ def _render_deliverable_for_approval(
     state_key: str,
 ) -> None:
     """Show the actual output before allowing an approval."""
-    st.subheader("AI's konkrete forslag")
-    st.write(f"**AI Offices anbefaling:** {deliverable['summary']}")
+    st.markdown("### Forslag")
     _render_deliverable_option(deliverable)
-    st.write(f"**Hvorfor:** {deliverable['rationale']}")
-    with st.expander("Se alternativer"):
-        for index, alternative in enumerate(
-            deliverable["alternatives"], start=1
-        ):
+    with st.expander("Se begrundelse, alternativer og kontrol"):
+        st.write(f"**Hvorfor:** {deliverable['rationale']}")
+        st.write("**Alternativer:**")
+        for index, alternative in enumerate(deliverable["alternatives"], 1):
             st.write(f"{index}. {alternative}")
-    with st.expander("Se implementering og kontrol"):
-        st.write("**Sådan implementeres den manuelt:**")
+        st.write("**Implementering:**")
         for index, step in enumerate(
-            deliverable["implementation_steps"], start=1
+            deliverable["implementation_steps"], 1
         ):
             st.write(f"{index}. {step}")
-        st.write("**Kontrollér før godkendelse:**")
+        st.write("**Kontrol før godkendelse:**")
         for check in deliverable["validation_checks"]:
             st.write(f"- {check}")
+    if deliverable["deliverable_type"] == "content_update":
+        _render_compact_content_approval(
+            database, item, title, deliverable, state_key
+        )
+        return
     with st.form(f"approve-deliverable-{item['task_key']}"):
         edited_title = st.text_input("Opgavetitel", value=title)
         if deliverable["deliverable_type"] == "title_meta":
@@ -1204,88 +1190,6 @@ def _render_deliverable_for_approval(
                 edited_snippet_title, edited_snippet_meta
             )
             reviewed_fields = {}
-        elif deliverable["deliverable_type"] == "content_update":
-            type_options = {
-                "Udbyg eksisterende side": "existing_section",
-                "Ny kategoritekst": "new_category",
-                "Ny artikel": "new_article",
-                "Nyt blogindlæg": "new_blog_post",
-            }
-            current_type = str(deliverable["content_opportunity_type"])
-            edited_type_label = st.selectbox(
-                "Indholdstype",
-                list(type_options),
-                index=list(type_options.values()).index(current_type),
-            )
-            edited_topic = st.text_input(
-                "Manglende emne",
-                value=deliverable["missing_topic"],
-            )
-            edited_queries = st.text_input(
-                "Search Console-søgeord",
-                value=", ".join(deliverable["evidence_queries"]),
-            )
-            edited_duplication = st.text_area(
-                "Dublet- og kannibaliseringskontrol",
-                value=deliverable["duplication_check"],
-                height=100,
-            )
-            edited_location = st.text_input(
-                "Placering på siden",
-                value=deliverable["content_location"],
-                help="Angiv den præcise overskrift eller passage.",
-            )
-            edited_current = st.text_area(
-                "Nuværende tekst",
-                value=deliverable["current_content"],
-                height=120,
-            )
-            edited_replacement = st.text_area(
-                "Ny færdig tekst",
-                value=deliverable["replacement_content"],
-                height=260,
-                help="Dette er teksten, der skal kunne kopieres direkte.",
-            )
-            edited_intent = st.text_area(
-                "Søgeintention",
-                value=deliverable["search_intent"],
-                height=90,
-            )
-            edited_proposed_title = st.text_input(
-                "Foreslået titel til nyt indhold",
-                value=deliverable.get("proposed_title") or "",
-            )
-            edited_slug = st.text_input(
-                "Foreslået URL til nyt indhold",
-                value=deliverable.get("proposed_slug") or "",
-            )
-            edited_outline = st.text_area(
-                "Disposition – ét punkt pr. linje",
-                value="\n".join(deliverable.get("outline") or []),
-                height=140,
-            )
-            edited_solution = edited_replacement
-            reviewed_fields = {
-                "content_location": edited_location,
-                "current_content": edited_current,
-                "replacement_content": edited_replacement,
-                "search_intent": edited_intent,
-                "content_opportunity_type": type_options[
-                    edited_type_label
-                ],
-                "missing_topic": edited_topic,
-                "evidence_queries": [
-                    query.strip() for query in edited_queries.split(",")
-                    if query.strip()
-                ],
-                "duplication_check": edited_duplication,
-                "proposed_title": edited_proposed_title,
-                "proposed_slug": edited_slug,
-                "outline": [
-                    row.strip() for row in edited_outline.splitlines()
-                    if row.strip()
-                ],
-            }
         elif deliverable["deliverable_type"] == "internal_links":
             edited_source = st.text_input(
                 "Kildeside",
@@ -1368,6 +1272,69 @@ def _render_deliverable_for_approval(
         "Lav et nyt forslag",
         key=f"regenerate-{item['task_key']}",
         help="Kasserer det viste udkast og genererer et nyt.",
+    ):
+        st.session_state.pop(state_key, None)
+        st.session_state.pop(f"{state_key}:fallback", None)
+        st.rerun()
+
+
+def _render_compact_content_approval(
+    database: Any,
+    item: dict[str, Any],
+    title: str,
+    deliverable: dict[str, Any],
+    state_key: str,
+) -> None:
+    """Approve directly and keep duplicate editing fields collapsed."""
+    if st.button(
+        "Godkend forslag",
+        type="primary",
+        key=f"approve-content-direct-{item['task_key']}",
+        help="Godkender det viste forslag uden at publicere noget.",
+    ):
+        _create_and_approve(
+            database, item, title, format_deliverable(deliverable)
+        )
+    with st.expander("Redigér før godkendelse"):
+        with st.form(f"edit-content-deliverable-{item['task_key']}"):
+            edited_title = st.text_input("Opgavetitel", value=title)
+            edited_location = st.text_input(
+                "Placering på siden",
+                value=deliverable["content_location"],
+            )
+            edited_current = st.text_area(
+                "Eksisterende tekst",
+                value=deliverable["current_content"],
+                height=100,
+            )
+            edited_replacement = st.text_area(
+                "Ny færdig tekst",
+                value=deliverable["replacement_content"],
+                height=220,
+            )
+            edited = st.form_submit_button(
+                "Gem ændringer og godkend", type="primary"
+            )
+        if edited:
+            reviewed = {
+                **deliverable,
+                "content_location": edited_location,
+                "current_content": edited_current,
+                "replacement_content": edited_replacement,
+                "recommended_option": edited_replacement,
+            }
+            try:
+                validate_content_change(reviewed)
+            except ValueError as error:
+                st.error(str(error))
+            else:
+                _create_and_approve(
+                    database, item, edited_title, format_deliverable(reviewed)
+                )
+    if st.button(
+        "Lav et nyt forslag",
+        key=f"regenerate-{item['task_key']}",
+        help="Kasserer det viste forslag og genererer et nyt.",
     ):
         st.session_state.pop(state_key, None)
         st.session_state.pop(f"{state_key}:fallback", None)
