@@ -687,13 +687,24 @@ def _render_content_update(deliverable: dict[str, Any]) -> None:
             st.write(f"{index}. {row}")
     st.write("**Placering på siden**")
     st.info(str(deliverable.get("content_location") or "Ikke angivet"))
-    st.write("**Nuværende tekst**")
+    is_new_section = str(deliverable.get("current_content") or "").startswith(
+        "Ny sektion"
+    )
+    st.write(
+        "**Ny sektion – der er ingen tekst, som skal erstattes**"
+        if is_new_section
+        else "**Erstat denne eksisterende tekst**"
+    )
     st.code(
         str(deliverable.get("current_content") or "Ikke identificeret"),
         language=None,
         wrap_lines=True,
     )
-    st.write("**Ny færdig tekst**")
+    st.write(
+        "**Indsæt denne nye tekst**"
+        if is_new_section
+        else "**Med denne færdige tekst**"
+    )
     st.code(
         str(
             deliverable.get("replacement_content")
@@ -1019,12 +1030,17 @@ def _render_combined_traffic_task(
         st.subheader(item["description"])
         st.write(f"**Prioritet:** {item['priority']}")
         st.write(f"**Website:** {item['website']}")
+        if item.get("target_url"):
+            st.write("**Side der skal rettes:**")
+            st.markdown(
+                f"[{item['target_url']}]({item['target_url']})"
+            )
         st.markdown("### Det forbereder AI Office")
         st.write(item.get("recommended_action") or item["description"])
         st.info(
-            "Du skal ikke selv udarbejde forslagene. AI Office producerer "
-            "først et konkret arbejdsudkast, som du kan kontrollere, "
-            "redigere og godkende."
+            "Du skal ikke selv udarbejde forslaget. AI Office viser det "
+            "konkrete forslag nedenfor, så du kan kontrollere, redigere "
+            "og godkende det."
         )
         if item.get("completion_criterion"):
             st.write(
@@ -1067,32 +1083,21 @@ def _render_new_decision_actions(
     key = str(item["task_key"])
     state_key = f"task-deliverable:{key}"
     if state_key not in st.session_state:
-        if st.button(
-            "Lav konkret arbejdsudkast",
-            type="primary",
-            key=f"generate-deliverable-{key}",
-            help=(
-                "AI Office producerer forslagene. Intet godkendes eller "
-                "ændres på websitet endnu."
-            ),
-        ):
-            with st.spinner("AI Office udarbejder det konkrete forslag…"):
-                deliverable, used_fallback = _generate_deliverable(
-                    database, item
-                )
-            st.session_state[state_key] = deliverable
-            st.session_state[f"{state_key}:fallback"] = used_fallback
-            st.rerun()
-    else:
-        deliverable = st.session_state[state_key]
-        if st.session_state.get(f"{state_key}:fallback"):
-            st.warning(
-                "AI-forbindelsen var ikke tilgængelig. Udkastet er lavet "
-                "med faste regler og bør kontrolleres ekstra grundigt."
+        with st.spinner("AI Office udarbejder det konkrete forslag…"):
+            deliverable, used_fallback = _generate_deliverable(
+                database, item
             )
-        _render_deliverable_for_approval(
-            database, item, title, deliverable, state_key
+        st.session_state[state_key] = deliverable
+        st.session_state[f"{state_key}:fallback"] = used_fallback
+    deliverable = st.session_state[state_key]
+    if st.session_state.get(f"{state_key}:fallback"):
+        st.warning(
+            "AI-forbindelsen var ikke tilgængelig. Forslaget er lavet "
+            "med faste regler og bør kontrolleres ekstra grundigt."
         )
+    _render_deliverable_for_approval(
+        database, item, title, deliverable, state_key
+    )
     snooze_column, reject_column = st.columns(2)
     if snooze_column.button(
         "Udsæt 14 dage",
@@ -1163,7 +1168,7 @@ def _render_deliverable_for_approval(
     state_key: str,
 ) -> None:
     """Show the actual output before allowing an approval."""
-    st.subheader("Konkret arbejdsudkast")
+    st.subheader("AI's konkrete forslag")
     st.write(f"**AI Offices anbefaling:** {deliverable['summary']}")
     _render_deliverable_option(deliverable)
     st.write(f"**Hvorfor:** {deliverable['rationale']}")
@@ -1334,9 +1339,7 @@ def _render_deliverable_for_approval(
                 ),
             )
             reviewed_fields = {}
-        approved = st.form_submit_button(
-            "Godkend arbejdsudkast", type="primary"
-        )
+        approved = st.form_submit_button("Godkend forslag", type="primary")
     if approved:
         reviewed = {
             **deliverable,

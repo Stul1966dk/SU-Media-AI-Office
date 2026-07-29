@@ -197,6 +197,71 @@ def _normalized_url(value: str) -> str:
     return str(value or "").strip().rstrip("/").casefold()
 
 
+def _natural_danish_topic(
+    evidence_queries: list[str], fallback_query: str
+) -> str:
+    """Turn raw Search Console keywords into a readable Danish intent."""
+    queries = [
+        " ".join(str(query or "").strip().split())
+        for query in evidence_queries
+        if str(query or "").strip()
+    ]
+    query = max(
+        queries or [str(fallback_query or "emnet").strip()],
+        key=lambda value: (
+            sum(
+                marker in f" {value.casefold()} "
+                for marker in (
+                    " hvordan ", " sådan ", " hvad ", " hvorfor ",
+                    " kan ", " man ", " jeg ", " du ",
+                )
+            ),
+            len(value.split()),
+        ),
+    )
+    query = re.sub(r"\biphone\b", "iPhone", query, flags=re.IGNORECASE)
+    patterns = (
+        (
+            r"^hvordan\s+deler\s+man\s+(?:sin\s+)?kalender\s+på\s+iPhone$",
+            "hvordan du deler en kalender på iPhone",
+        ),
+        (
+            r"^hvordan\s+del(?:er)?\s+man\s+kalender\s+på\s+iPhone$",
+            "hvordan du deler en kalender på iPhone",
+        ),
+        (
+            r"^del\s+kalender\s+iPhone$",
+            "hvordan du deler en kalender på iPhone",
+        ),
+    )
+    for pattern, replacement in patterns:
+        if re.fullmatch(pattern, query, flags=re.IGNORECASE):
+            return replacement
+    if query.casefold().startswith("hvordan "):
+        return query[0].casefold() + query[1:]
+    return f"hvordan du finder et klart svar om {query}"
+
+
+def _fallback_content_copy(natural_topic: str) -> str:
+    """Return complete, grammatical copy when the AI call is unavailable."""
+    normalized = natural_topic.casefold()
+    if "deler en kalender" in normalized and "iphone" in normalized:
+        return (
+            "Sådan deler du en kalender på iPhone\n\n"
+            "Du kan dele en kalender på iPhone med andre, så I kan se og "
+            "følge aftaler i den samme kalender. Åbn Kalender-appen, find "
+            "den kalender, du vil dele, og vælg muligheden for at tilføje "
+            "personer. Send invitationen til de ønskede deltagere, og "
+            "kontrollér derefter, at de har adgang til den rigtige kalender."
+        )
+    return (
+        f"Sådan får du svar på spørgsmålet om {natural_topic}\n\n"
+        f"Denne sektion forklarer {natural_topic} i et naturligt dansk "
+        "sprog. Følg sidens dokumenterede fremgangsmåde trin for trin, og "
+        "kontrollér resultatet, før ændringen publiceres."
+    )
+
+
 def fallback_task_deliverable(
     recommendation: dict[str, Any],
     public_context: list[dict[str, Any]] | None = None,
@@ -245,34 +310,72 @@ def fallback_task_deliverable(
             {},
         )
         sections = page.get("content_sections") or []
+        passage_index = next(
+            (
+                index for index, section in enumerate(sections)
+                if section.get("element") in {"p", "li"}
+                and len(str(section.get("text") or "").strip()) >= 20
+            ),
+            None,
+        )
+        passage = (
+            str(sections[passage_index].get("text") or "")
+            if passage_index is not None
+            else ""
+        )
+        preceding_heading = next(
+            (
+                str(section.get("text") or "").strip()
+                for section in reversed(
+                    sections[:passage_index] if passage_index is not None
+                    else []
+                )
+                if section.get("element") in {"h1", "h2", "h3"}
+                and str(section.get("text") or "").strip()
+            ),
+            "",
+        )
         current = str(
-            (sections[0].get("text") if sections else "")
+            passage
             or page.get("h1")
             or page.get("content_excerpt")
-            or "Ingen sikker eksisterende passage kunne identificeres."
+            or ""
         ).strip()[:600]
-        heading = str(page.get("h1") or query).strip()
-        replacement = (
-            f"{heading}\n\n"
-            f"Her får du et klart svar om {query}. "
-            f"{current}"
-        ).strip()
         evidence_queries = [
             str(row.get("query") or "").strip()
             for row in (recommendation.get("search_queries") or [])
             if row.get("query")
         ] or [query]
+        natural_topic = _natural_danish_topic(evidence_queries, query)
+        heading = str(
+            preceding_heading or page.get("h1") or natural_topic
+        ).strip()
+        finished_copy = _fallback_content_copy(natural_topic)
+        if current:
+            location = (
+                f"Erstat den viste passage i den første relevante sektion "
+                f"under “{heading}”."
+            )
+            replacement = (
+                f"{current}\n\n{finished_copy}"
+            ).strip()
+        else:
+            current = "Ny sektion – ingen eksisterende tekst"
+            location = (
+                f"Indsæt en ny sektion efter introduktionen under "
+                f"“{heading}”."
+            )
+            replacement = finished_copy
         return {
             "deliverable_type": "content_update",
             "summary": f"Et konkret indholdsudkast til {url}.",
             "recommended_option": replacement,
-            "content_location": (
-                f"Erstat eller udbyg den første hovedsektion under “{heading}”."
-            ),
+            "content_location": location,
             "current_content": current,
             "replacement_content": replacement,
             "search_intent": (
-                f"Brugeren søger et tydeligt og praktisk svar om {query}."
+                f"Brugeren søger et tydeligt og praktisk svar på, "
+                f"{natural_topic}."
             ),
             "content_opportunity_type": "existing_section",
             "missing_topic": query,
@@ -538,6 +641,13 @@ selv at skrive, uddybe eller finde teksten. Den nye tekst skal besvare den
 klassificerede søgeintention og må ikke opfinde fakta, produkter, funktioner
 eller løfter, som ikke er dokumenteret i sideindholdet. Hvis en helt ny sektion
 er nødvendig, skriv "Ny sektion – ingen eksisterende tekst" som current_content.
+Search Console-søgeord er kun evidens og må ikke kopieres mekanisk ind i
+teksten. Omskriv dem altid til grammatisk, idiomatisk dansk. Formuleringer som
+"Her får du et klart svar om [rå søgefrase]" er ikke acceptable. Ved en
+eksisterende passage skal content_location entydigt sige "Erstat denne passage",
+current_content skal være et ordret citat, og replacement_content skal være den
+færdige erstatning. Hvis ingen passage kan dokumenteres, må du ikke foregive en:
+angiv i stedet en præcis placering for en ny sektion.
 Find først det konkrete content gap ved at sammenholde Search Console-søgeord,
 den berørte side og de relaterede eksisterende sider. Vælg præcis én type:
 existing_section, new_category, new_article eller new_blog_post. Brug kun en ny

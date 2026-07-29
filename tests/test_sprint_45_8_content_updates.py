@@ -145,6 +145,79 @@ class ContentUpdateDeliverableTests(unittest.TestCase):
         self.assertGreaterEqual(len(result["replacement_content"]), 80)
         self.assertTrue(result["content_location"])
 
+    def test_fallback_quotes_paragraph_instead_of_page_heading(self) -> None:
+        result = fallback_task_deliverable(
+            {
+                "website": "site.dk",
+                "target_url": "https://site.dk/guide/",
+                "target_query": "del kalender iphone",
+                "measured_cause": "Placeringsfald",
+            },
+            public_context=[{
+                "relation": "berørt side",
+                "h1": "Kalenderdeling",
+                "content_sections": [
+                    {"element": "h1", "text": "Kalenderdeling"},
+                    {"element": "h2", "text": "Del kalenderen"},
+                    {
+                        "element": "p",
+                        "text": "Åbn Kalender-appen på din iPhone.",
+                    },
+                ],
+            }],
+        )
+
+        self.assertEqual(
+            "Åbn Kalender-appen på din iPhone.",
+            result["current_content"],
+        )
+        self.assertIn("under “Del kalenderen”", result["content_location"])
+
+    def test_raw_search_console_phrase_is_naturalized_in_fallback(self) -> None:
+        result = fallback_task_deliverable(
+            {
+                "website": "site.dk",
+                "target_url": "https://site.dk/guide/",
+                "target_query": "del kalender iphone",
+                "search_queries": [
+                    {"query": "del kalender iphone"},
+                    {"query": "hvordan deler man kalender på iphone"},
+                ],
+                "measured_cause": "Placeringsfald",
+            },
+            public_context=[{
+                "relation": "berørt side",
+                "h1": "Sådan deler du kalenderen",
+                "content_sections": [{
+                    "element": "p",
+                    "text": "Åbn Kalender-appen på din iPhone.",
+                }],
+            }],
+        )
+
+        replacement = result["replacement_content"]
+        self.assertNotIn("klart svar om del kalender iphone", replacement)
+        self.assertIn("Sådan deler du en kalender på iPhone", replacement)
+        self.assertIn("Åbn Kalender-appen", replacement)
+        self.assertIn("Erstat den viste passage", result["content_location"])
+
+    def test_fallback_marks_a_new_section_when_no_passage_exists(self) -> None:
+        result = fallback_task_deliverable(
+            {
+                "website": "site.dk",
+                "target_url": "https://site.dk/guide/",
+                "target_query": "del kalender iphone",
+                "measured_cause": "Placeringsfald",
+            },
+            public_context=[],
+        )
+
+        self.assertEqual(
+            "Ny sektion – ingen eksisterende tekst",
+            result["current_content"],
+        )
+        self.assertIn("Indsæt en ny sektion", result["content_location"])
+
     def test_formatted_delivery_persists_structured_content(self) -> None:
         description = format_deliverable(content_payload())
 
@@ -158,8 +231,8 @@ class ContentUpdateDeliverableTests(unittest.TestCase):
 
         self.assertIn("def _render_content_update(", source)
         self.assertIn('st.write("**Placering på siden**")', source)
-        self.assertIn('st.write("**Nuværende tekst**")', source)
-        self.assertIn('st.write("**Ny færdig tekst**")', source)
+        self.assertIn("**Erstat denne eksisterende tekst**", source)
+        self.assertIn("**Med denne færdige tekst**", source)
         self.assertIn('"Ny færdig tekst",', source)
         self.assertIn("validate_content_change(reviewed)", source)
 

@@ -100,9 +100,10 @@ class TaskDeliverableTests(unittest.TestCase):
             "def _render_new_decision_actions(", 1
         )[1].split("def _create_and_approve(", 1)[0]
 
-        self.assertIn("Lav konkret arbejdsudkast", action_source)
-        self.assertIn("Konkret arbejdsudkast", action_source)
-        self.assertIn("Godkend arbejdsudkast", action_source)
+        self.assertNotIn("Lav konkret arbejdsudkast", action_source)
+        self.assertIn("AI Office udarbejder det konkrete forslag", action_source)
+        self.assertIn("AI's konkrete forslag", action_source)
+        self.assertIn("Godkend forslag", action_source)
         self.assertNotIn('"Godkend opgave"', action_source)
         self.assertIn("analyze_current_snippet", source)
         self.assertIn('"relation": "berørt side"', source)
