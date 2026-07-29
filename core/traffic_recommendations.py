@@ -190,6 +190,14 @@ def _search_fields(
         "estimated_minutes": plan["estimated_minutes"],
         "target_url": page.get("page_url", ""),
         "target_query": plan["target_query"],
+        "search_queries": [
+            {
+                "query": str(row.get("query") or ""),
+                "click_loss": int(row.get("click_loss") or 0),
+            }
+            for row in (page.get("queries") or [])[:10]
+            if row.get("query")
+        ],
         "measured_cause": page.get("cause", ""),
         "click_change": click_change,
         "ctr_change": _point_change(

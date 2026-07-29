@@ -93,7 +93,8 @@ def validate_content_change(value: dict[str, Any]) -> None:
     """Require a paste-ready, grounded content change."""
     required = (
         "content_location", "current_content", "replacement_content",
-        "search_intent",
+        "search_intent", "content_opportunity_type", "missing_topic",
+        "duplication_check",
     )
     for field in required:
         if not str(value.get(field) or "").strip():
@@ -114,6 +115,36 @@ def validate_content_change(value: dict[str, Any]) -> None:
         raise ValueError(
             "Indholdsopdateringen beder brugeren skrive teksten selv."
         )
+    allowed = {
+        "existing_section", "new_category", "new_article", "new_blog_post",
+    }
+    if value["content_opportunity_type"] not in allowed:
+        raise ValueError("Indholdsleverancen har en ukendt indholdstype.")
+    evidence = value.get("evidence_queries")
+    if not isinstance(evidence, list) or not any(
+        str(query).strip() for query in evidence
+    ):
+        raise ValueError(
+            "Indholdsleverancen mangler Search Console-søgeord som evidens."
+        )
+    value["evidence_queries"] = [
+        str(query).strip() for query in evidence if str(query).strip()
+    ][:10]
+    if value["content_opportunity_type"] != "existing_section":
+        for field in ("proposed_title", "proposed_slug"):
+            if not str(value.get(field) or "").strip():
+                raise ValueError(
+                    f"Det nye indhold mangler det konkrete felt {field}."
+                )
+            value[field] = str(value[field]).strip()
+        outline = value.get("outline")
+        if not isinstance(outline, list) or len(outline) < 3:
+            raise ValueError(
+                "Det nye indhold skal have en disposition med mindst tre punkter."
+            )
+        value["outline"] = [
+            str(row).strip() for row in outline if str(row).strip()
+        ]
 
 
 def validate_internal_link(
@@ -226,6 +257,11 @@ def fallback_task_deliverable(
             f"Her får du et klart svar om {query}. "
             f"{current}"
         ).strip()
+        evidence_queries = [
+            str(row.get("query") or "").strip()
+            for row in (recommendation.get("search_queries") or [])
+            if row.get("query")
+        ] or [query]
         return {
             "deliverable_type": "content_update",
             "summary": f"Et konkret indholdsudkast til {url}.",
@@ -238,6 +274,15 @@ def fallback_task_deliverable(
             "search_intent": (
                 f"Brugeren søger et tydeligt og praktisk svar om {query}."
             ),
+            "content_opportunity_type": "existing_section",
+            "missing_topic": query,
+            "evidence_queries": evidence_queries,
+            "duplication_check": (
+                "Emnet udbygger den berørte side og opretter ikke en ny URL."
+            ),
+            "proposed_title": "",
+            "proposed_slug": "",
+            "outline": [],
             "alternatives": [
                 f"Tilføj en FAQ med tre spørgsmål om {query}.",
                 f"Udbyg den eksisterende hovedsektion om {query}.",
@@ -367,18 +412,34 @@ def format_deliverable(deliverable: dict[str, Any]) -> str:
     content_sections = ""
     structured_content_fields = (
         "content_location", "current_content", "replacement_content",
-        "search_intent",
+        "search_intent", "content_opportunity_type", "missing_topic",
+        "evidence_queries", "duplication_check",
     )
     if (
         deliverable["deliverable_type"] == "content_update"
         and all(deliverable.get(field) for field in structured_content_fields)
     ):
         content_sections = (
+            f"Indholdstype:\n{deliverable['content_opportunity_type']}\n\n"
+            f"Manglende emne:\n{deliverable['missing_topic']}\n\n"
+            f"Search Console-evidens:\n"
+            f"{', '.join(deliverable['evidence_queries'])}\n\n"
+            f"Dubletkontrol:\n{deliverable['duplication_check']}\n\n"
             f"Placering:\n{deliverable['content_location']}\n\n"
             f"Nuværende tekst:\n{deliverable['current_content']}\n\n"
             f"Ny tekst:\n{deliverable['replacement_content']}\n\n"
             f"Søgeintention:\n{deliverable['search_intent']}\n\n"
         )
+        if deliverable["content_opportunity_type"] != "existing_section":
+            content_sections += (
+                f"Foreslået titel:\n{deliverable['proposed_title']}\n\n"
+                f"Foreslået URL:\n{deliverable['proposed_slug']}\n\n"
+                "Disposition:\n"
+                + "\n".join(
+                    f"- {row}" for row in deliverable["outline"]
+                )
+                + "\n\n"
+            )
     link_sections = ""
     structured_link_fields = (
         "source_url", "destination_url", "anchor_text", "link_location",
@@ -462,6 +523,7 @@ def _prompt(
         "measured_cause": cause,
         "recommended_action": recommendation.get("recommended_action"),
         "evidence": recommendation.get("explanation"),
+        "search_queries": recommendation.get("search_queries") or [],
         "public_content_candidates": public_context[:8],
     }
     content_requirements = ""
@@ -475,12 +537,26 @@ selv at skrive, uddybe eller finde teksten. Den nye tekst skal besvare den
 klassificerede søgeintention og må ikke opfinde fakta, produkter, funktioner
 eller løfter, som ikke er dokumenteret i sideindholdet. Hvis en helt ny sektion
 er nødvendig, skriv "Ny sektion – ingen eksisterende tekst" som current_content.
+Find først det konkrete content gap ved at sammenholde Search Console-søgeord,
+den berørte side og de relaterede eksisterende sider. Vælg præcis én type:
+existing_section, new_category, new_article eller new_blog_post. Brug kun en ny
+side, når emnet har en selvstændig søgeintention og ikke naturligt hører hjemme
+på den eksisterende side. Kontrollér eksplicit risikoen for dubletindhold og
+søgeordskannibalisering. Ved nyt indhold skal du også levere titel, URL-idé,
+mindst tre dispositionspunkter og færdige indledende afsnit.
 """
         content_schema = """
   "content_location": "præcis overskrift og placering på siden",
   "current_content": "ordret eksisterende passage eller markering af ny sektion",
   "replacement_content": "færdig tekst til direkte indsættelse",
   "search_intent": "kort konkret beskrivelse af brugerens intention",
+  "content_opportunity_type": "existing_section|new_category|new_article|new_blog_post",
+  "missing_topic": "det konkrete manglende spørgsmål eller emne",
+  "evidence_queries": ["Search Console-søgeord 1", "søgeord 2"],
+  "duplication_check": "hvorfor forslaget ikke dublerer eller kannibaliserer eksisterende indhold",
+  "proposed_title": "titel ved nyt indhold; ellers tom tekst",
+  "proposed_slug": "URL-idé ved nyt indhold; ellers tom tekst",
+  "outline": ["mindst tre punkter ved nyt indhold; ellers tom liste"],
 """
     if deliverable_type == "internal_links":
         content_requirements = """

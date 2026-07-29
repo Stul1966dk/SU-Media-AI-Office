@@ -685,3 +685,22 @@ kontrolleres, kopieres, implementeres manuelt og efterfølgende måles.
 Succeskriterium: En intern-link-opgave skal fortælle præcis, hvilken eksisterende
 side der skal redigeres, hvilken side linket skal pege på, hvilken tekst der
 skal linkes, og hvordan den færdige passage skal se ud.
+
+# Sprint 45.10 - Content gaps og nye indholdsidéer
+
+- [x] Før de vigtigste tabende Search Console-søgeord ind i AI-leverancen.
+- [x] Sammenhold søgeordene med den berørte side og relaterede eksisterende sider.
+- [x] Identificér ét konkret manglende spørgsmål eller emne ad gangen.
+- [x] Vælg mellem eksisterende sektion, ny kategoritekst, artikel og blogindlæg.
+- [x] Brug kun en ny side ved en selvstændig søgeintention.
+- [x] Kræv en eksplicit kontrol for dubletindhold og søgeordskannibalisering.
+- [x] Kræv titel, URL-idé og disposition ved forslag til nyt indhold.
+- [x] Lever færdige nye afsnit frem for kun en emneidé.
+- [x] Vis Search Console-evidens, indholdstype og manglende emne på I dag.
+- [x] Gør brief, disposition og færdig tekst redigerbar før godkendelse.
+- [x] Gem hele content-gap-leverancen gennem godkendelses- og målingsflowet.
+- [x] Regressionstest alle fire indholdstyper, evidens og validering.
+
+Succeskriterium: AI Office kan både udbygge en relevant eksisterende side og
+foreslå en ny kategoritekst, artikel eller blogpost, men kun når Search Console
+og det eksisterende sideindhold dokumenterer et reelt hul.

@@ -204,6 +204,7 @@ class TrafficRecommendationWorkflow:
                 for key in (
                     "click_change", "plausible_change", "explanation",
                     "confidence", "total_score", "target_query",
+                    "search_queries",
                     "measurement_method", "completion_criterion",
                 )
             },

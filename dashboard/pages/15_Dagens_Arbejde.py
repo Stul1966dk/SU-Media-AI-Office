@@ -418,7 +418,8 @@ def _render_deliverable_option(deliverable: dict[str, Any]) -> None:
         deliverable.get("deliverable_type") == "content_update"
         and all(deliverable.get(field) for field in (
             "content_location", "current_content", "replacement_content",
-            "search_intent",
+            "search_intent", "content_opportunity_type", "missing_topic",
+            "evidence_queries", "duplication_check",
         ))
     ):
         _render_content_update(deliverable)
@@ -456,6 +457,39 @@ def _render_deliverable_option(deliverable: dict[str, Any]) -> None:
 
 
 def _render_content_update(deliverable: dict[str, Any]) -> None:
+    labels = {
+        "existing_section": "Udbyg en eksisterende side",
+        "new_category": "Ny kategoritekst",
+        "new_article": "Ny artikel",
+        "new_blog_post": "Nyt blogindlæg",
+    }
+    st.write("**Anbefalet indholdstype**")
+    st.info(labels.get(
+        str(deliverable.get("content_opportunity_type")),
+        "Ukendt indholdstype",
+    ))
+    st.write(f"**Manglende emne:** {deliverable.get('missing_topic')}")
+    st.write(
+        "**Search Console-evidens:** "
+        + ", ".join(deliverable.get("evidence_queries") or [])
+    )
+    st.write(f"**Dubletkontrol:** {deliverable.get('duplication_check')}")
+    if deliverable.get("content_opportunity_type") != "existing_section":
+        st.write("**Foreslået titel**")
+        st.code(
+            str(deliverable.get("proposed_title") or ""),
+            language=None,
+            wrap_lines=True,
+        )
+        st.write("**Foreslået URL**")
+        st.code(
+            str(deliverable.get("proposed_slug") or ""),
+            language=None,
+            wrap_lines=True,
+        )
+        st.write("**Disposition**")
+        for index, row in enumerate(deliverable.get("outline") or [], 1):
+            st.write(f"{index}. {row}")
     st.write("**Placering på siden**")
     st.info(str(deliverable.get("content_location") or "Ikke angivet"))
     st.write("**Nuværende tekst**")
@@ -652,7 +686,12 @@ def _parse_approved_deliverable(
         if all(heading in description for heading in optional_headings):
             result.update({
                 "recommended_option": section(
-                    "Anbefalet løsning:", "Placering:"
+                    "Anbefalet løsning:",
+                    (
+                        "Indholdstype:"
+                        if "Indholdstype:" in description
+                        else "Placering:"
+                    ),
                 ),
                 "content_location": section(
                     "Placering:", "Nuværende tekst:"
@@ -664,9 +703,55 @@ def _parse_approved_deliverable(
                     "Ny tekst:", "Søgeintention:"
                 ),
                 "search_intent": section(
-                    "Søgeintention:", "Begrundelse:"
+                    "Søgeintention:",
+                    (
+                        "Foreslået titel:"
+                        if "Foreslået titel:" in description
+                        else "Begrundelse:"
+                    ),
                 ),
             })
+            content_gap_headings = (
+                "Indholdstype:", "Manglende emne:",
+                "Search Console-evidens:", "Dubletkontrol:",
+            )
+            if all(
+                heading in description for heading in content_gap_headings
+            ):
+                result.update({
+                    "content_opportunity_type": section(
+                        "Indholdstype:", "Manglende emne:"
+                    ),
+                    "missing_topic": section(
+                        "Manglende emne:", "Search Console-evidens:"
+                    ),
+                    "evidence_queries": [
+                        row.strip() for row in section(
+                            "Search Console-evidens:", "Dubletkontrol:"
+                        ).split(",") if row.strip()
+                    ],
+                    "duplication_check": section(
+                        "Dubletkontrol:", "Placering:"
+                    ),
+                })
+                if "Foreslået titel:" in description:
+                    result.update({
+                        "proposed_title": section(
+                            "Foreslået titel:", "Foreslået URL:"
+                        ),
+                        "proposed_slug": section(
+                            "Foreslået URL:", "Disposition:"
+                        ),
+                        "outline": _strip_list_markers(section(
+                            "Disposition:", "Begrundelse:"
+                        )),
+                    })
+                else:
+                    result.update({
+                        "proposed_title": "",
+                        "proposed_slug": "",
+                        "outline": [],
+                    })
     if result["deliverable_type"] == "internal_links":
         optional_headings = (
             "Kildeside:", "Destinationsside:", "Ankertekst:",
@@ -920,6 +1005,31 @@ def _render_deliverable_for_approval(
             )
             reviewed_fields = {}
         elif deliverable["deliverable_type"] == "content_update":
+            type_options = {
+                "Udbyg eksisterende side": "existing_section",
+                "Ny kategoritekst": "new_category",
+                "Ny artikel": "new_article",
+                "Nyt blogindlæg": "new_blog_post",
+            }
+            current_type = str(deliverable["content_opportunity_type"])
+            edited_type_label = st.selectbox(
+                "Indholdstype",
+                list(type_options),
+                index=list(type_options.values()).index(current_type),
+            )
+            edited_topic = st.text_input(
+                "Manglende emne",
+                value=deliverable["missing_topic"],
+            )
+            edited_queries = st.text_input(
+                "Search Console-søgeord",
+                value=", ".join(deliverable["evidence_queries"]),
+            )
+            edited_duplication = st.text_area(
+                "Dublet- og kannibaliseringskontrol",
+                value=deliverable["duplication_check"],
+                height=100,
+            )
             edited_location = st.text_input(
                 "Placering på siden",
                 value=deliverable["content_location"],
@@ -941,12 +1051,40 @@ def _render_deliverable_for_approval(
                 value=deliverable["search_intent"],
                 height=90,
             )
+            edited_proposed_title = st.text_input(
+                "Foreslået titel til nyt indhold",
+                value=deliverable.get("proposed_title") or "",
+            )
+            edited_slug = st.text_input(
+                "Foreslået URL til nyt indhold",
+                value=deliverable.get("proposed_slug") or "",
+            )
+            edited_outline = st.text_area(
+                "Disposition – ét punkt pr. linje",
+                value="\n".join(deliverable.get("outline") or []),
+                height=140,
+            )
             edited_solution = edited_replacement
             reviewed_fields = {
                 "content_location": edited_location,
                 "current_content": edited_current,
                 "replacement_content": edited_replacement,
                 "search_intent": edited_intent,
+                "content_opportunity_type": type_options[
+                    edited_type_label
+                ],
+                "missing_topic": edited_topic,
+                "evidence_queries": [
+                    query.strip() for query in edited_queries.split(",")
+                    if query.strip()
+                ],
+                "duplication_check": edited_duplication,
+                "proposed_title": edited_proposed_title,
+                "proposed_slug": edited_slug,
+                "outline": [
+                    row.strip() for row in edited_outline.splitlines()
+                    if row.strip()
+                ],
             }
         elif deliverable["deliverable_type"] == "internal_links":
             edited_source = st.text_input(

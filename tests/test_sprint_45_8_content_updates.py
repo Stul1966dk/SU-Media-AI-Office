@@ -32,6 +32,15 @@ def content_payload(**changes):
         "search_intent": (
             "Brugeren vil have en praktisk vejledning til kalenderdeling."
         ),
+        "content_opportunity_type": "existing_section",
+        "missing_topic": "Del kalender med familien",
+        "evidence_queries": ["del kalender iphone"],
+        "duplication_check": (
+            "Emnet udbygger den eksisterende guide uden en ny URL."
+        ),
+        "proposed_title": "",
+        "proposed_slug": "",
+        "outline": [],
         "alternatives": ["Udbyg FAQ-sektionen.", "Tilføj en kort tjekliste."],
         "rationale": "Siden mister placering på vejledningssøgningen.",
         "implementation_steps": ["Find H2-sektionen.", "Erstat afsnittet."],
