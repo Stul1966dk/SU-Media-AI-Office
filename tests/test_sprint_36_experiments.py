@@ -214,7 +214,7 @@ class Sprint36ExperimentTests(unittest.TestCase):
             [button.label for button in app.button],
         )
         self.assertEqual(
-            ["Midlertidig test af andre opgavetyper"],
+            ["Udviklerværktøjer · midlertidig test"],
             [expander.label for expander in app.expander],
         )
         normal_buttons = [

@@ -16,8 +16,8 @@ class SectionBoundaryTests(unittest.TestCase):
         self.assertIn(
             '[data-testid="stVerticalBlockBorderWrapper"] {', styles
         )
-        self.assertIn("background: rgba(18, 24, 33, 0.72)", styles)
-        self.assertIn("border-color: #41556f", styles)
+        self.assertIn("background: var(--app-surface)", styles)
+        self.assertIn("border: 1px solid var(--app-border)", styles)
         self.assertIn("margin-block: 1.15rem", styles)
         self.assertIn("box-shadow:", styles)
 

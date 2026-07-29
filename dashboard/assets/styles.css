@@ -1,45 +1,110 @@
 :root {
-    color-scheme: dark;
+    color-scheme: light;
+    --app-bg: #f5f4f8;
+    --app-surface: #ffffff;
+    --app-surface-soft: #faf9fc;
+    --app-text: #222037;
+    --app-muted: #6f6a7d;
+    --app-border: #dedbe8;
+    --app-purple: #6d35c5;
+    --app-purple-hover: #5925ad;
+    --app-purple-soft: #f0eafd;
+    --app-green: #18845d;
+    --app-green-soft: #eaf7f1;
+    --app-red: #bd3348;
+    --app-red-soft: #fcedf0;
+    --sidebar-bg: #111925;
+    --sidebar-text: #edf1f7;
 }
 
 .stApp {
-    background:
-        radial-gradient(
-            circle at top right,
-            rgba(38, 110, 96, 0.12),
-            transparent 32rem
-        ),
-        #0b0f14;
+    background: var(--app-bg);
+    color: var(--app-text);
 }
 
 [data-testid="stHeader"] {
-    background: rgba(11, 15, 20, 0.86);
+    background: rgba(245, 244, 248, 0.92);
+}
+
+[data-testid="stSidebar"] {
+    background: var(--sidebar-bg);
+    border-right: 1px solid #283445;
+}
+
+[data-testid="stSidebar"] *,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] label {
+    color: var(--sidebar-text);
+}
+
+[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"][aria-current="page"] {
+    background: rgba(240, 234, 253, 0.12);
 }
 
 [data-testid="stSidebarNav"] {
     display: none;
 }
 
-[data-testid="stMetric"] {
-    background: #121821;
-    border: 1px solid #41556f;
-    border-radius: 0.75rem;
-    padding: 1rem;
+[data-testid="stMain"] h1,
+[data-testid="stMain"] h2,
+[data-testid="stMain"] h3,
+[data-testid="stMain"] h4,
+[data-testid="stMain"] p,
+[data-testid="stMain"] label,
+[data-testid="stMain"] li,
+[data-testid="stMain"] span {
+    color: var(--app-text);
 }
 
-/*
- * Streamlit uses bordered vertical blocks for the app's main content cards.
- * A stronger edge, subtle surface contrast and more whitespace make adjacent
- * sections readable without adding decorative colours.
- */
+[data-testid="stMain"] h1 {
+    font-size: clamp(2rem, 3vw, 2.7rem);
+    letter-spacing: -0.035em;
+    line-height: 1.12;
+}
+
+[data-testid="stMain"] h2 {
+    letter-spacing: -0.025em;
+}
+
+[data-testid="stCaptionContainer"],
+[data-testid="stCaptionContainer"] p,
+.stCaption {
+    color: var(--app-muted) !important;
+}
+
+a {
+    color: var(--app-purple);
+}
+
+[data-testid="stMetric"],
+[data-testid="stVerticalBlockBorderWrapper"],
+[data-testid="stExpander"] {
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
+    border-radius: 1rem;
+    box-shadow: 0 8px 28px rgba(48, 37, 72, 0.055);
+}
+
+[data-testid="stMetric"] {
+    min-height: 6.2rem;
+    padding: 1rem 1.1rem;
+}
+
+[data-testid="stMetricValue"] {
+    color: var(--app-text);
+    font-size: 1.35rem;
+    line-height: 1.35;
+}
+
+[data-testid="stMetricLabel"],
+[data-testid="stMetricLabel"] p {
+    color: var(--app-muted) !important;
+    font-size: 0.82rem;
+}
+
 [data-testid="stVerticalBlockBorderWrapper"] {
-    background: rgba(18, 24, 33, 0.72);
-    border-color: #41556f;
-    box-shadow:
-        0 1px 0 rgba(255, 255, 255, 0.04),
-        0 8px 24px rgba(0, 0, 0, 0.16);
     margin-block: 1.15rem;
-    padding: 0.45rem;
+    padding: 0.55rem;
 }
 
 [data-testid="stVerticalBlockBorderWrapper"]
@@ -47,25 +112,104 @@
     gap: 1rem;
 }
 
-[data-testid="stVerticalBlockBorderWrapper"] h2,
-[data-testid="stVerticalBlockBorderWrapper"] h3 {
-    margin-bottom: 0.35rem;
+[data-testid="stExpander"] {
+    box-shadow: none;
+    overflow: hidden;
 }
 
-[data-testid="stMetricValue"] {
-    font-size: 1.35rem;
-    line-height: 1.35;
+[data-testid="stExpander"] details,
+[data-testid="stExpander"] summary {
+    background: var(--app-surface);
+    color: var(--app-text);
 }
 
-[data-testid="stMetricLabel"] {
-    font-size: 0.82rem;
+/* Streamlit currently renders select boxes with both BaseWeb and React Aria. */
+[data-testid="stMain"] [data-baseweb="select"] > div,
+[data-testid="stMain"] [data-testid="stSelectbox"] [role="group"],
+[data-testid="stMain"] [data-testid="stSelectbox"] input,
+[data-testid="stMain"] [data-testid="stTextInput"] input,
+[data-testid="stMain"] [data-testid="stNumberInput"] input,
+[data-testid="stMain"] [data-testid="stTextArea"] textarea,
+[data-testid="stMain"] [data-testid="stDateInput"] input {
+    background: var(--app-surface) !important;
+    border-color: var(--app-border) !important;
+    color: var(--app-text) !important;
+}
+
+[data-testid="stMain"] [data-baseweb="select"] *,
+[data-testid="stMain"] [data-testid="stSelectbox"] input,
+[data-testid="stMain"] [data-testid="stSelectbox"] button {
+    color: var(--app-text) !important;
+    fill: var(--app-text) !important;
+}
+
+[data-testid="stMain"] [data-testid="stCode"] {
+    background: var(--app-surface-soft);
+    border: 1px solid var(--app-border);
+    border-radius: 0.75rem;
+}
+
+[data-testid="stMain"] [data-testid="stCode"] code,
+[data-testid="stMain"] [data-testid="stCode"] span {
+    color: var(--app-text) !important;
+}
+
+/* Every button has an explicit readable foreground; nested Markdown must inherit. */
+[data-testid="stMain"] button,
+[data-testid="stMain"] [data-testid="stLinkButton"] a {
+    background: var(--app-surface) !important;
+    border: 1px solid #b8b2c7 !important;
+    border-radius: 0.7rem !important;
+    color: var(--app-text) !important;
+    min-height: 2.85rem;
+}
+
+[data-testid="stMain"] button:hover,
+[data-testid="stMain"] [data-testid="stLinkButton"] a:hover {
+    background: var(--app-purple-soft) !important;
+    border-color: var(--app-purple) !important;
+    color: var(--app-purple-hover) !important;
+}
+
+[data-testid="stMain"] button[kind="primary"],
+[data-testid="stMain"] [data-testid="stFormSubmitButton"] button[kind="primary"],
+[data-testid="stMain"] [data-testid="stLinkButton"] a[kind="primary"] {
+    background: var(--app-purple) !important;
+    border-color: var(--app-purple) !important;
+    color: #ffffff !important;
+}
+
+[data-testid="stMain"] button[kind="primary"]:hover,
+[data-testid="stMain"] [data-testid="stFormSubmitButton"] button[kind="primary"]:hover {
+    background: var(--app-purple-hover) !important;
+    border-color: var(--app-purple-hover) !important;
+}
+
+[data-testid="stMain"] button *,
+[data-testid="stMain"] button p,
+[data-testid="stMain"] [data-testid="stLinkButton"] a *,
+[data-testid="stMain"] [data-testid="stFormSubmitButton"] button * {
+    color: inherit !important;
+}
+
+[data-testid="stMain"] [data-testid="stAlert"] {
+    border-radius: 0.8rem;
+}
+
+[data-testid="stMain"] [data-testid="stDataFrame"],
+[data-testid="stMain"] [data-testid="stTable"] {
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
+    border-radius: 0.8rem;
+    overflow: hidden;
 }
 
 .status-card {
     align-items: center;
-    background: #121821;
-    border: 1px solid #253041;
-    border-radius: 0.75rem;
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
+    border-radius: 0.85rem;
+    box-shadow: 0 6px 20px rgba(48, 37, 72, 0.045);
     display: flex;
     gap: 0.75rem;
     min-height: 4.5rem;
@@ -73,7 +217,7 @@
 }
 
 .status-card small {
-    color: #9aa8ba;
+    color: var(--app-muted);
     display: block;
 }
 
@@ -85,18 +229,13 @@
 }
 
 .status-ok .status-dot {
-    background: #39d98a;
-    box-shadow: 0 0 0 0.25rem rgba(57, 217, 138, 0.13);
+    background: var(--app-green);
+    box-shadow: 0 0 0 0.25rem rgba(24, 132, 93, 0.13);
 }
 
 .status-error .status-dot {
-    background: #ff5c65;
-    box-shadow: 0 0 0 0.25rem rgba(255, 92, 101, 0.13);
-}
-
-div[data-testid="stButton"] > button {
-    min-height: 5rem;
-    white-space: pre-line;
+    background: var(--app-red);
+    box-shadow: 0 0 0 0.25rem rgba(189, 51, 72, 0.13);
 }
 
 @media (max-width: 640px) {

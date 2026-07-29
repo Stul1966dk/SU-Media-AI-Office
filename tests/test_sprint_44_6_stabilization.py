@@ -42,7 +42,8 @@ class StabilizationTests(unittest.TestCase):
             ROOT / "dashboard" / "pages" / "15_Dagens_Arbejde.py"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("Lav konkret arbejdsudkast", source)
+        self.assertIn("Lav et nyt forslag", source)
+        self.assertIn("Godkend forslag", source)
         self.assertIn("Godkend arbejdsudkast", source)
         self.assertNotIn('"Godkend opgave"', source)
 
