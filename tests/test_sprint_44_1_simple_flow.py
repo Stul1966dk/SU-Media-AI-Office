@@ -13,7 +13,7 @@ class SimpleDailyFlowTests(unittest.TestCase):
             ROOT / "dashboard" / "pages" / "15_Dagens_Arbejde.py"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("Godmorgen – her er dagens vigtigste opgave", source)
+        self.assertIn("Her er de vigtigste opgaver", source)
         self.assertIn("_render_guided_progress", source)
         self.assertIn("Se AI-forslaget", source)
         self.assertIn(

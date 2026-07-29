@@ -83,7 +83,7 @@ def main() -> None:
         """
         <section class="daily-hero">
           <span class="daily-eyebrow">AI Office</span>
-          <h1>Godmorgen – her er dagens vigtigste opgave</h1>
+          <h1>Her er de vigtigste opgaver</h1>
           <p>Ét tydeligt næste trin ad gangen. Resten viser vi, når du får brug for det.</p>
         </section>
         """,

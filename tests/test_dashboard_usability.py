@@ -32,7 +32,7 @@ class DashboardUsabilityTests(unittest.TestCase):
         ).run()
         self.assertFalse(app.exception)
         self.assertTrue(any(
-            "Godmorgen – her er dagens vigtigste opgave" in item.value
+            "Her er de vigtigste opgaver" in item.value
             for item in app.markdown
         ))
 

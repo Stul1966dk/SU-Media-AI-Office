@@ -187,7 +187,8 @@ a {
 }
 
 /* Every button has an explicit readable foreground; nested Markdown must inherit. */
-[data-testid="stMain"] button,
+[data-testid="stMain"] [data-testid="stButton"] button,
+[data-testid="stMain"] [data-testid="stFormSubmitButton"] button,
 [data-testid="stMain"] [data-testid="stLinkButton"] a {
     background: var(--app-surface) !important;
     border: 1px solid #b8b2c7 !important;
@@ -196,14 +197,15 @@ a {
     min-height: 2.85rem;
 }
 
-[data-testid="stMain"] button:hover,
+[data-testid="stMain"] [data-testid="stButton"] button:hover,
+[data-testid="stMain"] [data-testid="stFormSubmitButton"] button:hover,
 [data-testid="stMain"] [data-testid="stLinkButton"] a:hover {
     background: var(--app-purple-soft) !important;
     border-color: var(--app-purple) !important;
     color: var(--app-purple-hover) !important;
 }
 
-[data-testid="stMain"] button[kind="primary"],
+[data-testid="stMain"] [data-testid="stButton"] button[kind="primary"],
 [data-testid="stMain"] [data-testid="stFormSubmitButton"] button[kind="primary"],
 [data-testid="stMain"] [data-testid="stLinkButton"] a[kind="primary"] {
     background: var(--app-purple) !important;
@@ -211,14 +213,14 @@ a {
     color: #ffffff !important;
 }
 
-[data-testid="stMain"] button[kind="primary"]:hover,
+[data-testid="stMain"] [data-testid="stButton"] button[kind="primary"]:hover,
 [data-testid="stMain"] [data-testid="stFormSubmitButton"] button[kind="primary"]:hover {
     background: var(--app-purple-hover) !important;
     border-color: var(--app-purple-hover) !important;
 }
 
-[data-testid="stMain"] button *,
-[data-testid="stMain"] button p,
+[data-testid="stMain"] [data-testid="stButton"] button *,
+[data-testid="stMain"] [data-testid="stButton"] button p,
 [data-testid="stMain"] [data-testid="stLinkButton"] a *,
 [data-testid="stMain"] [data-testid="stFormSubmitButton"] button * {
     color: inherit !important;
