@@ -21,7 +21,11 @@ def load_styles(path: Path) -> None:
 
 def render_sidebar(*, show_website_selector: bool = True) -> None:
     """Render the persistent, grouped Danish navigation menu."""
+    from dashboard.components.freshness_background import (
+        ensure_freshness_background,
+    )
     from dashboard.components.startup_sync import ensure_startup_sync
+    ensure_freshness_background()
     ensure_startup_sync()
     primary_pages = (
         ("app.py", "I dag", ":material/today:"),

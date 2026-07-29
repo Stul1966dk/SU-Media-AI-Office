@@ -38,8 +38,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agents.title_optimizer import TitleOptimizer
-from core.ai_service import AIService
-from core.content_freshness import build_freshness_recommendations
 from core.daily_work_preparation import DailyWorkPreparationService
 from core.current_diagnosis_reader import read_latest_diagnoses
 from core.seo_experiment_engine import SEOExperimentEngine
@@ -48,11 +46,13 @@ from core.priority_scoring import stable_priority_key
 from core.website_registry import WebsiteRegistry
 from connectors.wordpress_connector import WordPressConnector
 from core.work_queue_service import WorkQueueService
-from dashboard.components.database import open_database
 from dashboard.components.data import (
     _filter_decided_recommendations,
 )
+import dashboard.components.database as database_component_module
 import dashboard.components.data as dashboard_data_module
+import core.ai_service as ai_service_module
+import core.content_freshness as content_freshness_module
 import core.task_deliverables as task_deliverables_module
 import core.traffic_recommendation_store as traffic_store_module
 import core.traffic_recommendation_workflow as traffic_workflow_module
@@ -66,6 +66,15 @@ from dashboard.components.ui import (
 from dashboard.components.website_selector import set_selected_website
 
 task_deliverables_module = importlib.reload(task_deliverables_module)
+database_component_module = importlib.reload(database_component_module)
+ai_service_module = importlib.reload(ai_service_module)
+content_freshness_module = importlib.reload(content_freshness_module)
+open_database = database_component_module.open_database
+AIService = ai_service_module.AIService
+AIServiceError = ai_service_module.AIServiceError
+build_freshness_recommendations = (
+    content_freshness_module.build_freshness_recommendations
+)
 fallback_task_deliverable = task_deliverables_module.fallback_task_deliverable
 format_deliverable = task_deliverables_module.format_deliverable
 format_title_meta_option = task_deliverables_module.format_title_meta_option
@@ -184,7 +193,12 @@ def main() -> None:
         priority_tasks.extend(
             _filter_unlocked_recommendations(
                 database,
-                build_freshness_recommendations(content_by_website),
+                build_freshness_recommendations(
+                    content_by_website,
+                    verified_reviews=(
+                        database.get_content_freshness_reviews()
+                    ),
+                ),
             )
         )
         priority_tasks = (
@@ -733,23 +747,20 @@ def _render_legacy_approved_instruction(
         ):
             try:
                 with st.spinner("AI Office udarbejder arbejdsinstruksen…"):
-                    deliverable, used_fallback = _generate_deliverable(
+                    deliverable, fallback_reason = _generate_deliverable(
                         database, _recommendation_from_work_item(item)
                     )
             except ValueError as error:
                 st.warning(str(error))
                 return
             st.session_state[state_key] = deliverable
-            st.session_state[f"{state_key}:fallback"] = used_fallback
+            st.session_state[f"{state_key}:fallback"] = fallback_reason
             st.rerun()
         return
 
     deliverable = st.session_state[state_key]
-    if st.session_state.get(f"{state_key}:fallback"):
-        st.warning(
-            "AI-forbindelsen var ikke tilgængelig. Instruksen er lavet med "
-            "faste regler og bør kontrolleres ekstra grundigt."
-        )
+    if fallback_reason := st.session_state.get(f"{state_key}:fallback"):
+        st.warning(_fallback_warning(fallback_reason))
     _render_approved_instruction(deliverable)
     if st.button(
         "Gem som godkendt arbejdsinstruks",
@@ -1045,20 +1056,17 @@ def _render_new_decision_actions(
     if state_key not in st.session_state:
         try:
             with st.spinner("AI Office udarbejder det konkrete forslag…"):
-                deliverable, used_fallback = _generate_deliverable(
+                deliverable, fallback_reason = _generate_deliverable(
                     database, item
                 )
         except ValueError as error:
             st.warning(str(error))
             return
         st.session_state[state_key] = deliverable
-        st.session_state[f"{state_key}:fallback"] = used_fallback
+        st.session_state[f"{state_key}:fallback"] = fallback_reason
     deliverable = st.session_state[state_key]
-    if st.session_state.get(f"{state_key}:fallback"):
-        st.warning(
-            "AI-forbindelsen var ikke tilgængelig. Forslaget er lavet "
-            "med faste regler og bør kontrolleres ekstra grundigt."
-        )
+    if fallback_reason := st.session_state.get(f"{state_key}:fallback"):
+        st.warning(_fallback_warning(fallback_reason))
     _render_deliverable_for_approval(
         database, item, title, deliverable, state_key
     )
@@ -1087,7 +1095,7 @@ def _render_new_decision_actions(
 
 def _generate_deliverable(
     database: Any, item: dict[str, Any]
-) -> tuple[dict[str, Any], bool]:
+) -> tuple[dict[str, Any], str]:
     """Generate from public context, with a safe usable fallback."""
     if item.get("experiment_type") == "internal_links":
         _refresh_sparse_internal_link_content(
@@ -1193,8 +1201,25 @@ def _generate_deliverable(
             guided_item,
             ai_service=AIService(),
             public_context=public_context,
-        ), False
+        ), ""
+    except AIServiceError as error:
+        fallback_reason = (
+            f"AI-forbindelsen kunne ikke bruges ({error.category}). "
+            "Forslaget er derfor lavet med faste regler og bør kontrolleres "
+            "ekstra grundigt."
+        )
+    except (ValueError, json.JSONDecodeError):
+        fallback_reason = (
+            "AI-forbindelsen virker, men svaret opfyldte ikke appens "
+            "kvalitetskrav. Der vises derfor et regelbaseret forslag, som "
+            "bør kontrolleres ekstra grundigt."
+        )
     except Exception:
+        fallback_reason = (
+            "AI-svaret kunne ikke behandles. Der vises derfor et "
+            "regelbaseret forslag, som bør kontrolleres ekstra grundigt."
+        )
+    try:
         fallback = fallback_task_deliverable(
             item, public_context=public_context
         )
@@ -1202,7 +1227,19 @@ def _generate_deliverable(
             validate_content_novelty(
                 fallback, public_context=public_context
             )
-        return fallback, True
+        return fallback, fallback_reason
+    except Exception:
+        raise
+
+
+def _fallback_warning(value: Any) -> str:
+    """Translate both current and stale fallback state into accurate copy."""
+    if isinstance(value, str):
+        return value
+    return (
+        "AI-forslaget kunne ikke bruges i denne opgave. Der vises derfor et "
+        "regelbaseret forslag, som bør kontrolleres ekstra grundigt."
+    )
 
 
 def _usable_content_excerpt(row: dict[str, Any]) -> str:

@@ -10,7 +10,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.content_freshness import STATUS_LABELS, audit_content
 from dashboard.components.database import open_database
 from dashboard.components.help_panel import render_help_panel
 from dashboard.components.ui import load_styles, render_next_step, render_sidebar
@@ -25,8 +24,9 @@ def main() -> None:
     render_sidebar()
     st.title("Indholdsaktualitet")
     st.caption(
-        "Kontrollen køres, hver gang I dag eller denne side åbnes, på det "
-        "senest synkroniserede artikelindhold."
+        "Kontrollen køres stille i baggrunden på det senest synkroniserede "
+        "artikelindhold. Kun AI-bekræftede fund med en officiel kilde kan "
+        "blive til en opgave på I dag."
     )
     render_help_panel(
         purpose=(
@@ -58,52 +58,53 @@ def main() -> None:
     database = open_database(read_only=True)
     try:
         rows = database.get_content(website_id)
+        reviews = database.get_content_freshness_reviews()
     finally:
         database.close()
-    audited = [
-        {**row, "freshness": audit_content(row)}
-        for row in rows
-        if str(row.get("content_type") or "").casefold() in {"post", "page"}
-    ]
-    counts = {
-        key: sum(item["freshness"]["status"] == key for item in audited)
-        for key in STATUS_LABELS
-    }
-    columns = st.columns(4)
-    for column, key in zip(columns, STATUS_LABELS):
-        column.metric(STATUS_LABELS[key], counts[key])
     findings = [
-        item for item in audited
-        if item["freshness"]["status"] != "current"
+        {
+            **row,
+            "review": reviews.get(
+                str(row.get("url") or "").strip().rstrip("/").casefold(),
+                {},
+            ),
+        }
+        for row in rows
+        if (
+            str(row.get("content_type") or "").casefold() in {"post", "page"}
+            and reviews.get(
+                str(row.get("url") or "").strip().rstrip("/").casefold(),
+                {},
+            ).get("status") == "outdated"
+            and reviews.get(
+                str(row.get("url") or "").strip().rstrip("/").casefold(),
+                {},
+            ).get("content_hash") == str(row.get("raw_hash") or "")
+        )
     ]
-    st.subheader("Tekster til kontrol")
+    st.metric("Bekræftet uaktuelle tekster", len(findings))
+    st.subheader("Bekræftede fund")
     if not findings:
         st.success(
-            "Der er ingen tekster med tydelige aktualitetssignaler i det "
-            "lagrede indhold."
+            "Baggrundskontrollen har endnu ikke bekræftet en uaktuel tekst "
+            "med en officiel kilde."
         )
         return
     findings.sort(
         key=lambda item: (
-            -int(item["freshness"]["score"]),
+            str(item["review"].get("checked_at") or ""),
             str(item.get("title") or ""),
-        )
+        ),
+        reverse=True,
     )
     for item in findings:
         with st.container(border=True):
-            st.write(
-                f"**{item.get('title') or item.get('url')}** · "
-                f"{item['freshness']['status_label']}"
-            )
+            st.write(f"**{item.get('title') or item.get('url')}**")
             st.markdown(f"[Åbn siden]({item.get('url')})")
-            for signal in item["freshness"]["signals"]:
-                st.write(f"- {signal['label']}")
-                if signal.get("passage"):
-                    st.code(signal["passage"], language=None)
-            st.caption(
-                "Kontrollér fundet mod en aktuel, officiel kilde, før teksten "
-                "ændres eller fjernes."
-            )
+            st.write(str(item["review"].get("reason") or ""))
+            with st.expander("Se officielle kilder"):
+                for source in item["review"].get("official_sources", []):
+                    st.markdown(f"- [{source}]({source})")
 
 
 if __name__ == "__main__":

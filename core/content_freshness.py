@@ -112,8 +112,10 @@ def build_freshness_recommendations(
     content_by_website: dict[str, list[dict[str, Any]]],
     *,
     reference_date: date | None = None,
+    verified_reviews: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return bounded daily candidates only for explainable freshness risks."""
+    """Return daily candidates only after a matching AI verification."""
+    reviews = verified_reviews or {}
     candidates = []
     for website, rows in sorted(content_by_website.items()):
         for row in rows:
@@ -129,6 +131,14 @@ def build_freshness_recommendations(
             audit = audit_content(row, reference_date=reference_date)
             if audit["status"] == "current":
                 continue
+            review = reviews.get(_normalize_url(url), {})
+            if (
+                review.get("content_hash") != str(row.get("raw_hash") or "")
+                or review.get("status") != "outdated"
+                or review.get("confidence") != "high"
+                or not review.get("official_sources")
+            ):
+                continue
             signals = audit["signals"]
             total_score = 18.0 + float(audit["score"])
             candidates.append({
@@ -139,8 +149,11 @@ def build_freshness_recommendations(
                 "target_url": url,
                 "target_query": "",
                 "search_queries": [],
-                "measured_cause": "Muligt forældet indhold",
-                "description": f"Kontrollér om “{row.get('title') or url}” stadig er aktuel.",
+                "measured_cause": "Bekræftet uaktuel oplysning",
+                "description": (
+                    f"Opdatér den forældede oplysning i "
+                    f"“{row.get('title') or url}”."
+                ),
                 "recommended_action": (
                     "Kontrollér den viste passage mod aktuelle, officielle "
                     "kilder. Behold teksten uændret, hvis signalet ikke kan "
@@ -153,8 +166,8 @@ def build_freshness_recommendations(
                 "plausible_change": 0.0,
                 "search_console_change": "Aktualitetskontrol af lagret sideindhold",
                 "explanation": (
-                    f"Status: {audit['status_label']}. Automatisk analyse må "
-                    "ikke stå alene; oplysningerne skal verificeres."
+                    f"AI-kontrol med officiel webkilde har bekræftet fundet: "
+                    f"{review.get('reason') or audit['status_label']}."
                 ),
                 "confidence": "middel",
                 "estimated_minutes": 25,
@@ -167,6 +180,7 @@ def build_freshness_recommendations(
                     "28-dages målingsflow."
                 ),
                 "freshness_evidence": audit,
+                "freshness_verification": review,
             })
     return sorted(
         candidates,
@@ -174,6 +188,10 @@ def build_freshness_recommendations(
             -float(item["total_score"]), item["website"], item["target_url"]
         ),
     )
+
+
+def _normalize_url(value: Any) -> str:
+    return str(value or "").strip().rstrip("/").casefold()
 
 
 def _age_years(value: Any, today: date) -> int | None:

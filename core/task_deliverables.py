@@ -21,8 +21,16 @@ def generate_task_deliverable(
     public_context: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Ask AI for one bounded deliverable and validate its structure."""
-    response = ai_service.generate_response(
-        _prompt(recommendation, public_context or [])
+    tools = (
+        [{"type": "web_search"}]
+        if recommendation.get("freshness_verification")
+        else None
+    )
+    prompt = _prompt(recommendation, public_context or [])
+    response = (
+        ai_service.generate_response(prompt, tools=tools)
+        if tools
+        else ai_service.generate_response(prompt)
     )
     context = public_context or []
     deliverable = validate_task_deliverable(
@@ -756,6 +764,9 @@ def _prompt(
         "search_queries": recommendation.get("search_queries") or [],
         "forced_content_mode": recommendation.get("forced_content_mode") or "",
         "freshness_evidence": recommendation.get("freshness_evidence") or {},
+        "freshness_verification": (
+            recommendation.get("freshness_verification") or {}
+        ),
         "public_content_candidates": public_context[:8],
     }
     content_requirements = ""
@@ -806,8 +817,10 @@ Search Console- og sideindholdet tydeligt viser, at en ny side vil kannibalisere
 Denne opgave er en aktualitetskontrol. Du må ikke erklære en oplysning forældet
 alene på grund af tekstens alder eller et årstal. Peg på den konkrete eksisterende
 passage. Foreslå kun en erstatning, når den kan underbygges af det viste
-sideindhold og aktuelle, officielle oplysninger i konteksten. Hvis det ikke kan
-bekræftes, skal anbefalingen være manuel kontrol frem for en opdigtet rettelse.
+sideindhold og aktuelle, officielle oplysninger. Brug web search til at
+genkontrollere de officielle kilder i freshness_verification. Sæt disse
+kilde-URL'er i evidence_queries. Hvis det ikke kan bekræftes, skal anbefalingen
+være manuel kontrol frem for en opdigtet rettelse.
 """
         content_schema = """
   "content_location": "præcis overskrift og placering på siden",

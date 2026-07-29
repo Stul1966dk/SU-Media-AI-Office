@@ -1565,6 +1565,36 @@ class Database:
         ).fetchall()
         return [self._content_row(row) for row in rows]
 
+    def get_content_freshness_reviews(self) -> dict[str, dict[str, Any]]:
+        """Return cached AI freshness decisions keyed by normalized URL."""
+        row = self._connection.execute(
+            "SELECT value FROM app_state WHERE key = ?",
+            ("content_freshness_reviews",),
+        ).fetchone()
+        if not row:
+            return {}
+        try:
+            value = json.loads(str(row["value"]))
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def save_content_freshness_reviews(
+        self, reviews: dict[str, dict[str, Any]]
+    ) -> None:
+        """Persist non-secret freshness decisions from the background check."""
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO app_state (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (
+                    "content_freshness_reviews",
+                    json.dumps(reviews, ensure_ascii=False, default=str),
+                ),
+            )
+
     def get_recently_updated(
         self, website_id: str | None = None, limit: int = 50
     ) -> list[dict[str, Any]]:

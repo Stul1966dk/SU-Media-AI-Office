@@ -75,17 +75,22 @@ class AIService:
         print(text)
         return text
 
-    def generate_response(self, prompt: str) -> AIResponse:
+    def generate_response(
+        self, prompt: str, *, tools: list[dict[str, Any]] | None = None
+    ) -> AIResponse:
         """Return one text response and non-sensitive usage metadata."""
         if not self._api_key:
             raise AIServiceError("manglende API-nøgle")
         started = perf_counter()
         try:
             client = self._client or self._create_client()
-            response = client.responses.create(
-                model=self.model,
-                input=prompt,
-            )
+            request: dict[str, Any] = {
+                "model": self.model,
+                "input": prompt,
+            }
+            if tools:
+                request["tools"] = tools
+            response = client.responses.create(**request)
         except AIServiceError:
             raise
         except Exception as error:
