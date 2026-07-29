@@ -72,7 +72,7 @@ class ForcedRecommendationPanelTests(unittest.TestCase):
     def test_panel_is_session_based_and_can_be_closed(self) -> None:
         source = DAILY_WORK.read_text(encoding="utf-8")
 
-        self.assertIn("Midlertidig test af andre opgavetyper", source)
+        self.assertIn("Udviklerværktøjer · midlertidig test", source)
         self.assertIn("Test indholdsopdatering", source)
         self.assertIn("Test interne links", source)
         self.assertIn("Test content gap", source)

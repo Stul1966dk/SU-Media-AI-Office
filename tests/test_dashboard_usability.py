@@ -31,7 +31,10 @@ class DashboardUsabilityTests(unittest.TestCase):
             str(ROOT / "dashboard" / "app.py"), default_timeout=20
         ).run()
         self.assertFalse(app.exception)
-        self.assertEqual(["I dag"], [item.value for item in app.title])
+        self.assertTrue(any(
+            "Godmorgen – her er dagens vigtigste opgave" in item.value
+            for item in app.markdown
+        ))
 
     def test_portfolio_remains_available_as_secondary_page(self) -> None:
         app = AppTest.from_file(

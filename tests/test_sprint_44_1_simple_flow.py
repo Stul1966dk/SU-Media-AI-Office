@@ -13,10 +13,11 @@ class SimpleDailyFlowTests(unittest.TestCase):
             ROOT / "dashboard" / "pages" / "15_Dagens_Arbejde.py"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('st.title("I dag")', source)
-        self.assertIn("### Næste trin", source)
+        self.assertIn("Godmorgen – her er dagens vigtigste opgave", source)
+        self.assertIn("_render_guided_progress", source)
+        self.assertIn("Se AI-forslaget", source)
         self.assertIn(
-            'st.expander("Se datagrundlag og forklaring")', source
+            'st.expander("Se datagrundlag")', source
         )
         self.assertIn(
             'st.expander("Hvorfor er denne opgave valgt?")', source

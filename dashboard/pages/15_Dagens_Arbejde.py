@@ -74,15 +74,20 @@ def _optimizer(database: Any) -> TitleOptimizer:
 
 def main() -> None:
     st.set_page_config(
-        page_title="I dag", page_icon="✓", layout="centered"
+        page_title="I dag", page_icon="✓", layout="wide"
     )
     load_styles(PROJECT_ROOT / "dashboard" / "assets" / "styles.css")
     _load_daily_work_styles()
     render_sidebar(show_website_selector=False)
-    st.title("I dag")
-    st.caption(
-        "Her får du ét tydeligt næste trin. Når det er udført, viser siden "
-        "automatisk, hvad du skal gøre bagefter."
+    st.markdown(
+        """
+        <section class="daily-hero">
+          <span class="daily-eyebrow">AI Office</span>
+          <h1>Godmorgen – her er dagens vigtigste opgave</h1>
+          <p>Ét tydeligt næste trin ad gangen. Resten viser vi, når du får brug for det.</p>
+        </section>
+        """,
+        unsafe_allow_html=True,
     )
     action_result = st.session_state.pop("daily_action_result", None)
     if action_result:
@@ -100,6 +105,7 @@ def main() -> None:
         active_ids = {str(item["website"]) for item in websites}
         selected = _render_website_filter(websites)
         website_id = None if selected == ALL_WEBSITES else selected
+        _render_daily_summary(database, websites)
         if _render_forced_test_panel(
             database, websites, selected_website=website_id
         ):
@@ -205,7 +211,7 @@ def _render_forced_test_panel(
         return False
     active_mode = st.session_state.get(FORCED_TEST_MODE_KEY)
     with st.expander(
-        "Midlertidig test af andre opgavetyper",
+        "Udviklerværktøjer · midlertidig test",
         expanded=bool(active_mode),
     ):
         st.caption(
@@ -433,7 +439,7 @@ def _render_work_overview(
     """Show only the one current action; status belongs on Resultater."""
     actionable = traffic_work_module.next_actionable_work(items)
     if actionable:
-        st.markdown("### Næste trin")
+        _render_guided_progress(str(actionable.get("stage") or "draft"))
         _render_workflow_card(database, actionable, primary=True)
 
 
@@ -441,8 +447,9 @@ def _render_workflow_card(
     database: Any, item: dict[str, Any], *, primary: bool
 ) -> None:
     with st.container(border=True):
-        st.write(f"**{item['status_label']} · {item['website']}**")
-        st.write(item["title"])
+        st.caption("DIN NÆSTE OPGAVE")
+        st.markdown(f"## {item['title']}")
+        st.write(f"**{item['website']}** · {item['status_label']}")
         if item.get("target_url"):
             st.caption(item["target_url"])
         st.write(f"**Det skal du gøre:** {item['next_action']}")
@@ -1582,6 +1589,7 @@ def _format_number(value: float) -> str:
 def _render_recommendation(
     database: Any, queue: WorkQueueService, item: dict[str, Any]
 ) -> None:
+    _render_guided_progress("draft")
     change = _recommended_change(item)
     if not _has_concrete_change(change):
         st.error("Opgaven er ikke komplet og kan derfor ikke vises endnu.")
@@ -1618,8 +1626,8 @@ def _render_recommendation(
 def _render_implementation(
     database: Any, queue: WorkQueueService, item: dict[str, Any]
 ) -> None:
+    _render_guided_progress("approved")
     change = item.get("approved_change") or {}
-    st.header("Implementér ændringen")
     if not _has_concrete_change(change):
         st.error("Den godkendte ændring er ufuldstændig og kan ikke implementeres.")
         return
@@ -1761,15 +1769,240 @@ def _has_concrete_change(content: dict[str, Any]) -> bool:
     )
 
 
+def _render_daily_summary(
+    database: Any, websites: list[dict[str, Any]]
+) -> None:
+    """Give the page a compact orientation strip before the work begins."""
+    experiments = database.get_seo_experiments()
+    active_measurements = sum(
+        1
+        for item in experiments
+        if str(item.get("status") or "").lower()
+        in {"active", "running", "measuring", "implemented"}
+    )
+    st.markdown(
+        f"""
+        <section class="daily-summary" aria-label="Dagens overblik">
+          <div><span class="summary-icon">✓</span><strong>1</strong><small>opgave i dag</small></div>
+          <div><span class="summary-icon">◎</span><strong>{len(websites)}</strong><small>aktive websites</small></div>
+          <div><span class="summary-icon">↗</span><strong>{active_measurements}</strong><small>aktive målinger</small></div>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_guided_progress(stage: str) -> None:
+    """Show the user's place in the three-step daily workflow."""
+    current = {
+        "draft": 1,
+        "approved": 2,
+        "awaiting_implementation": 2,
+        "implemented": 3,
+        "measuring": 3,
+    }.get(stage, 1)
+    steps = (
+        ("Se AI-forslaget", "Gennemgå og godkend"),
+        ("Ret siden", "Udfør ændringen"),
+        ("Registrér ændringen", "Start 28-dages måling"),
+    )
+    cards = []
+    for number, (title, description) in enumerate(steps, 1):
+        state = "is-current" if number == current else (
+            "is-complete" if number < current else ""
+        )
+        marker = "✓" if number < current else str(number)
+        cards.append(
+            f'<div class="daily-step {state}">'
+            f'<span class="step-number">{marker}</span>'
+            f'<span><strong>{title}</strong><small>{description}</small></span>'
+            "</div>"
+        )
+    st.markdown(
+        '<section class="daily-progress" aria-label="Opgavens trin">'
+        + "".join(cards)
+        + "</section>",
+        unsafe_allow_html=True,
+    )
+
+
 def _load_daily_work_styles() -> None:
     st.markdown(
         """
         <style>
-          [data-testid="stMainBlockContainer"] {max-width: 880px;}
+          :root {
+            --daily-bg: #f5f4f8;
+            --daily-card: #ffffff;
+            --daily-text: #222037;
+            --daily-muted: #6f6a7d;
+            --daily-border: #dedbe8;
+            --daily-purple: #6d35c5;
+            --daily-purple-soft: #f0eafd;
+            --daily-green: #18845d;
+            --daily-green-soft: #eaf7f1;
+          }
+          .stApp {background: var(--daily-bg);}
+          [data-testid="stHeader"] {background: rgba(245, 244, 248, 0.92);}
+          [data-testid="stMainBlockContainer"] {
+            max-width: 1180px;
+            padding-top: 2.5rem;
+            padding-bottom: 4rem;
+          }
+          .daily-hero {margin: 0 0 1.4rem;}
+          .daily-eyebrow {
+            color: var(--daily-purple);
+            font-size: .78rem;
+            font-weight: 800;
+            letter-spacing: .1em;
+            text-transform: uppercase;
+          }
+          .daily-hero h1 {
+            color: var(--daily-text);
+            font-size: clamp(1.75rem, 3vw, 2.55rem);
+            letter-spacing: -.035em;
+            line-height: 1.12;
+            margin: .35rem 0 .45rem;
+          }
+          .daily-hero p {color: var(--daily-muted); margin: 0;}
+          .daily-summary {
+            background: var(--daily-card);
+            border: 1px solid var(--daily-border);
+            border-radius: 1rem;
+            box-shadow: 0 8px 28px rgba(48, 37, 72, .06);
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            margin: 1.25rem 0 1.5rem;
+            overflow: hidden;
+          }
+          .daily-summary > div {
+            align-items: center;
+            display: grid;
+            gap: .05rem .75rem;
+            grid-template-columns: 2.5rem auto;
+            padding: 1rem 1.25rem;
+          }
+          .daily-summary > div + div {border-left: 1px solid var(--daily-border);}
+          .daily-summary strong {color: var(--daily-text); font-size: 1.15rem;}
+          .daily-summary small {color: var(--daily-muted);}
+          .summary-icon {
+            align-items: center;
+            background: var(--daily-purple-soft);
+            border-radius: .7rem;
+            color: var(--daily-purple);
+            display: flex;
+            font-size: 1.15rem;
+            grid-row: 1 / span 2;
+            height: 2.5rem;
+            justify-content: center;
+          }
+          .daily-progress {
+            display: grid;
+            gap: .75rem;
+            grid-template-columns: repeat(3, 1fr);
+            margin: 1.75rem 0 1rem;
+          }
+          .daily-step {
+            align-items: center;
+            background: #eeecf2;
+            border: 1px solid transparent;
+            border-radius: .85rem;
+            color: var(--daily-muted);
+            display: flex;
+            gap: .8rem;
+            padding: .85rem 1rem;
+          }
+          .daily-step.is-current {
+            background: var(--daily-purple-soft);
+            border-color: #cbb7ee;
+            color: var(--daily-text);
+          }
+          .daily-step.is-complete {
+            background: var(--daily-green-soft);
+            color: var(--daily-green);
+          }
+          .step-number {
+            align-items: center;
+            background: #fff;
+            border: 1px solid currentColor;
+            border-radius: 999px;
+            display: flex;
+            flex: 0 0 2rem;
+            height: 2rem;
+            justify-content: center;
+            font-weight: 750;
+          }
+          .daily-step.is-current .step-number {
+            background: var(--daily-purple);
+            border-color: var(--daily-purple);
+            color: #fff;
+          }
+          .daily-step strong, .daily-step small {display: block;}
+          .daily-step small {font-size: .78rem; margin-top: .12rem;}
+          [data-testid="stVerticalBlockBorderWrapper"] {
+            background: var(--daily-card);
+            border-color: var(--daily-border);
+            border-radius: 1rem;
+            box-shadow: 0 8px 28px rgba(48, 37, 72, .055);
+            padding: .6rem;
+          }
           [data-testid="stVerticalBlockBorderWrapper"] {
             margin-block: 1.25rem;
           }
-          .stButton button {min-height: 3.25rem; font-size: 1.05rem;}
+          [data-testid="stExpander"] {
+            background: rgba(255, 255, 255, .55);
+            border-color: var(--daily-border);
+            border-radius: .8rem;
+          }
+          [data-testid="stMain"] [data-baseweb="select"] > div,
+          [data-testid="stMain"] [data-testid="stSelectbox"] [role="group"],
+          [data-testid="stMain"] [data-testid="stSelectbox"] input,
+          [data-testid="stTextInput"] input,
+          [data-testid="stTextArea"] textarea {
+            background: #fff !important;
+            border-color: var(--daily-border) !important;
+            color: var(--daily-text) !important;
+          }
+          [data-testid="stMain"] [data-baseweb="select"] *,
+          [data-testid="stMain"] [data-baseweb="select"] svg,
+          [data-testid="stMain"] [data-testid="stSelectbox"] input,
+          [data-testid="stMain"] [data-testid="stSelectbox"] button {
+            color: var(--daily-text) !important;
+            fill: var(--daily-text) !important;
+          }
+          .stButton button {
+            border-radius: .7rem;
+            min-height: 3rem;
+            font-size: .95rem;
+          }
+          .stButton button[kind="primary"],
+          [data-testid="stFormSubmitButton"] button[kind="primary"] {
+            background: var(--daily-purple);
+            border-color: var(--daily-purple);
+            color: #fff;
+          }
+          [data-testid="stCode"] {
+            background: #f8f7fa;
+            border: 1px solid var(--daily-border);
+            border-radius: .75rem;
+          }
+          [data-testid="stMain"] h1,
+          [data-testid="stMain"] h2,
+          [data-testid="stMain"] h3,
+          [data-testid="stMain"] p,
+          [data-testid="stMain"] label,
+          [data-testid="stMain"] [data-testid="stMarkdownContainer"] {
+            color: var(--daily-text);
+          }
+          [data-testid="stCaptionContainer"], .stCaption {
+            color: var(--daily-muted);
+          }
+          @media (max-width: 760px) {
+            .daily-summary, .daily-progress {grid-template-columns: 1fr;}
+            .daily-summary > div + div {
+              border-left: 0;
+              border-top: 1px solid var(--daily-border);
+            }
+          }
         </style>
         """,
         unsafe_allow_html=True,
