@@ -1,7 +1,10 @@
 import unittest
 from pathlib import Path
 
-from core.traffic_recommendations import expand_daily_work_types
+from core.traffic_recommendations import (
+    apply_post_analysis_guidance,
+    expand_daily_work_types,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -102,6 +105,33 @@ class DailyWorkTypeCandidateTests(unittest.TestCase):
         self.assertNotIn("Test interne links", source)
         self.assertNotIn("Test content gap", source)
         self.assertNotIn("FORCED_TEST_MODE_KEY", source)
+
+    def test_latest_post_analysis_prioritizes_its_next_change_type(self):
+        candidates = expand_daily_work_types(
+            [recommendation()],
+            content_urls_by_website={
+                "site.dk": [
+                    "https://site.dk/maal/",
+                    "https://site.dk/kilde/",
+                ],
+            },
+        )
+        guided = apply_post_analysis_guidance(candidates, [{
+            "target_url": "https://site.dk/maal/",
+            "post_analysis": {
+                "decision": "keep_and_continue",
+                "current_change_type": "title_meta",
+                "next_change_type": "content_gap",
+                "title": "Fortsæt med indhold",
+                "rationale": "Placeringen er stadig svag.",
+            },
+        }])
+
+        self.assertEqual("content_gap", guided[0]["daily_work_type"])
+        self.assertEqual(
+            "content_gap",
+            guided[0]["post_analysis_guidance"]["preferred_change_type"],
+        )
 
 
 if __name__ == "__main__":

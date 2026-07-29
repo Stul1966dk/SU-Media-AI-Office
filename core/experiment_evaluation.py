@@ -114,6 +114,9 @@ class ExperimentEvaluationService:
             quality, caveats = self._sample_quality(metrics, periods)
             result_status = self.classify(metrics, quality, caveats)
             conclusion = self._ai_conclusion(metrics, result_status, caveats)
+            post_analysis = self.build_post_analysis(
+                experiment, metrics, result_status, caveats
+            )
             evaluated = datetime.now().astimezone().isoformat(timespec="seconds")
             previous = next((
                 item for item in self.database.get_experiment_evaluations(
@@ -141,6 +144,7 @@ class ExperimentEvaluationService:
                 "sample_quality": quality,
                 "result_status": result_status,
                 "ai_conclusion": conclusion,
+                "post_analysis": post_analysis,
                 "caveats": caveats,
                 "evaluation_version": EVALUATION_VERSION,
             }
@@ -186,6 +190,123 @@ class ExperimentEvaluationService:
                 experiment_id, {"status": original_status}
             )
             raise
+
+    @staticmethod
+    def build_post_analysis(
+        experiment: dict[str, Any],
+        metrics: dict[str, Any],
+        result: str,
+        caveats: list[str],
+    ) -> dict[str, Any]:
+        """Choose one bounded next decision from the completed measurement."""
+        current_type = str(experiment.get("experiment_type") or "")
+        position = float(metrics.get("position_after") or 0)
+        ctr = float(metrics.get("ctr_after") or 0)
+        impressions = int(metrics.get("impressions_after") or 0)
+        base = {
+            "current_change_type": current_type,
+            "result_status": result,
+            "target_url": str(experiment.get("target_url") or ""),
+            "evidence": [
+                f"Klik: {metrics.get('clicks_before', 0)} → "
+                f"{metrics.get('clicks_after', 0)}",
+                f"CTR: {float(metrics.get('ctr_before') or 0) * 100:.2f}% → "
+                f"{ctr * 100:.2f}%",
+                f"Placering: {float(metrics.get('position_before') or 0):.1f} "
+                f"→ {position:.1f}",
+            ],
+        }
+        if result == "insufficient_data":
+            return {
+                **base,
+                "decision": "wait",
+                "next_change_type": "none",
+                "title": "Afvent flere data",
+                "rationale": (
+                    "Datagrundlaget opfylder endnu ikke minimumskravene. "
+                    "Der bør ikke foretages en ny ændring på URL'en endnu."
+                ),
+                "caveats": caveats,
+            }
+        if result in {"decline", "strong_decline"}:
+            return {
+                **base,
+                "decision": "review_or_rollback",
+                "next_change_type": current_type or "none",
+                "title": "Gennemgå den seneste ændring",
+                "rationale": (
+                    "Resultatet blev dårligere. Kontrollér implementeringen "
+                    "og overvej at justere eller tilbageføre den, før en ny "
+                    "ændringstype afprøves."
+                ),
+                "caveats": caveats,
+            }
+        if result in {"improvement", "strong_improvement"}:
+            if current_type == "title_meta" and position > 10:
+                return {
+                    **base,
+                    "decision": "keep_and_continue",
+                    "next_change_type": "content_update",
+                    "title": "Behold title/meta og gennemgå indholdet",
+                    "rationale": (
+                        "CTR-ændringen gav en forbedring, men siden ligger "
+                        "fortsat uden for top 10. Næste forsøg bør derfor "
+                        "undersøge søgeintention og manglende sideindhold."
+                    ),
+                    "caveats": caveats,
+                }
+            if (
+                current_type == "content_update"
+                and impressions >= 100
+                and ctr < .025
+            ):
+                return {
+                    **base,
+                    "decision": "keep_and_continue",
+                    "next_change_type": "title_meta",
+                    "title": "Behold indholdet og forbedr søgeresultatet",
+                    "rationale": (
+                        "Indholdsændringen gav en forbedring, mens den "
+                        "aktuelle CTR fortsat er lav. Næste forsøg bør "
+                        "afgrænses til title og metabeskrivelse."
+                    ),
+                    "caveats": caveats,
+                }
+            return {
+                **base,
+                "decision": "complete",
+                "next_change_type": "none",
+                "title": "Behold ændringen",
+                "rationale": (
+                    "Ændringen gav en dokumenteret forbedring, og målingen "
+                    "viser ikke et stærkt signal om endnu en ændring nu."
+                ),
+                "caveats": caveats,
+            }
+        next_type = {
+            "title_meta": (
+                "content_update" if position > 10 else "title_meta"
+            ),
+            "content_update": (
+                "title_meta" if impressions >= 100 and ctr < .025
+                else "internal_links"
+            ),
+            "internal_links": (
+                "content_update" if position > 10 else "content_gap"
+            ),
+        }.get(current_type, "content_update")
+        return {
+            **base,
+            "decision": "try_different_change",
+            "next_change_type": next_type,
+            "title": "Afprøv en anden, afgrænset ændring",
+            "rationale": (
+                "Den afsluttede ændring gav ingen tydelig effekt. Det næste "
+                f"forsøg bør være {next_type} og skal bygge på en ny analyse "
+                "af sidens aktuelle søgeord og indhold."
+            ),
+            "caveats": caveats,
+        }
 
     @staticmethod
     def calculate_metrics(

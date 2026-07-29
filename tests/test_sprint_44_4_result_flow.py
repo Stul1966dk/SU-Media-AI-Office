@@ -25,6 +25,8 @@ class UnifiedResultFlowTests(unittest.TestCase):
             self.assertIn(label, results)
         self.assertIn("get_seo_learning_entries()", results)
         self.assertIn("Se dokumenterede mønstre og datakvalitet", results)
+        self.assertIn("Efteranalyse · hvad skal der ske nu?", results)
+        self.assertIn("Se grundlaget for næste beslutning", results)
 
     def test_old_learning_surfaces_only_point_to_results(self):
         for filename in (
@@ -49,6 +51,7 @@ class UnifiedResultFlowTests(unittest.TestCase):
         self.assertIn('"samme løsning."', recommendations)
         self.assertIn("apply_measured_learning(", today)
         self.assertIn("get_seo_learning_entries()", today)
+        self.assertIn("apply_post_analysis_guidance(", today)
 
     def test_two_failed_same_url_measurements_change_the_advice(self):
         recommendation = {

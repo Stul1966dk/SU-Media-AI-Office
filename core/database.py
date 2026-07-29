@@ -183,6 +183,7 @@ class Database:
                 sample_quality TEXT NOT NULL,
                 result_status TEXT NOT NULL,
                 ai_conclusion TEXT,
+                post_analysis_json TEXT NOT NULL DEFAULT '{}',
                 caveats_json TEXT NOT NULL DEFAULT '[]',
                 evaluation_version INTEGER NOT NULL,
                 created_at TEXT NOT NULL,
@@ -199,6 +200,17 @@ class Database:
                 ON experiment_evaluations (experiment_id, evaluated_at DESC);
             """
         )
+        columns = {
+            row["name"]
+            for row in self._connection.execute(
+                "PRAGMA table_info(experiment_evaluations)"
+            )
+        }
+        if "post_analysis_json" not in columns:
+            self._connection.execute(
+                """ALTER TABLE experiment_evaluations
+                   ADD COLUMN post_analysis_json TEXT NOT NULL DEFAULT '{}'"""
+            )
 
     def save_experiment_evaluation(self, values: dict[str, Any]) -> int:
         """Upsert one evaluation version and measurement-period pair."""
@@ -214,9 +226,13 @@ class Database:
             "ctr_percentage_point_change", "ctr_relative_change",
             "position_before", "position_after", "position_change",
             "sample_quality", "result_status", "ai_conclusion",
-            "caveats_json", "evaluation_version", "created_at", "updated_at",
+            "post_analysis_json", "caveats_json", "evaluation_version",
+            "created_at", "updated_at",
         )
         normalized = dict(values)
+        normalized["post_analysis_json"] = json.dumps(
+            values.get("post_analysis", {}), ensure_ascii=False
+        )
         normalized["caveats_json"] = json.dumps(
             values.get("caveats", []), ensure_ascii=False
         )
@@ -269,6 +285,9 @@ class Database:
         for row in rows:
             item = dict(row)
             item["caveats"] = json.loads(item.pop("caveats_json") or "[]")
+            item["post_analysis"] = json.loads(
+                item.pop("post_analysis_json") or "{}"
+            )
             result.append(item)
         return result
 

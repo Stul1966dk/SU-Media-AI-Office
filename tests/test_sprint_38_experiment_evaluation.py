@@ -80,9 +80,48 @@ class ExperimentEvaluationTests(unittest.TestCase):
         self.assertEqual(0, result["position_change"])
         self.assertEqual("strong_improvement", result["result_status"])
         self.assertTrue(result["ai_conclusion"])
+        self.assertEqual("complete", result["post_analysis"]["decision"])
+        stored = self.database.get_experiment_evaluations(experiment_id)[0]
+        self.assertEqual("Behold ændringen", stored["post_analysis"]["title"])
         self.assertEqual("completed", self.database.get_seo_experiment(
             experiment_id
         )["status"])
+
+    def test_successful_title_test_can_continue_with_content(self):
+        experiment_id = self.experiment()
+        experiment = self.database.get_seo_experiment(experiment_id)
+        analysis = self.service.build_post_analysis(
+            experiment,
+            {
+                "clicks_before": 10, "clicks_after": 18,
+                "ctr_before": .02, "ctr_after": .04,
+                "position_before": 13.0, "position_after": 12.0,
+                "impressions_after": 500,
+            },
+            "improvement",
+            [],
+        )
+
+        self.assertEqual("keep_and_continue", analysis["decision"])
+        self.assertEqual("content_update", analysis["next_change_type"])
+
+    def test_insufficient_data_never_starts_another_change(self):
+        experiment_id = self.experiment()
+        experiment = self.database.get_seo_experiment(experiment_id)
+        analysis = self.service.build_post_analysis(
+            experiment,
+            {
+                "clicks_before": 0, "clicks_after": 0,
+                "ctr_before": 0, "ctr_after": 0,
+                "position_before": 0, "position_after": 0,
+                "impressions_after": 10,
+            },
+            "insufficient_data",
+            ["For få visninger."],
+        )
+
+        self.assertEqual("wait", analysis["decision"])
+        self.assertEqual("none", analysis["next_change_type"])
 
     def test_zero_baseline_and_insufficient_data_retries(self):
         experiment_id = self.experiment()

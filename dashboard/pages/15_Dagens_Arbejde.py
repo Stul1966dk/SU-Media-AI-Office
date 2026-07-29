@@ -174,6 +174,11 @@ def main() -> None:
                 database, active_ids
             ),
         )
+        priority_tasks = (
+            traffic_recommendations_module.apply_post_analysis_guidance(
+                priority_tasks, database.get_experiment_evaluations()
+            )
+        )
         priority_tasks = traffic_recommendations_module.apply_measured_learning(
             priority_tasks, database.get_seo_learning_entries()
         )
@@ -1002,6 +1007,12 @@ def _render_combined_traffic_task(
                 st.write(
                     f"**Læring fra tidligere målinger:** "
                     f"{item['learning_summary']}"
+                )
+            if item.get("post_analysis_guidance"):
+                guidance = item["post_analysis_guidance"]
+                st.write(
+                    "**Efteranalyse fra seneste 28-dages test:** "
+                    f"{guidance.get('rationale') or guidance.get('title')}"
                 )
         _render_new_decision_actions(database, item)
     _render_priority_explanation(item)

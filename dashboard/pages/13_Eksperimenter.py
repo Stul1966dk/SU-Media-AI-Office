@@ -121,9 +121,9 @@ def main() -> None:
                 st.write(
                     experiment.get("result_summary") or "Ingen konklusion."
                 )
-                st.write(
-                    "**Anbefalet næste skridt:** "
-                    + _next_step(experiment.get("result"))
+                _render_post_analysis(
+                    evaluations.get(experiment["id"]),
+                    fallback_result=experiment.get("result"),
                 )
                 with st.expander("Vis evalueringens datagrundlag"):
                     _detail(experiment, learnings.get(experiment["id"]),
@@ -499,6 +499,39 @@ def _next_step(result: str | None) -> str:
         "negative_effect": "Overvej at justere ændringen.",
         "inconclusive": "Afvent mere data. Ingen konklusion endnu.",
     }.get(result, "Følg udviklingen.")
+
+
+def _render_post_analysis(
+    evaluation: dict[str, Any] | None,
+    *,
+    fallback_result: str | None,
+) -> None:
+    """Show one explicit decision after the measurement has ended."""
+    analysis = (evaluation or {}).get("post_analysis") or {}
+    if not analysis:
+        st.write(
+            "**Anbefalet næste skridt:** " + _next_step(fallback_result)
+        )
+        return
+    with st.container(border=True):
+        st.write("**Efteranalyse · hvad skal der ske nu?**")
+        st.write(f"**{analysis.get('title') or 'Næste beslutning'}**")
+        st.write(analysis.get("rationale") or "")
+        next_type = str(analysis.get("next_change_type") or "none")
+        if next_type != "none":
+            st.write(
+                "**Næste ændringstype:** "
+                + {
+                    "title_meta": "Title og metabeskrivelse",
+                    "content_update": "Indholdsopdatering",
+                    "content_gap": "Content Gap",
+                    "internal_links": "Interne links",
+                }.get(next_type, next_type)
+            )
+        evidence = analysis.get("evidence") or []
+        with st.expander("Se grundlaget for næste beslutning"):
+            for item in evidence:
+                st.write(f"- {item}")
 
 
 def _insufficient_requirements(evaluation: dict[str, Any]) -> None:

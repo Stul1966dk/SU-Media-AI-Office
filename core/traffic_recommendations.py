@@ -140,6 +140,56 @@ def expand_daily_work_types(
     )
 
 
+def apply_post_analysis_guidance(
+    recommendations: list[dict[str, Any]],
+    evaluations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Prioritize the next work type selected by the latest 28-day analysis."""
+    latest_by_url: dict[str, dict[str, Any]] = {}
+    for evaluation in evaluations:
+        url = _normalize_url(evaluation.get("target_url"))
+        analysis = evaluation.get("post_analysis") or {}
+        if url and analysis and url not in latest_by_url:
+            latest_by_url[url] = analysis
+    guided = []
+    for recommendation in recommendations:
+        item = dict(recommendation)
+        analysis = latest_by_url.get(
+            _normalize_url(item.get("target_url"))
+        )
+        if not analysis:
+            guided.append(item)
+            continue
+        next_type = str(analysis.get("next_change_type") or "none")
+        current_type = str(analysis.get("current_change_type") or "")
+        candidate_type = str(item.get("daily_work_type") or "")
+        preferred = (
+            next_type
+            if next_type != "none"
+            else current_type
+            if analysis.get("decision") == "review_or_rollback"
+            else ""
+        )
+        if preferred:
+            adjustment = 2.0 if candidate_type == preferred else -1.0
+            item["total_score"] = round(
+                float(item.get("total_score") or 0) + adjustment, 2
+            )
+            item["post_analysis_guidance"] = {
+                "preferred_change_type": preferred,
+                "title": analysis.get("title"),
+                "rationale": analysis.get("rationale"),
+            }
+        guided.append(item)
+    return sorted(
+        guided,
+        key=lambda item: (
+            -float(item.get("total_score") or 0),
+            str(item.get("task_key") or ""),
+        ),
+    )
+
+
 def apply_measured_learning(
     recommendations: list[dict[str, Any]],
     learning_entries: list[dict[str, Any]],
