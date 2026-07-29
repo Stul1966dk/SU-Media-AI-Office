@@ -1286,7 +1286,9 @@ def _load_daily_work_styles() -> None:
         """
         <style>
           [data-testid="stMainBlockContainer"] {max-width: 880px;}
-          [data-testid="stVerticalBlockBorderWrapper"] {padding: .7rem; margin: 1.3rem 0;}
+          [data-testid="stVerticalBlockBorderWrapper"] {
+            margin-block: 1.25rem;
+          }
           .stButton button {min-height: 3.25rem; font-size: 1.05rem;}
         </style>
         """,
