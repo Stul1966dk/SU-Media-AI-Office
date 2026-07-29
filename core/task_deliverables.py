@@ -524,6 +524,7 @@ def _prompt(
         "recommended_action": recommendation.get("recommended_action"),
         "evidence": recommendation.get("explanation"),
         "search_queries": recommendation.get("search_queries") or [],
+        "forced_content_mode": recommendation.get("forced_content_mode") or "",
         "public_content_candidates": public_context[:8],
     }
     content_requirements = ""
@@ -544,6 +545,19 @@ side, når emnet har en selvstændig søgeintention og ikke naturligt hører hje
 på den eksisterende side. Kontrollér eksplicit risikoen for dubletindhold og
 søgeordskannibalisering. Ved nyt indhold skal du også levere titel, URL-idé,
 mindst tre dispositionspunkter og færdige indledende afsnit.
+"""
+        forced_mode = str(
+            recommendation.get("forced_content_mode") or ""
+        )
+        if forced_mode == "existing_section":
+            content_requirements += """
+Denne test skal leveres som existing_section. Opret ikke en ny side.
+"""
+        elif forced_mode == "content_gap":
+            content_requirements += """
+Denne test skal afprøve et content gap. Vælg den bedst dokumenterede type blandt
+new_category, new_article og new_blog_post. Brug kun existing_section, hvis
+Search Console- og sideindholdet tydeligt viser, at en ny side vil kannibalisere.
 """
         content_schema = """
   "content_location": "præcis overskrift og placering på siden",

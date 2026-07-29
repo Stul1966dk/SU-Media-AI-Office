@@ -213,8 +213,16 @@ class Sprint36ExperimentTests(unittest.TestCase):
             "🟢 Markér som implementeret",
             [button.label for button in app.button],
         )
-        self.assertEqual([], list(app.expander))
-        self.assertEqual(1, len(app.button))
+        self.assertEqual(
+            ["Midlertidig test af andre opgavetyper"],
+            [expander.label for expander in app.expander],
+        )
+        normal_buttons = [
+            button.label for button in app.button
+            if not button.label.startswith("Test ")
+        ]
+        self.assertEqual(1, len(normal_buttons))
+        self.assertTrue(normal_buttons[0].endswith("som implementeret"))
         source = page.read_text(encoding="utf-8")
         self.assertNotIn("Vis godkendelsesgrundlag", source)
         self.assertIn("Kopiér title", source)
@@ -279,9 +287,13 @@ class Sprint36ExperimentTests(unittest.TestCase):
         ):
             app = AppTest.from_file(str(page)).run(timeout=20)
         self.assertFalse(app.exception)
+        normal_buttons = [
+            button.label for button in app.button
+            if not button.label.startswith("Test ")
+        ]
         self.assertEqual(
             ["🟢 Accepter opgave", "⚪ Spring over"],
-            [button.label for button in app.button],
+            normal_buttons,
         )
         self.assertEqual("Alle websites", app.selectbox[0].value)
         visible = " ".join(
@@ -299,7 +311,10 @@ class Sprint36ExperimentTests(unittest.TestCase):
         ):
             app = app.selectbox[0].select("empty.dk").run(timeout=20)
         self.assertEqual("empty.dk", app.selectbox[0].value)
-        self.assertEqual([], [button.label for button in app.button])
+        self.assertEqual([], [
+            button.label for button in app.button
+            if not button.label.startswith("Test ")
+        ])
         self.assertTrue(any(
             "mangler Search Console-data" in item.value
             for item in app.info

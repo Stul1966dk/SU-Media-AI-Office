@@ -704,3 +704,18 @@ skal linkes, og hvordan den færdige passage skal se ud.
 Succeskriterium: AI Office kan både udbygge en relevant eksisterende side og
 foreslå en ny kategoritekst, artikel eller blogpost, men kun når Search Console
 og det eksisterende sideindhold dokumenterer et reelt hul.
+
+# Sprint 45.11 - Midlertidigt testpanel for anbefalingstyper
+
+- [x] Vis et tydeligt markeret testpanel på I dag.
+- [x] Lad brugeren vælge et aktivt website til testen.
+- [x] Fremtving indholdsopdatering, interne links eller content gap.
+- [x] Tilsidesæt kun normal prioritering i den aktuelle Streamlit-session.
+- [x] Brug gemte Search Console-data og eksisterende sideindhold.
+- [x] Bevar normal AI-generering, redigering, godkendelse og måling.
+- [x] Publicér eller implementér aldrig noget automatisk.
+- [x] Tilbyd én tydelig knap til at afslutte testtilstanden.
+- [x] Regressionstest alle tre testtyper og AI-begrænsningerne.
+
+Succeskriterium: Brugeren kan afprøve de tre nye anbefalingstyper nu uden at
+vente på den normale prioriteringsmotor eller ændre dens permanente regler.
