@@ -22,7 +22,7 @@
 
 [data-testid="stMetric"] {
     background: #121821;
-    border: 1px solid #34445a;
+    border: 1px solid #41556f;
     border-radius: 0.75rem;
     padding: 1rem;
 }
@@ -33,11 +33,11 @@
  * sections readable without adding decorative colours.
  */
 [data-testid="stVerticalBlockBorderWrapper"] {
-    background: rgba(18, 24, 33, 0.58);
-    border-color: #34445a;
+    background: rgba(18, 24, 33, 0.72);
+    border-color: #41556f;
     box-shadow:
-        0 1px 0 rgba(255, 255, 255, 0.025),
-        0 8px 24px rgba(0, 0, 0, 0.12);
+        0 1px 0 rgba(255, 255, 255, 0.04),
+        0 8px 24px rgba(0, 0, 0, 0.16);
     margin-block: 1.15rem;
     padding: 0.45rem;
 }

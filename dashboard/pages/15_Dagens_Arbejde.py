@@ -1144,6 +1144,7 @@ def _render_implementation(
     if not _has_concrete_change(change):
         st.error("Den godkendte ændring er ufuldstændig og kan ikke implementeres.")
         return
+    _render_page_card(item, change)
     _render_search_intent(item)
     _render_change_card(item, change)
     with st.container(border=True):

@@ -16,8 +16,8 @@ class SectionBoundaryTests(unittest.TestCase):
         self.assertIn(
             '[data-testid="stVerticalBlockBorderWrapper"] {', styles
         )
-        self.assertIn("background: rgba(18, 24, 33, 0.58)", styles)
-        self.assertIn("border-color: #34445a", styles)
+        self.assertIn("background: rgba(18, 24, 33, 0.72)", styles)
+        self.assertIn("border-color: #41556f", styles)
         self.assertIn("margin-block: 1.15rem", styles)
         self.assertIn("box-shadow:", styles)
 
@@ -27,6 +27,19 @@ class SectionBoundaryTests(unittest.TestCase):
         self.assertIn("margin-block: 1.25rem", source)
         self.assertNotIn(
             "padding: .7rem; margin: 1.3rem 0;", source
+        )
+
+    def test_accepted_task_keeps_target_page_card(self) -> None:
+        source = DAILY_WORK.read_text(encoding="utf-8")
+        implementation = source.split(
+            "def _render_implementation(", 1
+        )[1].split("def _render_page_card(", 1)[0]
+
+        self.assertIn("_render_page_card(item, change)", implementation)
+        self.assertIn("_render_change_card(item, change)", implementation)
+        self.assertLess(
+            implementation.index("_render_page_card(item, change)"),
+            implementation.index("_render_change_card(item, change)"),
         )
 
 
