@@ -59,12 +59,43 @@ def validate_task_deliverable(text: str) -> dict[str, Any]:
                 "Title og meta må ikke omtale priser, beløb eller valuta."
             )
         value["recommended_option"] = format_title_meta_option(title, meta)
+    elif deliverable_type == "content_update":
+        validate_content_change(value)
+        value["recommended_option"] = value["replacement_content"]
     value["rationale"] = str(value["rationale"]).strip()
     return value
 
 
+def validate_content_change(value: dict[str, Any]) -> None:
+    """Require a paste-ready, grounded content change."""
+    required = (
+        "content_location", "current_content", "replacement_content",
+        "search_intent",
+    )
+    for field in required:
+        if not str(value.get(field) or "").strip():
+            raise ValueError(
+                f"Indholdsopdateringen mangler det konkrete felt {field}."
+            )
+        value[field] = str(value[field]).strip()
+    if len(value["replacement_content"]) < 80:
+        raise ValueError(
+            "Den nye tekst er for kort til at være en færdig indholdsleverance."
+        )
+    placeholders = (
+        "skriv selv", "tilføj relevant tekst", "indsæt tekst her",
+        "udarbejd et afsnit", "2-3 korte afsnit",
+    )
+    normalized = value["replacement_content"].casefold()
+    if any(placeholder in normalized for placeholder in placeholders):
+        raise ValueError(
+            "Indholdsopdateringen beder brugeren skrive teksten selv."
+        )
+
+
 def fallback_task_deliverable(
     recommendation: dict[str, Any],
+    public_context: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Return a concrete rule-based draft if the AI service is unavailable."""
     query = str(
@@ -102,13 +133,37 @@ def fallback_task_deliverable(
             ],
         }
     if deliverable_type == "content_update":
+        page = next(
+            (
+                row for row in (public_context or [])
+                if row.get("relation") == "berørt side"
+            ),
+            {},
+        )
+        sections = page.get("content_sections") or []
+        current = str(
+            (sections[0].get("text") if sections else "")
+            or page.get("h1")
+            or page.get("content_excerpt")
+            or "Ingen sikker eksisterende passage kunne identificeres."
+        ).strip()[:600]
+        heading = str(page.get("h1") or query).strip()
+        replacement = (
+            f"{heading}\n\n"
+            f"Her får du et klart svar om {query}. "
+            f"{current}"
+        ).strip()
         return {
             "deliverable_type": "content_update",
             "summary": f"Et konkret indholdsudkast til {url}.",
-            "recommended_option": (
-                f"Tilføj en sektion med overskriften “Sådan bruger du "
-                f"{query} i praksis” og besvar først brugerens vigtigste "
-                "spørgsmål i 2–3 korte afsnit."
+            "recommended_option": replacement,
+            "content_location": (
+                f"Erstat eller udbyg den første hovedsektion under “{heading}”."
+            ),
+            "current_content": current,
+            "replacement_content": replacement,
+            "search_intent": (
+                f"Brugeren søger et tydeligt og praktisk svar om {query}."
             ),
             "alternatives": [
                 f"Tilføj en FAQ med tre spørgsmål om {query}.",
@@ -215,10 +270,26 @@ def format_deliverable(deliverable: dict[str, Any]) -> str:
     checks = "\n".join(
         f"- {item}" for item in deliverable["validation_checks"]
     )
+    content_sections = ""
+    structured_content_fields = (
+        "content_location", "current_content", "replacement_content",
+        "search_intent",
+    )
+    if (
+        deliverable["deliverable_type"] == "content_update"
+        and all(deliverable.get(field) for field in structured_content_fields)
+    ):
+        content_sections = (
+            f"Placering:\n{deliverable['content_location']}\n\n"
+            f"Nuværende tekst:\n{deliverable['current_content']}\n\n"
+            f"Ny tekst:\n{deliverable['replacement_content']}\n\n"
+            f"Søgeintention:\n{deliverable['search_intent']}\n\n"
+        )
     return (
         f"Leverancetype: {deliverable['deliverable_type']}\n\n"
         f"{deliverable['summary']}\n\n"
         f"Anbefalet løsning:\n{deliverable['recommended_option']}\n\n"
+        f"{content_sections}"
         f"Begrundelse:\n{deliverable['rationale']}\n\n"
         f"Alternativer:\n{alternatives}\n\n"
         f"Implementering:\n{steps}\n\n"
@@ -281,6 +352,24 @@ def _prompt(
         "evidence": recommendation.get("explanation"),
         "public_content_candidates": public_context[:8],
     }
+    content_requirements = ""
+    content_schema = ""
+    if deliverable_type == "content_update":
+        content_requirements = """
+Ved content_update skal du udpege en præcis placering på siden og citere den
+nuværende passage fra public_content_candidates. Lever en fuldt færdig
+erstatning eller tilføjelse, som kan kopieres direkte. Bed aldrig brugeren om
+selv at skrive, uddybe eller finde teksten. Den nye tekst skal besvare den
+klassificerede søgeintention og må ikke opfinde fakta, produkter, funktioner
+eller løfter, som ikke er dokumenteret i sideindholdet. Hvis en helt ny sektion
+er nødvendig, skriv "Ny sektion – ingen eksisterende tekst" som current_content.
+"""
+        content_schema = """
+  "content_location": "præcis overskrift og placering på siden",
+  "current_content": "ordret eksisterende passage eller markering af ny sektion",
+  "replacement_content": "færdig tekst til direkte indsættelse",
+  "search_intent": "kort konkret beskrivelse af brugerens intention",
+"""
     return f"""
 Du er arbejdsassistent i en dansk SEO-app. Producer selve arbejdsudkastet;
 bed aldrig brugeren om selv at skrive forslagene eller lave den indledende
@@ -290,6 +379,7 @@ Ved title_meta skal title og meta stå på hver sin linje som "Title: ..." og
 "Meta: ...". Brug altid " | " som separator i titles; brug ikke kolon som
 title-separator. Titles og metabeskrivelser må aldrig omtale priser, konkrete
 beløb eller valuta, fordi oplysningerne hurtigt bliver forældede.
+{content_requirements}
 
 Opgavetype: {deliverable_type}
 Data: {json.dumps(payload, ensure_ascii=False)}
@@ -299,6 +389,7 @@ Svar kun med gyldig JSON:
   "deliverable_type": "{deliverable_type}",
   "summary": "kort beskrivelse af den færdige leverance",
   "recommended_option": "det konkrete forslag; ved title_meta både title og meta",
+{content_schema}
   "alternatives": ["konkret alternativ 1", "konkret alternativ 2", "konkret alternativ 3"],
   "rationale": "kort databaseret begrundelse",
   "implementation_steps": ["præcis manuel handling 1", "præcis manuel handling 2"],

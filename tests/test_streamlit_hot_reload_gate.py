@@ -19,6 +19,7 @@ class StreamlitHotReloadGateTests(unittest.TestCase):
             "format_title_meta_option",
             "prefer_pipe_separator",
             "split_title_meta_option",
+            "validate_content_change",
         )
         for name in required:
             self.assertTrue(hasattr(task_deliverables, name))

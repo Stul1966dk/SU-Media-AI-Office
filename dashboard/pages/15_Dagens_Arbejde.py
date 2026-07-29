@@ -56,6 +56,7 @@ format_title_meta_option = task_deliverables_module.format_title_meta_option
 generate_task_deliverable = task_deliverables_module.generate_task_deliverable
 prefer_pipe_separator = task_deliverables_module.prefer_pipe_separator
 split_title_meta_option = task_deliverables_module.split_title_meta_option
+validate_content_change = task_deliverables_module.validate_content_change
 
 
 def _optimizer(database: Any) -> TitleOptimizer:
@@ -412,6 +413,15 @@ def _render_approved_instruction(deliverable: dict[str, Any]) -> None:
 
 
 def _render_deliverable_option(deliverable: dict[str, Any]) -> None:
+    if (
+        deliverable.get("deliverable_type") == "content_update"
+        and all(deliverable.get(field) for field in (
+            "content_location", "current_content", "replacement_content",
+            "search_intent",
+        ))
+    ):
+        _render_content_update(deliverable)
+        return
     if deliverable.get("deliverable_type") != "title_meta":
         st.success(deliverable["recommended_option"])
         st.caption("Teksten kan markeres og kopieres direkte.")
@@ -433,6 +443,30 @@ def _render_deliverable_option(deliverable: dict[str, Any]) -> None:
     st.write("**Metabeskrivelse**")
     st.code(meta, language=None, wrap_lines=True)
     st.caption("Brug kopiér-knappen i meta-feltet.")
+
+
+def _render_content_update(deliverable: dict[str, Any]) -> None:
+    st.write("**Placering på siden**")
+    st.info(str(deliverable.get("content_location") or "Ikke angivet"))
+    st.write("**Nuværende tekst**")
+    st.code(
+        str(deliverable.get("current_content") or "Ikke identificeret"),
+        language=None,
+        wrap_lines=True,
+    )
+    st.write("**Ny færdig tekst**")
+    st.code(
+        str(
+            deliverable.get("replacement_content")
+            or deliverable.get("recommended_option")
+            or ""
+        ),
+        language=None,
+        wrap_lines=True,
+    )
+    st.caption("Brug kopiér-knappen i feltet med den nye tekst.")
+    st.write("**Søgeintention**")
+    st.write(str(deliverable.get("search_intent") or "Ikke angivet"))
 
 
 def _render_legacy_approved_instruction(
@@ -552,7 +586,7 @@ def _parse_approved_deliverable(
     checks = _strip_list_markers(section(
         "Kontrol før godkendelse:", None
     ))
-    return {
+    result = {
         "deliverable_type": section(
             "Leverancetype:", None
         ).splitlines()[0].strip()
@@ -566,6 +600,29 @@ def _parse_approved_deliverable(
         "implementation_steps": steps,
         "validation_checks": checks,
     }
+    if result["deliverable_type"] == "content_update":
+        optional_headings = (
+            "Placering:", "Nuværende tekst:", "Ny tekst:", "Søgeintention:",
+        )
+        if all(heading in description for heading in optional_headings):
+            result.update({
+                "recommended_option": section(
+                    "Anbefalet løsning:", "Placering:"
+                ),
+                "content_location": section(
+                    "Placering:", "Nuværende tekst:"
+                ),
+                "current_content": section(
+                    "Nuværende tekst:", "Ny tekst:"
+                ),
+                "replacement_content": section(
+                    "Ny tekst:", "Søgeintention:"
+                ),
+                "search_intent": section(
+                    "Søgeintention:", "Begrundelse:"
+                ),
+            })
+    return result
 
 
 def _strip_list_markers(value: str) -> list[str]:
@@ -738,7 +795,9 @@ def _generate_deliverable(
             item, ai_service=AIService(), public_context=public_context
         ), False
     except Exception:
-        return fallback_task_deliverable(item), True
+        return fallback_task_deliverable(
+            item, public_context=public_context
+        ), True
 
 
 def _render_deliverable_for_approval(
@@ -784,6 +843,36 @@ def _render_deliverable_for_approval(
             edited_solution = format_title_meta_option(
                 edited_snippet_title, edited_snippet_meta
             )
+            reviewed_fields = {}
+        elif deliverable["deliverable_type"] == "content_update":
+            edited_location = st.text_input(
+                "Placering på siden",
+                value=deliverable["content_location"],
+                help="Angiv den præcise overskrift eller passage.",
+            )
+            edited_current = st.text_area(
+                "Nuværende tekst",
+                value=deliverable["current_content"],
+                height=120,
+            )
+            edited_replacement = st.text_area(
+                "Ny færdig tekst",
+                value=deliverable["replacement_content"],
+                height=260,
+                help="Dette er teksten, der skal kunne kopieres direkte.",
+            )
+            edited_intent = st.text_area(
+                "Søgeintention",
+                value=deliverable["search_intent"],
+                height=90,
+            )
+            edited_solution = edited_replacement
+            reviewed_fields = {
+                "content_location": edited_location,
+                "current_content": edited_current,
+                "replacement_content": edited_replacement,
+                "search_intent": edited_intent,
+            }
         else:
             edited_solution = st.text_area(
                 "Anbefalet løsning",
@@ -794,11 +883,22 @@ def _render_deliverable_for_approval(
                     "eller søgeintentionen."
                 ),
             )
+            reviewed_fields = {}
         approved = st.form_submit_button(
             "Godkend arbejdsudkast", type="primary"
         )
     if approved:
-        reviewed = {**deliverable, "recommended_option": edited_solution}
+        reviewed = {
+            **deliverable,
+            **reviewed_fields,
+            "recommended_option": edited_solution,
+        }
+        if reviewed["deliverable_type"] == "content_update":
+            try:
+                validate_content_change(reviewed)
+            except ValueError as error:
+                st.error(str(error))
+                return
         _create_and_approve(
             database, item, edited_title, format_deliverable(reviewed)
         )

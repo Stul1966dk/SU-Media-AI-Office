@@ -648,3 +648,21 @@ hvis den omtaler priser, beløb eller valuta, som hurtigt kan blive forældet.
 Succeskriterium: Brugeren kan se, hvilken søgeintention AI'en har vurderet,
 inden et forslag godkendes, og title/meta må ikke love funktioner eller indhold,
 som ikke findes på siden.
+
+# Sprint 45.8 - Konkrete indholdsopdateringer
+
+- [x] Indlæs offentlige H1-, H2-, H3-, afsnits- og listeelementer fra siden.
+- [x] Kræv en præcis placering for indholdsændringen.
+- [x] Kræv den identificerede nuværende tekst eller en tydelig ny sektion.
+- [x] Kræv en færdig erstatning eller tilføjelse, som kan kopieres direkte.
+- [x] Afvis udkast, der beder brugeren om selv at skrive indholdet.
+- [x] Kræv en konkret beskrivelse af søgeintentionen.
+- [x] Vis placering, førtekst, ny tekst og søgeintention separat på I dag.
+- [x] Giv den nye tekst sin egen indbyggede kopiér-knap.
+- [x] Gem den strukturerede leverance gennem godkendelse og implementering.
+- [x] Bevar visning og registrering af ældre, generiske indholdsopgaver.
+- [x] Regressionstest validering, sideanalyse, fallback, lagring og brugerflade.
+
+Succeskriterium: En ny indholdsopgave må ikke nøjes med at bede brugeren
+opdatere en side. Den skal udpege stedet og levere den færdige tekst, som kan
+kontrolleres, kopieres, implementeres manuelt og efterfølgende måles.

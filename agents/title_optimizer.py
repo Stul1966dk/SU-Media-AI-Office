@@ -49,7 +49,10 @@ class _PageParser(HTMLParser):
         self.schema: list[str] = []
         self.links: list[str] = []
         self.text: list[str] = []
+        self.sections: list[dict[str, str]] = []
         self._capture = ""
+        self._section_tag = ""
+        self._section_text: list[str] = []
 
     def handle_starttag(
         self, tag: str, attrs: list[tuple[str, str | None]]
@@ -57,6 +60,9 @@ class _PageParser(HTMLParser):
         values = {key.lower(): value or "" for key, value in attrs}
         if tag in {"title", "h1"}:
             self._capture = tag
+        if tag in {"h1", "h2", "h3", "p", "li"}:
+            self._section_tag = tag
+            self._section_text = []
         elif tag == "meta" and values.get("name", "").lower() == "description":
             self.meta = values.get("content", "").strip()
         elif tag == "link" and "canonical" in values.get("rel", "").lower():
@@ -71,12 +77,20 @@ class _PageParser(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag == self._capture:
             self._capture = ""
+        if tag == self._section_tag:
+            text = " ".join(self._section_text).strip()
+            if text:
+                self.sections.append({"element": tag, "text": text})
+            self._section_tag = ""
+            self._section_text = []
 
     def handle_data(self, data: str) -> None:
         text = data.strip()
         if not text:
             return
         self.text.append(text)
+        if self._section_tag:
+            self._section_text.append(text)
         if self._capture == "title":
             self.title += (" " if self.title else "") + text
         elif self._capture == "h1":
@@ -152,6 +166,7 @@ class TitleOptimizer:
             "title": parser.title.strip(), "meta_description": parser.meta,
             "h1": parser.h1.strip(), "canonical": parser.canonical,
             "content_excerpt": " ".join(parser.text).strip()[:3000],
+            "content_sections": parser.sections[:40],
             "word_count": len(re.findall(r"\b[\wæøåÆØÅ-]+\b",
                                          " ".join(parser.text))),
             "internal_links": internal_links,
