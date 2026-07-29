@@ -24,6 +24,10 @@ def main() -> None:
     load_styles(PROJECT_ROOT / "dashboard" / "assets" / "styles.css")
     render_sidebar()
     st.title("Indholdsaktualitet")
+    st.caption(
+        "Kontrollen køres, hver gang I dag eller denne side åbnes, på det "
+        "senest synkroniserede artikelindhold."
+    )
     render_help_panel(
         purpose=(
             "Find tekster, der kan omtale gamle årstal, versioner eller "

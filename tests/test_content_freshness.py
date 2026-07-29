@@ -7,6 +7,7 @@ from core.content_freshness import (
     build_freshness_recommendations,
 )
 from core.task_deliverables import _prompt
+from core.priority_scoring import stable_priority_key
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -129,6 +130,44 @@ class ContentFreshnessTests(unittest.TestCase):
         self.assertIn("aktuel, officiel kilde", overview)
         self.assertIn("build_freshness_recommendations", today)
         self.assertIn('"content_freshness"', today)
+        self.assertIn(
+            "sorted(priority_tasks, key=stable_priority_key)", today
+        )
+        self.assertIn(
+            "hver gang I dag eller denne side åbnes", overview
+        )
+
+    def test_freshness_competes_with_other_work_by_score(self):
+        freshness = build_freshness_recommendations(
+            {
+                "site.dk": [
+                    content(
+                        source_updated_at="2018-01-01T00:00:00+01:00",
+                        content_text=(
+                            "Denne funktion er lukket ned og understøttes "
+                            "ikke længere. Guiden forklarer den tidligere "
+                            "arbejdsgang og de gamle indstillinger."
+                        ),
+                    )
+                ]
+            },
+            reference_date=date(2026, 7, 29),
+        )[0]
+        more_important_traffic_task = {
+            "task_type": "combined_traffic_decline",
+            "website": "site.dk",
+            "description": "Større dokumenteret trafikfald",
+            "task_key": "traffic",
+            "total_score": freshness["total_score"] + 10,
+        }
+
+        ranked = sorted(
+            [freshness, more_important_traffic_task],
+            key=stable_priority_key,
+        )
+
+        self.assertEqual("traffic", ranked[0]["task_key"])
+        self.assertEqual("content_freshness", ranked[1]["task_type"])
 
 
 if __name__ == "__main__":

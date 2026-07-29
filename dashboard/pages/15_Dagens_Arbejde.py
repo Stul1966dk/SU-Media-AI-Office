@@ -44,6 +44,7 @@ from core.daily_work_preparation import DailyWorkPreparationService
 from core.current_diagnosis_reader import read_latest_diagnoses
 from core.seo_experiment_engine import SEOExperimentEngine
 from core.prompt_guidelines import PromptGuidelines
+from core.priority_scoring import stable_priority_key
 from core.website_registry import WebsiteRegistry
 from connectors.wordpress_connector import WordPressConnector
 from core.work_queue_service import WorkQueueService
@@ -197,6 +198,9 @@ def main() -> None:
         priority_tasks = _filter_decided_recommendations(
             priority_tasks, decisions,
         )
+        # All eligible work types compete in one shared, evidence-based queue.
+        # This final sort prevents insertion order from favouring any task type.
+        priority_tasks = sorted(priority_tasks, key=stable_priority_key)
         if website_id:
             priority_tasks = [
                 item for item in priority_tasks

@@ -6,6 +6,8 @@ import re
 from datetime import date, datetime
 from typing import Any
 
+from core.priority_scoring import priority_label
+
 
 STATUS_LABELS = {
     "current": "Aktuel",
@@ -128,6 +130,7 @@ def build_freshness_recommendations(
             if audit["status"] == "current":
                 continue
             signals = audit["signals"]
+            total_score = 18.0 + float(audit["score"])
             candidates.append({
                 "task_key": f"content-freshness|{website}|{url}",
                 "task_type": "content_freshness",
@@ -145,10 +148,8 @@ def build_freshness_recommendations(
                 ),
                 "experiment_type": "content_update",
                 "forced_content_mode": "existing_section",
-                "priority": (
-                    "Høj" if audit["status"] == "likely_outdated" else "Mellem"
-                ),
-                "total_score": 18.0 + float(audit["score"]),
+                "priority": priority_label(total_score),
+                "total_score": total_score,
                 "plausible_change": 0.0,
                 "search_console_change": "Aktualitetskontrol af lagret sideindhold",
                 "explanation": (
