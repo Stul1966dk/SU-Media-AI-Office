@@ -135,8 +135,13 @@ class TrafficWorkOverviewTests(unittest.TestCase):
             "priority_tasks = database.get_priority_task_scores", source
         )
         self.assertIn("set_selected_website(website)", source)
+        self.assertNotIn("Igangværende SEO-arbejde", source)
+        results = (
+            Path(__file__).resolve().parents[1]
+            / "dashboard" / "pages" / "13_Eksperimenter.py"
+        ).read_text(encoding="utf-8")
         self.assertIn(
-            'label="Se aktive målinger og resultater"', source
+            'st.subheader("Aktive målinger")', results
         )
 
     def test_hot_reload_fallback_reads_diagnoses_per_website(self):

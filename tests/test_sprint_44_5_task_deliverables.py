@@ -24,7 +24,12 @@ class FakeAI:
         return SimpleNamespace(text=json.dumps({
             "deliverable_type": self.deliverable_type,
             "summary": "Tre færdige forslag.",
-            "recommended_option": "Det anbefalede konkrete forslag.",
+            "recommended_option": (
+                "Title: Det anbefalede forslag | Site\n"
+                "Meta: Den anbefalede konkrete metabeskrivelse."
+                if self.deliverable_type == "title_meta"
+                else "Det anbefalede konkrete forslag."
+            ),
             "alternatives": ["Forslag A", "Forslag B", "Forslag C"],
             "rationale": "Bygger på det målte signal.",
             "implementation_steps": ["Indsæt manuelt.", "Kontrollér siden."],

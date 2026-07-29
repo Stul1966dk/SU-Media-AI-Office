@@ -34,9 +34,6 @@ from core.ai_service import AIService
 from core.daily_work_preparation import DailyWorkPreparationService
 from core.current_diagnosis_reader import read_latest_diagnoses
 from core.seo_experiment_engine import SEOExperimentEngine
-from core.task_deliverables import (
-    fallback_task_deliverable, format_deliverable, generate_task_deliverable,
-)
 from core.website_registry import WebsiteRegistry
 from core.work_queue_service import WorkQueueService
 from dashboard.components.database import open_database
@@ -44,12 +41,21 @@ from dashboard.components.data import (
     _filter_decided_recommendations,
 )
 import dashboard.components.data as dashboard_data_module
+import core.task_deliverables as task_deliverables_module
 import core.traffic_recommendation_store as traffic_store_module
 import core.traffic_recommendation_workflow as traffic_workflow_module
 import core.traffic_recommendations as traffic_recommendations_module
 import core.traffic_work_overview as traffic_work_module
 from dashboard.components.ui import load_styles, render_sidebar
 from dashboard.components.website_selector import set_selected_website
+
+task_deliverables_module = importlib.reload(task_deliverables_module)
+fallback_task_deliverable = task_deliverables_module.fallback_task_deliverable
+format_deliverable = task_deliverables_module.format_deliverable
+format_title_meta_option = task_deliverables_module.format_title_meta_option
+generate_task_deliverable = task_deliverables_module.generate_task_deliverable
+prefer_pipe_separator = task_deliverables_module.prefer_pipe_separator
+split_title_meta_option = task_deliverables_module.split_title_meta_option
 
 
 def _optimizer(database: Any) -> TitleOptimizer:
@@ -226,43 +232,11 @@ def _current_diagnoses(
 def _render_work_overview(
     database: Any, items: list[dict[str, Any]]
 ) -> None:
-    """Show the current workflow before proposing another recommendation."""
-    if not items:
-        return
-    st.subheader("Igangværende SEO-arbejde")
-    counts = {
-        "Kladder": sum(item["stage"] == "draft" for item in items),
-        "Afventer implementering": sum(
-            item["stage"] == "approved" for item in items
-        ),
-        "Under måling": sum(
-            item["stage"] == "measurement" for item in items
-        ),
-        "Klar til evaluering": sum(
-            item["stage"] == "ready_for_evaluation" for item in items
-        ),
-    }
+    """Show only the one current action; status belongs on Resultater."""
     actionable = traffic_work_module.next_actionable_work(items)
     if actionable:
         st.markdown("### Næste trin")
         _render_workflow_card(database, actionable, primary=True)
-    other_items = [
-        item for item in items
-        if not actionable or item is not actionable
-    ]
-    with st.expander("Se status og øvrigt igangværende arbejde"):
-        columns = st.columns(4)
-        for column, (label, value) in zip(columns, counts.items()):
-            column.metric(label, value)
-        if counts["Under måling"] or counts["Klar til evaluering"]:
-            st.page_link(
-                "pages/13_Eksperimenter.py",
-                label="Se aktive målinger og resultater",
-                icon=":material/science:",
-            )
-        if other_items:
-            for item in other_items:
-                _render_workflow_card(database, item, primary=False)
 
 
 def _render_workflow_card(
@@ -298,7 +272,7 @@ def _workflow(database: Any) -> Any:
 
 def _finish_daily_action(message: str) -> None:
     st.session_state["daily_action_result"] = message
-    st.rerun()
+    st.switch_page("app.py")
 
 
 def _render_draft_decision(
@@ -420,8 +394,7 @@ def _render_approved_instruction(deliverable: dict[str, Any]) -> None:
     st.markdown("### Godkendt arbejdsinstruks")
     st.write(deliverable["summary"])
     st.write("**Det skal du rette**")
-    st.success(deliverable["recommended_option"])
-    st.caption("Teksten kan markeres og kopieres direkte.")
+    _render_deliverable_option(deliverable)
     st.write("**Sådan udfører du ændringen**")
     for index, step in enumerate(deliverable["implementation_steps"], 1):
         st.write(f"{index}. {step}")
@@ -436,6 +409,30 @@ def _render_approved_instruction(deliverable: dict[str, Any]) -> None:
                 deliverable["alternatives"], 1
             ):
                 st.write(f"{index}. {alternative}")
+
+
+def _render_deliverable_option(deliverable: dict[str, Any]) -> None:
+    if deliverable.get("deliverable_type") != "title_meta":
+        st.success(deliverable["recommended_option"])
+        st.caption("Teksten kan markeres og kopieres direkte.")
+        return
+    try:
+        title, meta = split_title_meta_option(
+            deliverable["recommended_option"]
+        )
+    except ValueError:
+        st.warning(
+            "Forslaget kunne ikke opdeles automatisk. Kontrollér teksten "
+            "ekstra grundigt."
+        )
+        st.code(deliverable["recommended_option"], language=None)
+        return
+    st.write("**Title**")
+    st.code(title, language=None, wrap_lines=True)
+    st.caption("Brug kopiér-knappen i title-feltet.")
+    st.write("**Metabeskrivelse**")
+    st.code(meta, language=None, wrap_lines=True)
+    st.caption("Brug kopiér-knappen i meta-feltet.")
 
 
 def _render_legacy_approved_instruction(
@@ -556,6 +553,10 @@ def _parse_approved_deliverable(
         "Kontrol før godkendelse:", None
     ))
     return {
+        "deliverable_type": section(
+            "Leverancetype:", None
+        ).splitlines()[0].strip()
+        if "Leverancetype:" in description else "",
         "summary": summary,
         "recommended_option": section(
             "Anbefalet løsning:", "Begrundelse:"
@@ -750,7 +751,7 @@ def _render_deliverable_for_approval(
     """Show the actual output before allowing an approval."""
     st.subheader("Konkret arbejdsudkast")
     st.write(f"**AI Offices anbefaling:** {deliverable['summary']}")
-    st.success(deliverable["recommended_option"])
+    _render_deliverable_option(deliverable)
     st.write(f"**Hvorfor:** {deliverable['rationale']}")
     with st.expander("Se alternativer"):
         for index, alternative in enumerate(
@@ -768,15 +769,31 @@ def _render_deliverable_for_approval(
             st.write(f"- {check}")
     with st.form(f"approve-deliverable-{item['task_key']}"):
         edited_title = st.text_input("Opgavetitel", value=title)
-        edited_solution = st.text_area(
-            "Anbefalet løsning",
-            value=deliverable["recommended_option"],
-            height=150,
-            help=(
-                "Ret kun forslaget, hvis AI Office har misforstået siden "
-                "eller søgeintentionen."
-            ),
-        )
+        if deliverable["deliverable_type"] == "title_meta":
+            proposed_title, proposed_meta = split_title_meta_option(
+                deliverable["recommended_option"]
+            )
+            edited_snippet_title = st.text_input(
+                "Godkendt title", value=proposed_title
+            )
+            edited_snippet_meta = st.text_area(
+                "Godkendt metabeskrivelse",
+                value=proposed_meta,
+                height=100,
+            )
+            edited_solution = format_title_meta_option(
+                edited_snippet_title, edited_snippet_meta
+            )
+        else:
+            edited_solution = st.text_area(
+                "Anbefalet løsning",
+                value=deliverable["recommended_option"],
+                height=150,
+                help=(
+                    "Ret kun forslaget, hvis AI Office har misforstået siden "
+                    "eller søgeintentionen."
+                ),
+            )
         approved = st.form_submit_button(
             "Godkend arbejdsudkast", type="primary"
         )
@@ -1006,7 +1023,7 @@ def _render_recommendation(
         try:
             queue.approve(
                 item["id"],
-                title=change["approved_title"],
+                title=prefer_pipe_separator(change["approved_title"]),
                 meta=change["approved_meta"],
                 title_optimizer=_optimizer(database),
             )
@@ -1067,7 +1084,11 @@ def _render_change_card(
     with st.container(border=True):
         st.subheader("AI anbefaler")
         st.write("**Ny title**")
-        st.code(change["approved_title"], language=None, wrap_lines=True)
+        st.code(
+            prefer_pipe_separator(change["approved_title"]),
+            language=None,
+            wrap_lines=True,
+        )
         st.caption("Kopiér title med kopiér-ikonet i feltet.")
         st.write("**Ny metabeskrivelse**")
         st.code(change["approved_meta"], language=None, wrap_lines=True)

@@ -558,3 +558,19 @@ Succeskriterium: Brugeren kan på I dag se præcis, hvad der skal rettes, hvorda
 
 Succeskriterium: I dag foreslår og viser kun arbejde fra de websites, brugeren
 aktivt har valgt at arbejde med, uden at slette historik fra de øvrige.
+
+# Sprint 45.2 - Enklere udførelse på I dag
+
+- [x] Vis title og metabeskrivelse i hvert sit kopierbare felt.
+- [x] Brug Streamlits indbyggede kopiér-knap uden special-JavaScript.
+- [x] Brug `|` i stedet for kolon som separator i nye og eksisterende titles.
+- [x] Gem den normaliserede title som den faktisk godkendte ændring.
+- [x] Kræv struktureret title og meta fra AI-genereringen.
+- [x] Fjern samlet status og øvrigt arbejde fra I dag; målinger følges under
+  Resultater i menuen.
+- [x] Navigér tilbage til toppen af I dag efter en afsluttet handling.
+- [x] Gør de nye leverancefunktioner sikre ved Streamlit hot reload.
+- [x] Regressionstest og browsertest det samlede flow.
+
+Succeskriterium: Brugeren kan kopiere title og meta med én handling pr. felt,
+ser kun den aktuelle opgave på I dag og starter altid næste opgave fra toppen.

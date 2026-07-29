@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 
@@ -51,6 +52,9 @@ def validate_task_deliverable(text: str) -> dict[str, Any]:
     value["deliverable_type"] = deliverable_type
     value["summary"] = str(value["summary"]).strip()
     value["recommended_option"] = str(value["recommended_option"]).strip()
+    if deliverable_type == "title_meta":
+        title, meta = split_title_meta_option(value["recommended_option"])
+        value["recommended_option"] = format_title_meta_option(title, meta)
     value["rationale"] = str(value["rationale"]).strip()
     return value
 
@@ -76,8 +80,8 @@ def fallback_task_deliverable(
                 "Se løsningen, de vigtigste valg og typiske fejl."
             ),
             "alternatives": [
-                f"Title: Sådan gør du: {query.capitalize()}",
-                f"Title: {query.capitalize()} – komplet guide",
+                f"Title: Sådan gør du | {query.capitalize()}",
+                f"Title: {query.capitalize()} | Komplet guide",
                 f"Meta: Lær hvordan du håndterer {query} med en enkel guide.",
             ],
             "rationale": (
@@ -218,6 +222,37 @@ def format_deliverable(deliverable: dict[str, Any]) -> str:
     )
 
 
+def split_title_meta_option(value: str) -> tuple[str, str]:
+    """Extract title and meta from either one-line or multiline AI output."""
+    cleaned = " ".join(str(value or "").split())
+    match = re.fullmatch(
+        r"Title:\s*(.+?)\s+Meta:\s*(.+)",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        raise ValueError(
+            "Title/meta-udkastet skal indeholde både 'Title:' og 'Meta:'."
+        )
+    title = prefer_pipe_separator(match.group(1).strip())
+    meta = match.group(2).strip()
+    if not title or not meta:
+        raise ValueError("Title/meta-udkastet mangler title eller meta.")
+    return title, meta
+
+
+def prefer_pipe_separator(title: str) -> str:
+    """Use the product's preferred visual separator in generated titles."""
+    clean = str(title or "").strip()
+    if " | " not in clean and ": " in clean:
+        clean = clean.replace(": ", " | ", 1)
+    return clean
+
+
+def format_title_meta_option(title: str, meta: str) -> str:
+    return f"Title: {prefer_pipe_separator(title)}\nMeta: {str(meta).strip()}"
+
+
 def _prompt(
     recommendation: dict[str, Any],
     public_context: list[dict[str, Any]],
@@ -238,6 +273,9 @@ Du er arbejdsassistent i en dansk SEO-app. Producer selve arbejdsudkastet;
 bed aldrig brugeren om selv at skrive forslagene eller lave den indledende
 analyse. Intet må publiceres automatisk. Brug kun den givne evidens, markér
 usikkerhed, og bevar sidens søgeintention.
+Ved title_meta skal title og meta stå på hver sin linje som "Title: ..." og
+"Meta: ...". Brug altid " | " som separator i titles; brug ikke kolon som
+title-separator.
 
 Opgavetype: {deliverable_type}
 Data: {json.dumps(payload, ensure_ascii=False)}
