@@ -45,6 +45,7 @@ from core.daily_work_preparation import DailyWorkPreparationService
 from core.current_diagnosis_reader import read_latest_diagnoses
 from core.seo_experiment_engine import SEOExperimentEngine
 from core.website_registry import WebsiteRegistry
+from connectors.wordpress_connector import WordPressConnector
 from core.work_queue_service import WorkQueueService
 from dashboard.components.database import open_database
 from dashboard.components.data import (
@@ -1237,6 +1238,10 @@ def _generate_deliverable(
     database: Any, item: dict[str, Any]
 ) -> tuple[dict[str, Any], bool]:
     """Generate from public context, with a safe usable fallback."""
+    if item.get("experiment_type") == "internal_links":
+        _refresh_sparse_internal_link_content(
+            database, str(item.get("website") or "")
+        )
     public_context = []
     has_target_context = False
     if item.get("target_url"):
@@ -1339,6 +1344,32 @@ def _usable_content_excerpt(row: dict[str, Any]) -> str:
     return excerpt[:500]
 
 
+def _refresh_sparse_internal_link_content(
+    database: Any,
+    website_id: str,
+    *,
+    connector_type: Any = WordPressConnector,
+) -> bool:
+    """Refresh public WordPress content when link evidence is incomplete."""
+    if not website_id:
+        return False
+    existing = [
+        row for row in database.get_content(website_id)
+        if str(row.get("content_type") or "post").casefold()
+        in {"post", "page"}
+    ]
+    if len(existing) >= 10:
+        return False
+    connector = connector_type(website_id=website_id, database=database)
+    try:
+        if not connector.connect():
+            return False
+        connector.import_content()
+        return True
+    finally:
+        connector.disconnect()
+
+
 def _rank_internal_link_candidates(
     item: dict[str, Any],
     rows: list[dict[str, Any]],
@@ -1353,6 +1384,12 @@ def _rank_internal_link_candidates(
     target_terms = _meaningful_link_terms(target_material)
     ranked: list[tuple[int, dict[str, Any]]] = []
     for row in rows:
+        content_type = str(row.get("content_type") or "post").casefold()
+        status = str(row.get("status") or "public").casefold()
+        if content_type not in {"post", "page"}:
+            continue
+        if status not in {"publish", "published", "public"}:
+            continue
         url = str(row.get("url") or row.get("link") or "")
         if not url or _normalized_page_url(url) == target_url:
             continue

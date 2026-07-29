@@ -135,16 +135,104 @@ class InternalLinkDeliverableTests(unittest.TestCase):
 
         self.assertEqual([], rows)
 
+    def test_media_and_non_public_content_are_not_link_sources(self) -> None:
+        page = load_daily_work()
+
+        rows = page._rank_internal_link_candidates(
+            {
+                "target_url": TARGET,
+                "target_query": "Gmail konto",
+            },
+            [
+                {
+                    "url": "https://site.dk/gmail.jpg",
+                    "title": "Gmail billede",
+                    "content_type": "media",
+                    "status": "public",
+                },
+                {
+                    "url": "https://site.dk/gmail-kladde/",
+                    "title": "Gmail kladde",
+                    "content_type": "post",
+                    "status": "draft",
+                },
+                {
+                    "url": SOURCE,
+                    "title": "Gmail login",
+                    "content_type": "post",
+                    "status": "publish",
+                },
+            ],
+            is_locked=lambda _url: False,
+        )
+
+        self.assertEqual([SOURCE], [row["url"] for row in rows])
+
+    def test_sparse_content_is_refreshed_before_link_analysis(self) -> None:
+        page = load_daily_work()
+        events = []
+
+        class FakeDatabase:
+            def get_content(self, _website):
+                return [{"content_type": "post"}]
+
+        class FakeConnector:
+            def __init__(self, **_kwargs):
+                pass
+
+            def connect(self):
+                events.append("connect")
+                return True
+
+            def import_content(self):
+                events.append("import")
+
+            def disconnect(self):
+                events.append("disconnect")
+
+        refreshed = page._refresh_sparse_internal_link_content(
+            FakeDatabase(),
+            "site.dk",
+            connector_type=FakeConnector,
+        )
+
+        self.assertTrue(refreshed)
+        self.assertEqual(["connect", "import", "disconnect"], events)
+
+    def test_complete_content_registry_is_not_refetched(self) -> None:
+        page = load_daily_work()
+
+        class FakeDatabase:
+            def get_content(self, _website):
+                return [{"content_type": "post"} for _ in range(10)]
+
+        class UnexpectedConnector:
+            def __init__(self, **_kwargs):
+                raise AssertionError("Connectoren må ikke startes")
+
+        refreshed = page._refresh_sparse_internal_link_content(
+            FakeDatabase(),
+            "site.dk",
+            connector_type=UnexpectedConnector,
+        )
+
+        self.assertFalse(refreshed)
+
     def test_generation_stops_when_no_safe_source_exists(self) -> None:
         page = load_daily_work()
 
         class FakeDatabase:
             def get_content(self, _website):
-                return [{
-                    "url": "https://site.dk/kalender/",
-                    "title": "Fælles kalender",
-                    "excerpt": "Del kalenderen med familien.",
-                }]
+                return [
+                    {
+                        "url": f"https://site.dk/kalender-{index}/",
+                        "title": "Fælles kalender",
+                        "excerpt": "Del kalenderen med familien.",
+                        "content_type": "post",
+                        "status": "publish",
+                    }
+                    for index in range(10)
+                ]
 
             def get_seo_experiments(self, **_kwargs):
                 return []
