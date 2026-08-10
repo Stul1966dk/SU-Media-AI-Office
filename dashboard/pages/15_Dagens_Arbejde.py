@@ -67,7 +67,11 @@ from dashboard.components.website_selector import set_selected_website
 
 task_deliverables_module = importlib.reload(task_deliverables_module)
 database_component_module = importlib.reload(database_component_module)
-ai_service_module = importlib.reload(ai_service_module)
+# core.ai_service genindlæses bevidst IKKE: det er et stabilt modul, og en
+# reload udskifter AIServiceError-klassen i sys.modules, så andre moduler
+# (fx core.system_health) og testene holder en forældet klasse, hvorefter
+# `except AIServiceError` ikke længere matcher. Redigeres ai_service.py under
+# udvikling, kræver det en servergenstart.
 content_freshness_module = importlib.reload(content_freshness_module)
 open_database = database_component_module.open_database
 AIService = ai_service_module.AIService

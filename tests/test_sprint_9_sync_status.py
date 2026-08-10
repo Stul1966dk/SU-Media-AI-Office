@@ -56,6 +56,7 @@ class SyncStatusTestCase(unittest.TestCase):
     def test_partial_error_gives_warning(self):
         steps = self.complete_steps()
         steps[1].update({
+            "properties_processed": 2,
             "properties_failed": 1,
             "property_results": [{"property": "bad.dk", "status": "error"}],
         })
@@ -74,7 +75,8 @@ class SyncStatusTestCase(unittest.TestCase):
         }
         model = load_sync_status(self.database(steps))
         self.assertEqual(
-            "En eller flere integrationer fejler", model["overall_status"]
+            "Synkronisering gennemført med advarsler",
+            model["overall_status"],
         )
 
     def test_no_data_is_not_run(self):

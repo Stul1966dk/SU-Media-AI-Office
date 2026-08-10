@@ -185,7 +185,7 @@ class Sprint7DerivedRefreshTests(unittest.TestCase):
         result = service.refresh_all()
         steps = self.steps(result)
         self.assertEqual("skipped", steps["SEO History"]["status"])
-        self.assertEqual("completed", steps["Website Intelligence"]["status"])
+        self.assertEqual("success", steps["Website Intelligence"]["status"])
         self.assertEqual("skipped", steps["Prioriteringsscore"]["status"])
         self.assertEqual(2, service._test_intelligence.analyze_site.call_count)
 
@@ -213,7 +213,7 @@ class Sprint7DerivedRefreshTests(unittest.TestCase):
         ]
         second = service.refresh_all()
         step = self.steps(second)["SEO-eksperimentovervågning"]
-        self.assertEqual("completed", step["status"])
+        self.assertEqual("success", step["status"])
         self.assertTrue(step["data_changed"])
 
     @patch("core.data_refresh_service.ExperimentMonitoringService")
@@ -235,9 +235,9 @@ class Sprint7DerivedRefreshTests(unittest.TestCase):
         result = service.refresh_all()
         steps = self.steps(result)
         self.assertEqual(
-            "completed", steps["SEO-eksperimentovervågning"]["status"]
+            "success", steps["SEO-eksperimentovervågning"]["status"]
         )
-        self.assertEqual("completed", steps["Prioriteringsscore"]["status"])
+        self.assertEqual("success", steps["Prioriteringsscore"]["status"])
 
     @patch("core.data_refresh_service.ExperimentMonitoringService")
     def test_error_is_unknown_not_no_change(self, _monitoring: Mock) -> None:
@@ -267,7 +267,7 @@ class Sprint7DerivedRefreshTests(unittest.TestCase):
         service._test_seo.analyze_site.assert_called_once_with("a.dk")
         service._test_intelligence.analyze_site.assert_called_once_with("a.dk")
         self.assertEqual(
-            "completed",
+            "success",
             self.steps(result)["SEO-eksperimentovervågning"]["status"],
         )
         service.refresh_priority_scores.assert_called_once_with(["a.dk"])
