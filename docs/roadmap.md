@@ -719,3 +719,45 @@ og det eksisterende sideindhold dokumenterer et reelt hul.
 
 Succeskriterium: Brugeren kan afprøve de tre nye anbefalingstyper nu uden at
 vente på den normale prioriteringsmotor eller ændre dens permanente regler.
+
+# Lokal drift - beslutning
+
+AI Office køres kun lokalt på CEO's egen Windows-pc. Ingen online-hosting
+(Vercel/Render/Supabase) for nu; systemet bliver på lokal SQLite. Online
+genovervejes kun, hvis der ønskes overvågning 24/7 uafhængigt af, om pc'en er
+tændt. GitHub bevares som kodebackup og versionshistorik, ikke som hosting.
+
+# Lokal drift 1 - Grøn baseline og launcher
+
+- [x] Fjern importlib.reload af core.ai_service, som brød klasseidentitet i
+  tests og produktion.
+- [x] Bring hele testsuiten grøn som baseline før lokal drift.
+- [x] Tilføj Start_AI_Office.bat, så appen startes med dobbeltklik uden terminal.
+
+Succeskriterium: Brugeren kan starte dashboardet uden terminal, og suiten er
+grøn som fælles udgangspunkt.
+
+# Lokal drift 2 - Automatisk lokal backup
+
+- [x] Tag et konsistent snapshot via sqlite3 backup-API (virker mens appen kører).
+- [x] Gem snapshots i data/backups med tidsstempel i filnavnet.
+- [x] Behold de nyeste 14 auto-backups og prune kun auto-backups.
+- [x] Bevar manuelt navngivne historiske backups.
+- [x] Tilføj scripts/backup_database.py med samme database-sti som appen.
+
+Succeskriterium: Databasen sikkerhedskopieres pålideligt uden at røre den
+manuelle backuphistorik.
+
+# Lokal drift 3 - Konstant overvågning via Windows Opgavestyring
+
+- [x] Headless idempotent Partner Ads-salgstjek + Telegram (scripts/monitor_sales.py).
+- [x] Headless dagligt data-refresh og eksperiment-monitorering (scripts/daily_refresh.py).
+- [x] Registreringsscript til tre opgaver: salgstjek hvert 30. min, dagligt
+  refresh kl. 03:00, backup kl. 03:30.
+- [x] Kør under brugeren uden administrator, med pythonw.exe og StartWhenAvailable.
+- [x] Log planlagte kørsler til logs/scheduled_tasks.log.
+- [x] Tilføj unregister-script til at fjerne opgaverne igen.
+- [ ] Valgfrit: væk computeren for at køre de daglige opgaver under dvale.
+
+Succeskriterium: Salg, data og backup vedligeholdes automatisk, mens pc'en er
+tændt, uden manuelle handlinger og uden AI-kald i de planlagte kørsler.
