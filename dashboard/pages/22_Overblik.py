@@ -18,6 +18,7 @@ from dashboard.components.ui import (
     load_styles,
     render_next_step,
     render_sidebar,
+    render_table,
 )
 
 MONTH_LABELS_DA = (
@@ -158,26 +159,22 @@ def _render_by_website(overview) -> None:
         "Kilden er url-feltet i hvert Partner Ads-salg. Salg kan stamme fra "
         "både aktive og udfasede websites."
     )
-    st.dataframe(
+    render_table(
         [
             {
-                "Website": item.website,
-                "Provision": float(item.total),
-                "Salg": item.sales,
-                "Andel": item.share,
+                "website": item.website,
+                "provision": item.total,
+                "salg": item.sales,
+                "andel": f"{round(item.share * 100)} %",
             }
             for item in overview.by_website
         ],
-        column_config={
-            "Provision": st.column_config.NumberColumn(
-                "Provision (DKK)", format="%.2f"
-            ),
-            "Andel": st.column_config.NumberColumn(
-                "Andel af perioden", format="percent"
-            ),
+        columns={
+            "website": "Website",
+            "provision": "Provision",
+            "salg": "Salg",
+            "andel": "Andel",
         },
-        width="stretch",
-        hide_index=True,
     )
 
 
