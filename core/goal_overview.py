@@ -38,6 +38,22 @@ class WebsiteCommission:
 
 
 @dataclass(frozen=True)
+class PageCommission:
+    page: str
+    total: Decimal
+    sales: int
+    share: float
+
+
+@dataclass(frozen=True)
+class ProductCommission:
+    product: str
+    total: Decimal
+    sales: int
+    share: float
+
+
+@dataclass(frozen=True)
 class GoalOverview:
     today: date
     current_month: MonthlyCommission
@@ -51,6 +67,8 @@ class GoalOverview:
     status_label: str
     progress_to_low: float
     by_website: list[WebsiteCommission]
+    by_page: list[PageCommission]
+    by_product: list[ProductCommission]
     website_period_months: int
 
 
@@ -66,6 +84,8 @@ def build_goal_overview(
     """Aggregate commission into a goal- and website-oriented overview."""
     monthly: dict[tuple[int, int], list] = {}
     website_totals: dict[str, list] = {}
+    page_totals: dict[str, list] = {}
+    product_totals: dict[str, list] = {}
 
     history_keys = _month_sequence(today.year, today.month, history_months)
     history_set = set(history_keys)
@@ -74,14 +94,19 @@ def build_goal_overview(
         parsed = _parse_record(record)
         if parsed is None:
             continue
-        year, month, provision, url = parsed
+        year, month, provision, url, uid, uid2 = parsed
         bucket = monthly.setdefault((year, month), [Decimal("0"), 0])
         bucket[0] += provision
         bucket[1] += 1
         if (year, month) in history_set:
-            site = website_totals.setdefault(_domain(url), [Decimal("0"), 0])
-            site[0] += provision
-            site[1] += 1
+            domain = _domain(url)
+            _add(website_totals, domain, provision)
+            page = _page_label(domain, uid)
+            if page:
+                _add(page_totals, page, provision)
+            product = _clean_product(uid2)
+            if product:
+                _add(product_totals, product, provision)
 
     current_key = (today.year, today.month)
     current_month = MonthlyCommission(
@@ -103,17 +128,19 @@ def build_goal_overview(
         float(rolling_average / target_low) if target_low else 0.0
     )
 
-    window_total = sum((total for total, _ in website_totals.values()), Decimal("0"))
+    window_total = sum(
+        (total for total, _ in website_totals.values()), Decimal("0")
+    )
     by_website = [
-        WebsiteCommission(
-            website=name,
-            total=total,
-            sales=sales,
-            share=float(total / window_total) if window_total else 0.0,
-        )
-        for name, (total, sales) in website_totals.items()
+        WebsiteCommission(*item) for item in _ranked(website_totals, window_total)
     ]
-    by_website.sort(key=lambda item: (item.total, item.sales), reverse=True)
+    by_page = [
+        PageCommission(*item) for item in _ranked(page_totals, window_total)
+    ]
+    by_product = [
+        ProductCommission(*item)
+        for item in _ranked(product_totals, window_total)
+    ]
 
     return GoalOverview(
         today=today,
@@ -128,14 +155,16 @@ def build_goal_overview(
         status_label=status_label,
         progress_to_low=progress_to_low,
         by_website=by_website,
+        by_page=by_page,
+        by_product=by_product,
         website_period_months=history_months,
     )
 
 
 def _parse_record(
     record: dict[str, Any],
-) -> tuple[int, int, Decimal, str] | None:
-    """Return (year, month, provision, url) for a valid DKK sale."""
+) -> tuple[int, int, Decimal, str, str, str] | None:
+    """Return (year, month, provision, url, uid, uid2) for a valid DKK sale."""
     if str(record.get("valuta", "DKK")).upper() != "DKK":
         return None
     try:
@@ -150,7 +179,63 @@ def _parse_record(
         provision = Decimal(str(record["provision"]))
     except (InvalidOperation, KeyError, TypeError, ValueError):
         return None
-    return year, month, provision, str(record.get("url", "") or "")
+    return (
+        year,
+        month,
+        provision,
+        str(record.get("url", "") or ""),
+        str(record.get("uid", "") or ""),
+        str(record.get("uid2", "") or ""),
+    )
+
+
+def _add(totals: dict[str, list], key: str, provision: Decimal) -> None:
+    bucket = totals.setdefault(key, [Decimal("0"), 0])
+    bucket[0] += provision
+    bucket[1] += 1
+
+
+def _page_label(domain: str, uid: str) -> str:
+    """Combine the source domain and the page path into a page identifier.
+
+    Unfilled Partner Ads link templates (e.g. ``[UID]``) are treated as missing.
+    """
+    path = (uid or "").strip()
+    if not path or "[" in path or "]" in path:
+        return ""
+    if domain and domain != "Ukendt":
+        return f"{domain}{path}"
+    return path
+
+
+def _clean_product(uid2: str) -> str:
+    """Return a human product name, or "" for encoded/placeholder junk.
+
+    Some sales carry a base64-encoded feed blob (``eyJ…``) instead of a name.
+    """
+    product = (uid2 or "").strip()
+    if not product or "[" in product or "]" in product:
+        return ""
+    if product.startswith("eyJ"):
+        return ""
+    return product
+
+
+def _ranked(
+    totals: dict[str, list], window_total: Decimal
+) -> list[tuple[str, Decimal, int, float]]:
+    """Return (name, total, sales, share) sorted by revenue descending."""
+    items = [
+        (
+            name,
+            total,
+            sales,
+            float(total / window_total) if window_total else 0.0,
+        )
+        for name, (total, sales) in totals.items()
+    ]
+    items.sort(key=lambda item: (item[1], item[2]), reverse=True)
+    return items
 
 
 def _domain(url: str) -> str:

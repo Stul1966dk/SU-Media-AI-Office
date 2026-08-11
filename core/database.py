@@ -4177,6 +4177,8 @@ class Database:
             "approval_status": sale.get(
                 "approval_status", sale.get("godkendelsesstatus", "")
             ),
+            "uid": sale.get("uid", ""),
+            "uid2": sale.get("uid2", ""),
         }
         if existing is None:
             with self._connection:
@@ -4185,8 +4187,8 @@ class Database:
                     INSERT INTO registered_sales (
                         kombiid, programid, program, dato, tidspunkt, ordrenr,
                         omsaetning, provision, url, valuta, created_at,
-                        status, approval_status, telegram_status
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                        status, approval_status, telegram_status, uid, uid2
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
                     """,
                     (
                         kombiid,
@@ -4194,7 +4196,7 @@ class Database:
                         values["tidspunkt"], values["ordrenr"],
                         values["omsaetning"], values["provision"], values["url"],
                         values["valuta"], timestamp, values["status"],
-                        values["approval_status"],
+                        values["approval_status"], values["uid"], values["uid2"],
                     ),
                 )
             return "created"
@@ -4215,7 +4217,8 @@ class Database:
                 UPDATE registered_sales SET
                     programid = ?, program = ?, dato = ?, tidspunkt = ?,
                     ordrenr = ?, omsaetning = ?, provision = ?, url = ?,
-                    valuta = ?, status = ?, approval_status = ?
+                    valuta = ?, status = ?, approval_status = ?,
+                    uid = ?, uid2 = ?
                 WHERE kombiid = ?
                 """,
                 (*values.values(), kombiid),
@@ -4291,9 +4294,13 @@ class Database:
         return total
 
     def get_commission_records(self) -> list[dict[str, Any]]:
-        """Return date, commission, source url and currency for every sale."""
+        """Return commission attribution fields for every sale.
+
+        Includes the source url (website), uid (page path) and uid2 (product).
+        """
         rows = self._connection.execute(
-            "SELECT dato, provision, url, valuta FROM registered_sales"
+            "SELECT dato, provision, url, valuta, uid, uid2 "
+            "FROM registered_sales"
         ).fetchall()
         return [
             {
@@ -4301,6 +4308,8 @@ class Database:
                 "provision": row["provision"],
                 "url": row["url"],
                 "valuta": row["valuta"],
+                "uid": row["uid"],
+                "uid2": row["uid2"],
             }
             for row in rows
         ]
@@ -5961,6 +5970,8 @@ class Database:
             "approval_status": "TEXT NOT NULL DEFAULT ''",
             "telegram_status": "TEXT NOT NULL DEFAULT 'skipped'",
             "telegram_attempted_at": "TEXT",
+            "uid": "TEXT NOT NULL DEFAULT ''",
+            "uid2": "TEXT NOT NULL DEFAULT ''",
         }
         with self._connection:
             for name, definition in additions.items():

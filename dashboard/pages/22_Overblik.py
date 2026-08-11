@@ -90,6 +90,8 @@ def render_overview_page() -> None:
     _render_goal(overview)
     _render_history(overview)
     _render_by_website(overview)
+    _render_by_page(overview)
+    _render_by_product(overview)
 
     render_next_step(
         text="Fortsæt til I dag for at arbejde på det, der flytter tallet.",
@@ -171,9 +173,9 @@ def _render_history(overview) -> None:
                 alt.Tooltip("belob:N", title="Provision"),
             ],
         )
-        .properties(height=260)
+        .properties(height=260, width="container")
     )
-    st.altair_chart(chart, use_container_width=True)
+    st.altair_chart(chart)
 
 
 def _render_by_website(overview) -> None:
@@ -199,6 +201,59 @@ def _render_by_website(overview) -> None:
         ],
         columns={
             "website": "Website",
+            "provision": "Provision",
+            "salg": "Salg",
+            "andel": "Andel",
+        },
+    )
+
+
+def _render_by_page(overview) -> None:
+    st.subheader(
+        f"Indtægt pr. side (top 10, seneste {overview.website_period_months} mdr.)"
+    )
+    if not overview.by_page:
+        st.caption("Ingen salg med kildeside (uid) i perioden.")
+        return
+    render_table(
+        [
+            {
+                "side": item.page,
+                "provision": item.total,
+                "salg": item.sales,
+                "andel": f"{round(item.share * 100)} %",
+            }
+            for item in overview.by_page[:10]
+        ],
+        columns={
+            "side": "Side",
+            "provision": "Provision",
+            "salg": "Salg",
+            "andel": "Andel",
+        },
+    )
+
+
+def _render_by_product(overview) -> None:
+    st.subheader(
+        f"Indtægt pr. produkt (top 10, seneste "
+        f"{overview.website_period_months} mdr.)"
+    )
+    if not overview.by_product:
+        st.caption("Ingen salg med produkt (uid2) i perioden.")
+        return
+    render_table(
+        [
+            {
+                "produkt": item.product,
+                "provision": item.total,
+                "salg": item.sales,
+                "andel": f"{round(item.share * 100)} %",
+            }
+            for item in overview.by_product[:10]
+        ],
+        columns={
+            "produkt": "Produkt",
             "provision": "Provision",
             "salg": "Salg",
             "andel": "Andel",
