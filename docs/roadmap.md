@@ -780,7 +780,10 @@ og produkt (uid2) pr. salg — modsat den tidligere antagelse om "globale" data.
   målbånd, DB-roundtrip og backfill.
 - [x] Sprint M2: side- og produktattribution (gem/backfill uid/uid2, top 10
   pr. side og produkt, junk-filtrering).
-- [ ] Sprint M3: kobl SEO-arbejde på en URL til salg fra netop den side.
+- [x] Sprint M3: kobl SEO-arbejde på en URL til provision fra netop den side
+  (før/efter via salgets uid, med konfidenssignal ud fra salgsmængde).
 
-Succeskriterium: Brugeren kan se den rullende månedsindtægt mod målet og hvilke
-websites der driver den, på komplette data og i dansk format.
+Succeskriterium: Brugeren kan se den rullende månedsindtægt mod målet, hvilke
+websites/sider/produkter der driver den, og om en konkret sideændring gav flere
+kroner — alt på komplette data, i dansk format og kun så sikkert som datamængden
+tillader. Fase 1 er hermed afsluttet.
