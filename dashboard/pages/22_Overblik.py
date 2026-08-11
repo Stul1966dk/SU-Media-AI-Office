@@ -4,6 +4,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import altair as alt
 import streamlit as st
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +37,11 @@ STATUS_TONE = {
 
 def _month_label(year: int, month: int) -> str:
     return f"{MONTH_LABELS_DA[month]} {year}"
+
+
+def _thousands(value) -> str:
+    """Format a whole-krone amount with Danish thousands separators."""
+    return f"{int(value):,}".replace(",", ".")
 
 
 def render_overview_page() -> None:
@@ -94,20 +100,19 @@ def render_overview_page() -> None:
 
 def _render_goal(overview) -> None:
     st.subheader("Indtægt mod mål")
-    average, this_month, goal = st.columns(3)
+    average, this_month = st.columns(2)
     average.metric(
-        f"Gennemsnit/md. ({overview.months_with_data} mdr.)",
+        f"Snit/md. ({overview.months_with_data} mdr.)",
         format_currency(overview.rolling_average),
     )
     this_month.metric(
-        "Denne måned indtil nu",
+        "Denne måned",
         format_currency(overview.current_month.total),
         help=f"{overview.current_month.sales} salg i denne måned.",
     )
-    goal.metric(
-        "Mål (gennemsnit/md.)",
-        f"{format_currency(overview.target_low)} – "
-        f"{format_currency(overview.target_high)}",
+    st.caption(
+        f"Mål: {_thousands(overview.target_low)}–"
+        f"{_thousands(overview.target_high)} kr. i gennemsnit pr. måned."
     )
 
     tone = STATUS_TONE.get(overview.status, "info")
@@ -137,15 +142,38 @@ def _render_history(overview) -> None:
     st.subheader("Månedlig provision")
     rows = [
         {
-            "Måned": _month_label(month.year, month.month),
-            "Provision": float(month.total),
+            "maaned": _month_label(month.year, month.month),
+            "order": index,
+            "provision": float(month.total),
+            "belob": format_currency(month.total),
         }
-        for month in overview.history
+        for index, month in enumerate(overview.history)
     ]
-    if not any(row["Provision"] for row in rows):
+    if not any(row["provision"] for row in rows):
         st.caption("Ingen provision i den viste periode.")
         return
-    st.bar_chart(rows, x="Måned", y="Provision", height=260)
+    chart = (
+        alt.Chart(alt.Data(values=rows))
+        .mark_bar()
+        .encode(
+            x=alt.X(
+                "maaned:N",
+                sort=alt.SortField(field="order", order="ascending"),
+                title="Måned",
+            ),
+            y=alt.Y(
+                "provision:Q",
+                title="Provision",
+                axis=alt.Axis(format="~s"),
+            ),
+            tooltip=[
+                alt.Tooltip("maaned:N", title="Måned"),
+                alt.Tooltip("belob:N", title="Provision"),
+            ],
+        )
+        .properties(height=260)
+    )
+    st.altair_chart(chart, use_container_width=True)
 
 
 def _render_by_website(overview) -> None:
