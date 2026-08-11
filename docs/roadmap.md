@@ -761,3 +761,25 @@ manuelle backuphistorik.
 
 Succeskriterium: Salg, data og backup vedligeholdes automatisk, mens pc'en er
 tændt, uden manuelle handlinger og uden AI-kald i de planlagte kørsler.
+
+# Fase 1: Mål- og effektoverblik
+
+Formål: knytte arbejdet til målet om 20-25k/md. og vise, hvor indtægten kommer
+fra. Muliggjort af, at Partner-ads-feedet indeholder website (url), side (uid)
+og produkt (uid2) pr. salg — modsat den tidligere antagelse om "globale" data.
+
+## Sprint M1 - Indtægt mod mål og pr. website
+
+- [x] Deterministisk goal-service: månedstal, rullende gennemsnit mod
+  20-25k-målbåndet, indtægt pr. kildewebsite (url-domæne), kun DKK-salg.
+- [x] Ny primær Overblik-side med mål-status, kronologisk månedsgraf og
+  website-tabel; alle beløb i dansk format.
+- [x] Notifikationsfri historisk backfill (`scripts/backfill_sales.py`), så
+  hele salgshistorikken er i basen uden sene Telegram-beskeder.
+- [x] Tests af aggregering, rullende gennemsnit, DKK-filter, domæneudledning,
+  målbånd, DB-roundtrip og backfill.
+- [ ] Sprint M2: side- og produktattribution (gem og backfill uid/uid2).
+- [ ] Sprint M3: kobl SEO-arbejde på en URL til salg fra netop den side.
+
+Succeskriterium: Brugeren kan se den rullende månedsindtægt mod målet og hvilke
+websites der driver den, på komplette data og i dansk format.
