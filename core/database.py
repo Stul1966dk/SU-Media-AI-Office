@@ -4290,6 +4290,21 @@ class Database:
                 total += Decimal(str(row["provision"]))
         return total
 
+    def get_commission_records(self) -> list[dict[str, Any]]:
+        """Return date, commission, source url and currency for every sale."""
+        rows = self._connection.execute(
+            "SELECT dato, provision, url, valuta FROM registered_sales"
+        ).fetchall()
+        return [
+            {
+                "dato": row["dato"],
+                "provision": row["provision"],
+                "url": row["url"],
+                "valuta": row["valuta"],
+            }
+            for row in rows
+        ]
+
     def get_website_counts(self) -> dict[str, int]:
         """Return total, monetized, and phasing-out website counts."""
         row = self._connection.execute(
