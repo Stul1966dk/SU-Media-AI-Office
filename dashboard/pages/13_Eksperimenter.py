@@ -15,8 +15,11 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.experiment_evaluation import (
     EvaluationRules, RESULT_LABELS as EVALUATION_LABELS,
 )
+from core.page_revenue_effect import compute_page_revenue_effect
 from dashboard.components.database import open_database
-from dashboard.components.formatting import format_date, format_datetime
+from dashboard.components.formatting import (
+    format_currency, format_date, format_datetime,
+)
 from dashboard.components.help_panel import render_help_panel
 from dashboard.components.ui import (
     load_styles, render_next_step, render_sidebar,
@@ -121,6 +124,7 @@ def main() -> None:
                 st.write(
                     experiment.get("result_summary") or "Ingen konklusion."
                 )
+                _render_page_revenue(database, experiment)
                 _render_post_analysis(
                     evaluations.get(experiment["id"]),
                     fallback_result=experiment.get("result"),
@@ -327,6 +331,66 @@ def _detail(
             )
 
 
+def _render_page_revenue(database: Any, item: dict[str, Any]) -> None:
+    """Show commission from the changed page, before vs after the change."""
+    url = item.get("target_url")
+    if not url:
+        return
+    implemented = next(
+        iter(database.get_approved_changes(experiment_id=item["id"])), {}
+    )
+    change_raw = implemented.get("implemented_at") or item.get("started_at")
+    if not change_raw:
+        return
+    try:
+        change_date = date.fromisoformat(str(change_raw)[:10])
+    except ValueError:
+        return
+
+    effect = compute_page_revenue_effect(
+        database.get_commission_records(),
+        target_url=url,
+        change_date=change_date,
+    )
+    st.write(
+        f"**Provision fra siden ({effect.window_days} dage før → efter)**"
+    )
+    if not effect.matched:
+        st.caption(
+            "Ingen salg kunne kobles til denne side. Det kræver, at sidens "
+            "affiliate-links sætter uid (sidesti). Website-tallene på Overblik "
+            "er upåvirkede."
+        )
+        return
+    if effect.baseline_sales == 0 and effect.after_sales == 0:
+        st.caption(
+            "Siden sælger sjældent — ingen salg i måleperioderne endnu, så en "
+            "kroneeffekt kan ikke måles her. Fungerer bedst på dine mest "
+            "sælgende sider."
+        )
+        return
+    before_col, after_col = st.columns(2)
+    before_col.metric(
+        "Før ændringen",
+        format_currency(effect.baseline_total),
+        help=f"{effect.baseline_sales} salg i {effect.window_days} dage før.",
+    )
+    if effect.after_complete:
+        after_col.metric(
+            "Efter ændringen",
+            format_currency(effect.after_total),
+            delta=format_currency(effect.delta),
+            help=f"{effect.after_sales} salg i {effect.window_days} dage efter.",
+        )
+    else:
+        after_col.metric(
+            "Efter (indtil videre)",
+            format_currency(effect.after_total),
+            help=f"{effect.after_sales} salg indtil videre.",
+        )
+    st.caption(f"Datagrundlag: {effect.confidence_label}")
+
+
 def _active_card(database: Any, item: dict[str, Any]) -> None:
     snapshots = database.get_experiment_snapshots(item["id"])
     latest = snapshots[-1] if snapshots else {}
@@ -407,6 +471,7 @@ def _active_card(database: Any, item: dict[str, Any]) -> None:
                     "Der er endnu ikke data nok til en statusopdatering.",
                 )
             )
+        _render_page_revenue(database, item)
         with st.expander("Se udvikling"):
             _development(database, item, snapshots)
         with st.expander("Se datagrundlag"):
