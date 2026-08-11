@@ -778,7 +778,8 @@ og produkt (uid2) pr. salg — modsat den tidligere antagelse om "globale" data.
   hele salgshistorikken er i basen uden sene Telegram-beskeder.
 - [x] Tests af aggregering, rullende gennemsnit, DKK-filter, domæneudledning,
   målbånd, DB-roundtrip og backfill.
-- [ ] Sprint M2: side- og produktattribution (gem og backfill uid/uid2).
+- [x] Sprint M2: side- og produktattribution (gem/backfill uid/uid2, top 10
+  pr. side og produkt, junk-filtrering).
 - [ ] Sprint M3: kobl SEO-arbejde på en URL til salg fra netop den side.
 
 Succeskriterium: Brugeren kan se den rullende månedsindtægt mod målet og hvilke
