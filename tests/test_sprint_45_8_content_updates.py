@@ -173,6 +173,36 @@ class ContentUpdateDeliverableTests(unittest.TestCase):
         )
         self.assertIn("under “Del kalenderen”", result["content_location"])
 
+    def test_fallback_skips_affiliate_disclaimer_and_breadcrumb(self) -> None:
+        # A disclaimer and a breadcrumb sit right below the heading; neither may
+        # be proposed as the existing text to replace.
+        result = fallback_task_deliverable(
+            {
+                "website": "site.dk",
+                "target_url": "https://site.dk/guide/",
+                "target_query": "hurtigt trådløst internet",
+                "measured_cause": "Forældet indhold",
+            },
+            public_context=[{
+                "relation": "berørt side",
+                "h1": "Hurtigt trådløst internet",
+                "content_sections": [
+                    {"element": "h1", "text": "Hurtigt trådløst internet"},
+                    {"element": "p", "text": "Teksten kan indeholde reklamelinks"},
+                    {"element": "p", "text": "Hjem › Guider › Hurtigt internet"},
+                    {
+                        "element": "p",
+                        "text": "Vælg en Wi-Fi adapter der matcher routeren.",
+                    },
+                ],
+            }],
+        )
+
+        self.assertEqual(
+            "Vælg en Wi-Fi adapter der matcher routeren.",
+            result["current_content"],
+        )
+
     def test_raw_search_console_phrase_is_naturalized_in_fallback(self) -> None:
         result = fallback_task_deliverable(
             {

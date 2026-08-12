@@ -355,6 +355,29 @@ def _fallback_content_copy(natural_topic: str) -> str:
     )
 
 
+_BOILERPLATE_MARKERS = (
+    "reklamelink",
+    "affiliate",
+    "annoncelink",
+    "kan indeholde reklame",
+)
+
+
+def _is_boilerplate_passage(text: str) -> bool:
+    """True for affiliate disclaimers and breadcrumbs — never a real passage.
+
+    These sit right below a heading on many pages (e.g. "Teksten kan indeholde
+    reklamelinks", "Hjem › Anmeldelser › …") and must never be proposed as the
+    existing text to replace.
+    """
+    lowered = text.casefold()
+    if any(marker in lowered for marker in _BOILERPLATE_MARKERS):
+        return True
+    if ("›" in text or "»" in text) and lowered.startswith("hjem"):
+        return True
+    return False
+
+
 def _select_relevant_passage(
     sections: list[dict[str, Any]], queries: list[str]
 ) -> tuple[str, str]:
@@ -414,10 +437,11 @@ def _select_relevant_passage(
         start_index, heading = -1, ""
     passage = next(
         (
-            str(section.get("text") or "").strip()
+            text
             for section in sections[start_index + 1:]
             if section.get("element") in {"p", "li"}
-            and len(str(section.get("text") or "").strip()) >= 20
+            and len(text := str(section.get("text") or "").strip()) >= 20
+            and not _is_boilerplate_passage(text)
         ),
         "",
     )
