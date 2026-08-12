@@ -8,6 +8,7 @@ from typing import Any
 
 from core.action_logging import log_action
 from core.decision_engine import DecisionEngine
+from core.revenue_attribution import page_key_for_url, revenue_by_page
 from core.seo_experiment_engine import SEOExperimentEngine
 
 
@@ -376,6 +377,12 @@ class WorkQueueService:
             and item["id"] not in active_draft_ids
             and item["target_url"] not in active_urls
         ]
+        page_revenue = revenue_by_page(self.database.get_commission_records())
+        monetized_sites = {
+            website["website"]
+            for website in self.registry.get_all()
+            if website.get("monetized")
+        }
         candidates: list[dict[str, Any]] = []
         for draft in drafts:
             search = (draft.get("page_analysis") or {}).get(
@@ -420,8 +427,12 @@ class WorkQueueService:
                 "previous_ctr": float(search.get("previous_ctr", 0)),
                 "current_position": float(search.get("position", 0)),
                 "previous_position": float(search.get("position", 0)),
-                "monetized": False, "manual_priority": "medium",
-                "affiliate_commission": 0, "seo_health_score": 50,
+                "monetized": draft["website_id"] in monetized_sites,
+                "manual_priority": "medium",
+                "affiliate_commission": page_revenue.get(
+                    page_key_for_url(draft["target_url"]), 0.0
+                ),
+                "seo_health_score": 50,
                 "seo_trend": "unknown", "has_active_work": False,
                 "active_experiment_count": 0,
                 "days_since_implementation": 90,

@@ -787,3 +787,28 @@ Succeskriterium: Brugeren kan se den rullende månedsindtægt mod målet, hvilke
 websites/sider/produkter der driver den, og om en konkret sideændring gav flere
 kroner — alt på komplette data, i dansk format og kun så sikkert som datamængden
 tillader. Fase 1 er hermed afsluttet.
+
+# Fase 2: Indtægtsvægtet prioritering
+
+Formål: lade Fase 1's indtægtsattribution styre *hvad* der arbejdes på, så den
+daglige SEO-indsats peger mod målet i stedet for kun mod søgemetrikker.
+
+## Sprint P1 - Provision ind i opgaveprioriteringen
+
+- [x] Fælles attributionsmodul (`core/revenue_attribution.py`) med én kilde til
+  side-/produktnøgler; `goal_overview` genbruger det, så en kandidat-URL mapper
+  til præcis samme sidenøgle som overblikket.
+- [x] Faktisk provision pr. side (uid-attribution) fodres ind i
+  `score_candidate` (`affiliate_commission`) i stedet for website-total/0, så
+  beviste tjenere rangerer højere. Gælder både decision-engine-kandidater og
+  reviewed-draft-kandidater i arbejdskøen.
+- [x] Afgrænset moneteringschance-signal: en monetiseret side med reel trafik
+  men ~0 kr provision løftes — men kun på sites der beviseligt tjener, så
+  informationssider på ikke-konverterende sites ikke fejlprioriteres.
+  Gennemsigtigt via `score_factors` og begrundelse.
+- [x] Tests: attributionsnormalisering, DKK/junk-filtrering, provisionsvægtning,
+  gap-signal med gate og at gap aldrig overgår en bevist tjener.
+
+Succeskriterium: Mellem to sider med samme SEO-potentiale vælger "I dag" den,
+der omsætter klik til kroner, og en trafikstærk side uden salg på et tjenende
+site markeres som en moneteringschance — alt sammen gennemsigtigt begrundet.

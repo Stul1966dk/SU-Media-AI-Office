@@ -1,9 +1,15 @@
 """Single-decision engine for measurable SEO work."""
 
 import math
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
+from core.revenue_attribution import (
+    domain as _domain,
+    page_key_for_url,
+    revenue_by_page,
+)
 from core.seo_experiment_engine import SEOExperimentEngine
 
 
@@ -11,6 +17,14 @@ GENERIC_TASKS = (
     "undersøg området", "optimér siden", "analyser mere",
     "overvåg udviklingen", "gennemgå websitet",
 )
+
+# A monetised page that draws real traffic but earns little or nothing is a
+# monetisation opportunity: worth surfacing even without a click problem. The
+# boost is bounded so it lifts such pages into contention without ever
+# outweighing a page with proven, measured earnings.
+MONETIZATION_GAP_MIN_IMPRESSIONS = 100
+MONETIZATION_GAP_MAX_COMMISSION = 50.0
+MONETIZATION_GAP_CAP = 6.0
 
 
 class DecisionEngine:
@@ -41,6 +55,10 @@ class DecisionEngine:
             {"phasing_out", "archived", "cancelled"}
             and (website_id is None or item["website"] == website_id)
         ]
+        page_revenue = self.page_revenue_map()
+        site_revenue: dict[str, float] = defaultdict(float)
+        for key, amount in page_revenue.items():
+            site_revenue[key.split("/", 1)[0]] += amount
         candidates = []
         for website in websites:
             site = website["website"]
@@ -121,10 +139,25 @@ class DecisionEngine:
                     "risk": "Mellem", "data_quality": self._data_quality(page),
                 }
                 candidate.update(self._website_signals(site))
+                # Per-page commission (Fase 1 uid attribution) replaces the
+                # coarse website-level figure so proven earners rank higher.
+                candidate["affiliate_commission"] = page_revenue.get(
+                    page_key_for_url(target_url), 0.0
+                )
+                # A monetisation gap only counts on a site that has proven it can
+                # earn — otherwise "traffic, no sales" is just non-commercial
+                # content, not an opportunity.
+                candidate["site_has_revenue"] = (
+                    site_revenue.get(_domain(target_url), 0.0) > 0
+                )
                 if not include_locked and self.has_conflict(candidate):
                     continue
                 candidates.append(candidate)
         return candidates
+
+    def page_revenue_map(self) -> dict[str, float]:
+        """Return DKK commission earned per page key from recorded sales."""
+        return revenue_by_page(self.database.get_commission_records())
 
     def score_candidate(self, candidate: dict[str, Any]) -> dict[str, Any]:
         """Return a transparent bounded score where data volume matters."""
@@ -142,6 +175,18 @@ class DecisionEngine:
         monetization = min(10, math.log10(commission + 1) * 3)
         if not commission:
             monetization = 3 if candidate["monetized"] else 0
+        # Monetisation opportunity: real traffic on a monetised page that earns
+        # little or nothing. Bounded so it never outweighs a proven earner.
+        monetization_gap = 0.0
+        if (
+            candidate["monetized"]
+            and candidate.get("site_has_revenue")
+            and commission < MONETIZATION_GAP_MAX_COMMISSION
+            and impressions >= MONETIZATION_GAP_MIN_IMPRESSIONS
+        ):
+            monetization_gap = min(
+                MONETIZATION_GAP_CAP, math.log10(impressions + 1) * 2.2
+            )
         manual = {
             "high": 4, "medium": 3, "middle": 3, "low": 1
         }.get(str(candidate["manual_priority"]).lower(), 1)
@@ -169,8 +214,9 @@ class DecisionEngine:
         risk_penalty = 5 if candidate["risk"] == "Høj" else 0
         score = round(min(
             100, volume_score + loss_score + ctr_opportunity
-            + monetization + manual + confidence + data_quality
-            + health_opportunity + trend + waiting + expected_gain
+            + monetization + monetization_gap + manual + confidence
+            + data_quality + health_opportunity + trend + waiting
+            + expected_gain
             - work_penalty - experiment_penalty - risk_penalty
         ))
         score = max(0, score)
@@ -183,6 +229,7 @@ class DecisionEngine:
                 "traffic_potential": round(volume_score + ctr_opportunity, 1),
                 "traffic_trend": round(loss_score + trend, 1),
                 "affiliate_income": round(monetization, 1),
+                "monetization_opportunity": round(monetization_gap, 1),
                 "seo_health": round(health_opportunity, 1),
                 "data_quality": round(data_quality, 1),
                 "ai_confidence": round(confidence, 1),
@@ -193,6 +240,7 @@ class DecisionEngine:
             },
         }
         candidate["priority_label"] = self._label(score)
+        candidate["monetization_opportunity"] = monetization_gap > 0
         return candidate
 
     def rank_candidates(
@@ -231,12 +279,25 @@ class DecisionEngine:
         return selected
 
     def explain_decision(self, candidate: dict[str, Any]) -> str:
+        commission = max(0.0, float(candidate.get("affiliate_commission", 0)))
+        if commission > 0:
+            money = (
+                f" Siden har givet {commission:.0f} kr. i provision, hvilket "
+                "vægter den op."
+            )
+        elif candidate.get("monetization_opportunity"):
+            money = (
+                " Siden har trafik men ingen registreret provision endnu — en "
+                "moneteringschance."
+            )
+        else:
+            money = ""
         return (
             f"Valgt fordi URL'en har {candidate['current_impressions']} "
             f"visninger, {candidate['current_clicks']} klik mod "
             f"{candidate['previous_clicks']} før, og en score på "
             f"{candidate['priority_score']}. Manuel websiteprioritet udgør "
-            "kun en mindre del af scoren."
+            f"kun en mindre del af scoren.{money}"
         )
 
     def daily_overview(self) -> dict[str, Any]:

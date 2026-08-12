@@ -12,7 +12,12 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable
-from urllib.parse import urlsplit
+
+from core.revenue_attribution import (
+    clean_product as _clean_product,
+    domain as _domain,
+    page_key as _page_label,
+)
 
 
 DEFAULT_TARGET_LOW = Decimal("20000")
@@ -195,32 +200,6 @@ def _add(totals: dict[str, list], key: str, provision: Decimal) -> None:
     bucket[1] += 1
 
 
-def _page_label(domain: str, uid: str) -> str:
-    """Combine the source domain and the page path into a page identifier.
-
-    Unfilled Partner Ads link templates (e.g. ``[UID]``) are treated as missing.
-    """
-    path = (uid or "").strip()
-    if not path or "[" in path or "]" in path:
-        return ""
-    if domain and domain != "Ukendt":
-        return f"{domain}{path}"
-    return path
-
-
-def _clean_product(uid2: str) -> str:
-    """Return a human product name, or "" for encoded/placeholder junk.
-
-    Some sales carry a base64-encoded feed blob (``eyJ…``) instead of a name.
-    """
-    product = (uid2 or "").strip()
-    if not product or "[" in product or "]" in product:
-        return ""
-    if product.startswith("eyJ"):
-        return ""
-    return product
-
-
 def _ranked(
     totals: dict[str, list], window_total: Decimal
 ) -> list[tuple[str, Decimal, int, float]]:
@@ -236,16 +215,6 @@ def _ranked(
     ]
     items.sort(key=lambda item: (item[1], item[2]), reverse=True)
     return items
-
-
-def _domain(url: str) -> str:
-    """Return the source website domain without a scheme or ``www.``."""
-    netloc = urlsplit(url).netloc.lower()
-    if not netloc:
-        netloc = urlsplit(f"//{url}").netloc.lower()
-    if netloc.startswith("www."):
-        netloc = netloc[4:]
-    return netloc or "Ukendt"
 
 
 def _bucket(monthly: dict, key: tuple[int, int]) -> tuple[Decimal, int]:

@@ -88,6 +88,7 @@ class Sprint30Tests(unittest.TestCase):
         )
         self.assertEqual({
             "traffic_potential", "traffic_trend", "affiliate_income",
+            "monetization_opportunity",
             "seo_health", "data_quality", "ai_confidence",
             "existing_work_penalty", "active_experiment_penalty",
             "waiting_time", "expected_gain",
