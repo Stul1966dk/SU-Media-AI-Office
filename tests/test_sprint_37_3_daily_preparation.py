@@ -195,6 +195,26 @@ class Sprint373DailyPreparationTests(unittest.TestCase):
                 self.assertEqual([], self.database.get_work_queue(("queued",)))
                 self.assertEqual([], self.database.get_title_optimization_drafts())
 
+    def test_skipped_url_is_not_regenerated(self):
+        # A previously skipped URL still occupies a queue row. It must not be
+        # regenerated: doing so used to crash _candidate_from_draft with
+        # StopIteration and surface "existing_draft_queue_failed", while also
+        # leaking a fresh orphan draft on every page load.
+        self._draft("romaskinen.dk", suffix="skippable")
+        candidate = self.queue._queue_candidates()[0]
+        item_id = self.database.enqueue_work_candidate(candidate)
+        self.database.skip_work_queue_item(item_id, "manuelt sprunget over")
+
+        optimizer = FakeOptimizer(self.database)
+        raw = self._raw_candidate("romaskinen.dk", suffix="skippable")
+        result = self._service(optimizer, [raw]).prepare_next("romaskinen.dk")
+
+        self.assertIsNone(result.item)
+        self.assertNotEqual("existing_draft_queue_failed", result.reason)
+        self.assertEqual(0, optimizer.generated)
+        self.assertEqual(1, len(self.database.get_work_queue(("skipped",))))
+        self.assertEqual(1, len(self.database.get_title_optimization_drafts()))
+
     def test_locked_candidate_is_not_generated(self):
         optimizer = FakeOptimizer(self.database)
         service = self._service(optimizer, [self._raw_candidate()])

@@ -59,10 +59,21 @@ class DailyWorkPreparationService:
                     website_id, include_locked=True
                 )
             )
+            # A URL that already has a queue row (queued, skipped or awaiting
+            # implementation) is parked: _queue_candidates() excludes it, so
+            # regenerating a draft for it would never surface and would crash
+            # _candidate_from_draft. Skip such URLs during selection instead.
+            queued_urls = {
+                row["target_url"]
+                for row in self.database.get_work_queue((
+                    "queued", "skipped", "awaiting_implementation",
+                ))
+            }
             candidates = [
                 item for item in all_candidates
                 if not self.queue.experiments.is_url_locked(item["target_url"])
                 and not self.queue.decisions.has_conflict(item)
+                and item["target_url"] not in queued_urls
             ]
             if not candidates:
                 reason = "all_candidates_locked" if all_candidates else (
