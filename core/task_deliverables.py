@@ -10,7 +10,11 @@ from urllib.parse import urlsplit
 
 DELIVERABLE_TYPES = {
     "title_meta", "content_update", "internal_links",
-    "technical_fix", "schema", "traffic_analysis",
+    "technical_fix", "schema", "traffic_analysis", "monetization",
+}
+
+MONETIZATION_OPPORTUNITY_TYPES = {
+    "affiliate_links", "cta", "comparison_table", "product_box",
 }
 
 
@@ -118,6 +122,8 @@ def validate_task_deliverable(
             allowed_source_urls=allowed_source_urls,
         )
         value["recommended_option"] = value["linked_sentence"]
+    elif deliverable_type == "monetization":
+        validate_monetization(value)
     value["rationale"] = str(value["rationale"]).strip()
     return value
 
@@ -178,6 +184,42 @@ def validate_content_change(value: dict[str, Any]) -> None:
         value["outline"] = [
             str(row).strip() for row in outline if str(row).strip()
         ]
+
+
+def validate_monetization(value: dict[str, Any]) -> None:
+    """Require a concrete, paste-ready monetization change for a page.
+
+    The recommended_option is the finished element (a comparison table,
+    an affiliate-link plan, a CTA or a product box) that turns existing
+    traffic into commission without inventing products or prices.
+    """
+    required = (
+        "content_location", "current_state", "opportunity_type", "evidence",
+    )
+    for field in required:
+        if not str(value.get(field) or "").strip():
+            raise ValueError(
+                f"Monetiseringsforslaget mangler det konkrete felt {field}."
+            )
+        value[field] = str(value[field]).strip()
+    if value["opportunity_type"] not in MONETIZATION_OPPORTUNITY_TYPES:
+        raise ValueError(
+            "Monetiseringsforslaget har en ukendt mulighedstype."
+        )
+    option = str(value.get("recommended_option") or "").strip()
+    if len(option) < 40:
+        raise ValueError(
+            "Monetiseringsforslaget er for kort til at være en færdig ændring."
+        )
+    normalized = option.casefold()
+    placeholders = (
+        "skriv selv", "tilføj relevant tekst", "indsæt tekst her",
+        "find selv", "indsæt link her", "udfyld selv",
+    )
+    if any(placeholder in normalized for placeholder in placeholders):
+        raise ValueError(
+            "Monetiseringsforslaget beder brugeren udfylde det selv."
+        )
 
 
 def validate_content_novelty(
@@ -627,6 +669,53 @@ def fallback_task_deliverable(
                 "Ankerteksten passer grammatisk ind i teksten.",
             ],
         }
+    if deliverable_type == "monetization":
+        page = next(
+            (
+                row for row in (public_context or [])
+                if row.get("relation") == "berørt side"
+            ),
+            {},
+        )
+        heading = str(page.get("h1") or "sidens overskrift").strip()
+        return {
+            "deliverable_type": "monetization",
+            "summary": f"Et konkret monetiseringsforslag til {url}.",
+            "recommended_option": (
+                "Tilføj en tydelig “Se aktuel pris”-knap ved det primære "
+                "produkt øverst på siden, og indsæt et affiliatelink på hver "
+                "produktomtale i brødteksten. Priser og lager hentes fra "
+                "forhandlerens produktfeed."
+            ),
+            "content_location": f"Umiddelbart under overskriften “{heading}”.",
+            "current_state": (
+                "Siden har målt organisk trafik, men få eller ingen "
+                "affiliatelinks eller købsknapper."
+            ),
+            "opportunity_type": "cta",
+            "evidence": (
+                "Siden får dokumenteret organisk trafik uden tilsvarende "
+                "provision i de gemte salgsdata."
+            ),
+            "rationale": (
+                "Eksisterende trafik uden monetisering er den hurtigste vej "
+                "til provision — uden at kræve en bedre placering."
+            ),
+            "alternatives": [
+                "Indsæt en sammenligningstabel over de omtalte produkter.",
+                "Tilføj en fremhævet produktboks til det primære produkt.",
+                "Placér affiliatelinks i de eksisterende produktomtaler.",
+            ],
+            "implementation_steps": [
+                "Find de produkter siden allerede omtaler.",
+                "Hent de rigtige affiliatelinks fra forhandlerens produktfeed.",
+                "Indsæt knap/links på de angivne placeringer.",
+            ],
+            "validation_checks": [
+                "Alle links peger på produkter siden faktisk omtaler.",
+                "Priser og lager kommer fra produktfeedet, ikke fra teksten.",
+            ],
+        }
     if deliverable_type in {"technical_fix", "schema"}:
         label = "schemaudkast" if deliverable_type == "schema" else "rettelsesplan"
         return {
@@ -738,12 +827,29 @@ def format_deliverable(deliverable: dict[str, Any]) -> str:
             f"Nuværende passage:\n{deliverable['current_sentence']}\n\n"
             f"Passage med link:\n{deliverable['linked_sentence']}\n\n"
         )
+    monetization_sections = ""
+    structured_monetization_fields = (
+        "content_location", "current_state", "opportunity_type", "evidence",
+    )
+    if (
+        deliverable["deliverable_type"] == "monetization"
+        and all(
+            deliverable.get(field) for field in structured_monetization_fields
+        )
+    ):
+        monetization_sections = (
+            f"Mulighedstype:\n{deliverable['opportunity_type']}\n\n"
+            f"Placering:\n{deliverable['content_location']}\n\n"
+            f"Nuværende tilstand:\n{deliverable['current_state']}\n\n"
+            f"Evidens:\n{deliverable['evidence']}\n\n"
+        )
     return (
         f"Leverancetype: {deliverable['deliverable_type']}\n\n"
         f"{deliverable['summary']}\n\n"
         f"Anbefalet løsning:\n{deliverable['recommended_option']}\n\n"
         f"{content_sections}"
         f"{link_sections}"
+        f"{monetization_sections}"
         f"Begrundelse:\n{deliverable['rationale']}\n\n"
         f"Alternativer:\n{alternatives}\n\n"
         f"Implementering:\n{steps}\n\n"
@@ -1009,6 +1115,39 @@ eller side, og bed ikke brugeren om selv at finde en kildeside.
   "link_location": "præcis placering eller afsnit på kildesiden",
   "current_sentence": "ordret eksisterende passage fra kildesiden",
   "linked_sentence": "færdig passage med ankerteksten indarbejdet",
+"""
+    if deliverable_type == "monetization":
+        content_requirements = """
+Ved monetization er opgaven at tjene penge på trafik siden ALLEREDE har.
+Dataen viser besøg men lav eller ingen provision. Foreslå én konkret,
+kopiér-klar monetiseringsændring forankret i sidens FAKTISKE indhold og de
+produkter/emner siden allerede omtaler. Opfind aldrig produkter, priser,
+mærker eller links, der ikke er dokumenteret i sideindholdet — henvis i stedet
+til de produkttyper siden allerede nævner, så redaktøren selv indsætter det
+rigtige affiliatelink fra forhandlerens produktfeed (priser og lager kommer
+fra feedet, ikke fra dig).
+Vælg præcis én opportunity_type:
+- comparison_table: for anmeldelser/guides/lister med flere produkter — lever
+  en færdig sammenligningstabel i markdown med de produkter siden allerede
+  omtaler og relevante kolonner (fx model, nøgleegenskab og en
+  "Se pris"-kolonne, hvor redaktøren indsætter affiliatelinket). Foretræk
+  denne på anmeldelses- og guidesider.
+- affiliate_links: når brødteksten omtaler produkter uden links — udpeg præcist
+  hvor linkene skal ind og med hvilken ankertekst.
+- cta: én tydelig handlingsopfordring (fx "Se aktuel pris") placeret der, hvor
+  købsintentionen er højest.
+- product_box: en fremhævet produktboks til sidens primære produkt.
+content_location skal entydigt sige, hvor på siden ændringen placeres.
+current_state skal beskrive, hvad der er der nu (fx "prosa-anmeldelse uden
+affiliatelinks"). evidence skal nævne de faktiske trafiktal fra dataen som
+begrundelse. recommended_option skal være den færdige, kopiér-klare ændring.
+Brug naturlig dansk retskrivning.
+"""
+        content_schema = """
+  "content_location": "præcis placering på siden",
+  "current_state": "hvad findes på siden nu",
+  "opportunity_type": "comparison_table|affiliate_links|cta|product_box",
+  "evidence": "de faktiske trafik-/provisionstal, der begrunder forslaget",
 """
     user_guidelines = str(
         recommendation.get("_prompt_guidelines") or ""
