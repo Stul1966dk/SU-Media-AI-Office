@@ -19,6 +19,9 @@ def _load(name: str, filename: str):
 
 monitor_sales = _load("monitor_sales_script", "monitor_sales.py")
 daily_refresh = _load("daily_refresh_script", "daily_refresh.py")
+reconnect_sc = _load(
+    "reconnect_search_console_script", "reconnect_search_console.py"
+)
 
 
 def _silent_logger() -> logging.Logger:
@@ -42,6 +45,29 @@ class MonitorSalesRunTests(unittest.TestCase):
         check = Mock(side_effect=RuntimeError("boom"))
 
         code = monitor_sales.run(Mock(), check=check, logger=_silent_logger())
+
+        self.assertEqual(1, code)
+
+
+class ReconnectSearchConsoleRunTests(unittest.TestCase):
+    def test_success_connects_and_returns_zero(self) -> None:
+        integration = Mock()
+        integration.connect.return_value = {"account": "owner@example.com"}
+
+        code = reconnect_sc.run(
+            Mock(), integration_factory=lambda _db: integration
+        )
+
+        self.assertEqual(0, code)
+        integration.connect.assert_called_once_with()
+
+    def test_failed_login_returns_one(self) -> None:
+        integration = Mock()
+        integration.connect.side_effect = RuntimeError("browseren blev lukket")
+
+        code = reconnect_sc.run(
+            Mock(), integration_factory=lambda _db: integration
+        )
 
         self.assertEqual(1, code)
 
