@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
 
 from core.ai_service import AIService, AIServiceError
 from core.prompt_guidelines import PromptGuidelines
+from core.revenue_attribution import page_key_for_url, revenue_by_page
 
 
 EVALUATION_VERSION = 1
@@ -37,6 +39,8 @@ class EvaluationRules:
     ctr_strong_pct: float = 20.0
     ctr_decline_pct: float = -10.0
     ctr_strong_decline_pct: float = -20.0
+    commission_improvement_dkk: float = 25.0
+    commission_strong_dkk: float = 200.0
 
     @classmethod
     def from_environment(cls) -> "EvaluationRules":
@@ -45,6 +49,12 @@ class EvaluationRules:
             minimum_days=int(os.getenv("SEO_EVAL_MIN_DAYS", "14")),
             minimum_clicks=int(os.getenv("SEO_EVAL_MIN_CLICKS", "5")),
             retry_days=int(os.getenv("SEO_EVAL_RETRY_DAYS", "7")),
+            commission_improvement_dkk=float(
+                os.getenv("SEO_EVAL_COMMISSION_IMPROVEMENT_DKK", "25")
+            ),
+            commission_strong_dkk=float(
+                os.getenv("SEO_EVAL_COMMISSION_STRONG_DKK", "200")
+            ),
         )
 
 
@@ -112,7 +122,11 @@ class ExperimentEvaluationService:
             after = self._comparison_data(experiment, periods)
             metrics = self.calculate_metrics(experiment, after)
             quality, caveats = self._sample_quality(metrics, periods)
-            result_status = self.classify(metrics, quality, caveats)
+            if str(experiment.get("goal_metric")) == "commission":
+                self._add_commission_metrics(experiment, periods, metrics)
+                result_status = self._classify_commission(metrics, quality)
+            else:
+                result_status = self.classify(metrics, quality, caveats)
             conclusion = self._ai_conclusion(metrics, result_status, caveats)
             post_analysis = self.build_post_analysis(
                 experiment, metrics, result_status, caveats
@@ -165,7 +179,7 @@ class ExperimentEvaluationService:
                     "planned_evaluation_date": next_date.isoformat(),
                 })
             else:
-                self.database.update_seo_experiment(experiment_id, {
+                completed_update = {
                     "status": "completed", "result": result_status,
                     "result_summary": conclusion,
                     "actual_evaluation_date": evaluated,
@@ -176,7 +190,14 @@ class ExperimentEvaluationService:
                     ],
                     "actual_ctr_change": metrics["ctr_percentage_point_change"],
                     "actual_position_change": metrics["position_change"],
-                })
+                }
+                if "commission_change" in metrics:
+                    completed_update["actual_commission_change"] = (
+                        metrics["commission_change"]
+                    )
+                self.database.update_seo_experiment(
+                    experiment_id, completed_update
+                )
             self.logger.info(json.dumps({
                 "event": "experiment_evaluated", "experiment_id": experiment_id,
                 "website_id": experiment["website_id"],
@@ -371,6 +392,62 @@ class ExperimentEvaluationService:
             return "improvement"
         return "neutral"
 
+    def _add_commission_metrics(
+        self, experiment: dict[str, Any], periods: dict[str, Any],
+        metrics: dict[str, Any],
+    ) -> None:
+        """Attach page-level commission before/after so the verdict and the
+        conclusion are measured on money, not clicks."""
+        url = str(experiment.get("target_url") or "")
+        before = self._page_commission(
+            url, periods["baseline_start"], periods["baseline_end"]
+        )
+        after = self._page_commission(
+            url, periods["comparison_start"], periods["comparison_end"]
+        )
+        metrics["commission_before"] = before
+        metrics["commission_after"] = after
+        metrics["commission_change"] = round(after - before, 2)
+
+    def _classify_commission(
+        self, metrics: dict[str, Any], quality: str
+    ) -> str:
+        """Classify a monetization experiment on its commission change."""
+        if quality == "insufficient":
+            return "insufficient_data"
+        change = float(metrics.get("commission_change") or 0)
+        if change >= self.rules.commission_strong_dkk:
+            return "strong_improvement"
+        if change >= self.rules.commission_improvement_dkk:
+            return "improvement"
+        if change <= -self.rules.commission_improvement_dkk:
+            return "decline"
+        return "neutral"
+
+    def _page_commission(self, url: str, start: str, end: str) -> float:
+        """Sum the page's DKK commission from sales dated within a window."""
+        key = page_key_for_url(url)
+        records = [
+            record for record in self.database.get_commission_records()
+            if self._within_window(record.get("dato"), start, end)
+        ]
+        return revenue_by_page(records).get(key, 0.0)
+
+    @staticmethod
+    def _within_window(sale_date: Any, start: str, end: str) -> bool:
+        iso = ExperimentEvaluationService._iso_sale_date(sale_date)
+        return bool(iso) and start <= iso <= end
+
+    @staticmethod
+    def _iso_sale_date(value: Any) -> str:
+        text = str(value or "").strip()
+        match = re.fullmatch(r"(\d{2})-(\d{2})-(\d{4})", text)
+        if match:
+            return f"{match.group(3)}-{match.group(2)}-{match.group(1)}"
+        if re.match(r"\d{4}-\d{2}-\d{2}", text):
+            return text[:10]
+        return ""
+
     def _periods(self, experiment: dict[str, Any]) -> dict[str, Any]:
         baseline_start = date.fromisoformat(experiment["baseline_start"][:10])
         baseline_end = date.fromisoformat(experiment["baseline_end"][:10])
@@ -452,6 +529,10 @@ class ExperimentEvaluationService:
                 "ændringen. Eksperimentet fortsætter, og systemet forsøger "
                 "automatisk igen, når der er indsamlet mere data."
             )
+        if "commission_change" in metrics:
+            return ExperimentEvaluationService._commission_conclusion(
+                metrics, result
+            )
         position = float(metrics.get("position_change") or 0)
         position_text = (
             "Den gennemsnitlige placering var stort set uændret, hvilket "
@@ -488,6 +569,37 @@ class ExperimentEvaluationService:
                 "variant kan overvejes senere."
             )
         return " ".join((opening, position_text, ending))
+
+    @staticmethod
+    def _commission_conclusion(metrics: dict[str, Any], result: str) -> str:
+        before = ExperimentEvaluationService._kr(metrics.get("commission_before"))
+        after = ExperimentEvaluationService._kr(metrics.get("commission_after"))
+        change = float(metrics.get("commission_change") or 0)
+        numbers = (
+            f"Provisionen fra siden gik fra {before} til {after} i "
+            f"måleperioden ({change:+.0f} kr.)."
+        )
+        if result in {"strong_improvement", "improvement"}:
+            verdict = (
+                "Ændringen begyndte at tjene penge på den eksisterende trafik; "
+                f"resultatet vurderes som {RESULT_LABELS[result].lower()}."
+            )
+        elif result in {"strong_decline", "decline"}:
+            verdict = (
+                "Provisionen faldt i måleperioden; resultatet vurderes som "
+                f"{RESULT_LABELS[result].lower()} og bør følges, før ændringen "
+                "tilbageføres."
+            )
+        else:
+            verdict = (
+                "Ændringen gav endnu ingen målbar provision — overvej en anden "
+                "monetiseringsform på siden."
+            )
+        return " ".join((numbers, verdict))
+
+    @staticmethod
+    def _kr(amount: Any) -> str:
+        return f"{round(float(amount or 0)):,.0f}".replace(",", ".") + " kr."
 
     def _recover_failure(
         self, experiment: dict[str, Any], error: Exception,

@@ -60,6 +60,66 @@ class ExperimentEvaluationTests(unittest.TestCase):
             average_position=position,
         )
 
+    def monetization_experiment(self, *, due="2026-02-01"):
+        experiment_id = self.database.create_seo_experiment({
+            "website_id": "site.dk", "target_url": "https://site.dk/side/",
+            "target_query": "", "experiment_type": "monetization",
+            "hypothesis": "Monetisering kan skabe provision fra trafikken.",
+            "change_description": "Tilføj sammenligningstabel",
+            "goal_metric": "commission", "goal_direction": "increase",
+            "target_change_pct": 25, "waiting_period_days": 14,
+            "status": "waiting_for_data", "confidence": 90,
+        })
+        self.database.update_seo_experiment(experiment_id, {
+            "baseline_start": "2026-01-01", "baseline_end": "2026-01-14",
+            "baseline_clicks": 20, "baseline_impressions": 800,
+            "baseline_ctr": .025, "baseline_position": 8.0,
+            "started_at": "2026-01-14T12:00:00+01:00",
+            "planned_evaluation_date": due,
+        })
+        return experiment_id
+
+    def _sale(self, uid, provision, kombiid, dato):
+        self.database.upsert_partner_ads_sale({
+            "kombiid": kombiid, "provision": provision,
+            "url": "https://site.dk/", "uid": uid, "uid2": "",
+            "valuta": "DKK", "dato": dato,
+        })
+
+    def test_monetization_experiment_is_judged_on_commission(self):
+        experiment_id = self.monetization_experiment()
+        self.comparison()  # enough traffic for a sufficient sample
+        # Commission earned within the comparison window (15.-28. jan).
+        self._sale("/side/", "300", "k1", "20-01-2026")
+
+        result = self.service.evaluate_experiment(
+            experiment_id, reference_date=date(2026, 2, 1)
+        )
+
+        self.assertEqual("strong_improvement", result["result_status"])
+        self.assertEqual(0.0, result["commission_before"])
+        self.assertEqual(300.0, result["commission_after"])
+        self.assertEqual(300.0, result["commission_change"])
+        self.assertIn("provision", result["ai_conclusion"].lower())
+        experiment = self.database.get_seo_experiment(experiment_id)
+        self.assertEqual("completed", experiment["status"])
+        self.assertEqual(300.0, experiment["actual_commission_change"])
+
+    def test_monetization_without_new_commission_is_neutral(self):
+        experiment_id = self.monetization_experiment()
+        self.comparison()
+        # A sale outside both measurement windows must not count as an effect.
+        self._sale("/side/", "300", "k1", "20-02-2026")
+
+        result = self.service.evaluate_experiment(
+            experiment_id, reference_date=date(2026, 2, 1)
+        )
+
+        self.assertEqual("neutral", result["result_status"])
+        self.assertEqual(0.0, result["commission_before"])
+        self.assertEqual(0.0, result["commission_after"])
+        self.assertEqual(0.0, result["commission_change"])
+
     def test_due_and_not_due_experiments(self):
         due = self.experiment(due="2026-02-01")
         self.experiment(due="2026-03-01")
