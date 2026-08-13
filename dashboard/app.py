@@ -46,7 +46,7 @@ STATUS_LABELS = {
     "search_console": "Search Console",
     "agent_orchestrator": "Agent Orchestrator",
     "knowledge_engine": "Knowledge Engine",
-    "openai": "OpenAI",
+    "openai": "Claude",
 }
 SEO_TRENDS = ("growing", "stable", "declining", "critical")
 

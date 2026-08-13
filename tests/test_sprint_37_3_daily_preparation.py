@@ -179,7 +179,7 @@ class Sprint373DailyPreparationTests(unittest.TestCase):
 
     def test_generation_and_reviewer_failures_leave_no_active_work(self):
         errors = (
-            RuntimeError("OpenAI fejlede"),
+            RuntimeError("Claude fejlede"),
             TitleOptimizationValidationError(
                 "Reviewer afviste", phase="review"
             ),

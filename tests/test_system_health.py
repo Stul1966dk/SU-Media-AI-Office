@@ -11,7 +11,7 @@ from core.system_health import check_runtime_services
 
 class WorkingAI:
     def test_connection(self) -> str:
-        return "SU Media AI Office er forbundet med OpenAI."
+        return "SU Media AI Office er forbundet med Claude."
 
 
 class FailingAI:

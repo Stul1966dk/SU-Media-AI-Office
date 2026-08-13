@@ -58,7 +58,7 @@ def _cached_openai_check(
             "checked_at": str(cached["last_attempt"]),
             "error_type": cached.get("error_type"),
             "test_executed": False,
-            "cache_reason": "Seneste OpenAI-test er stadig gyldig",
+            "cache_reason": "Seneste Claude-test er stadig gyldig",
             "last_test_at": cached["last_attempt"],
             "next_test_at": cached["next_test_at"],
             "openai_test_calls_executed": 0,
@@ -101,24 +101,24 @@ def _openai_test_reason(
     if force:
         return "Tvungen systemtest"
     if not cached:
-        return "Ingen tidligere OpenAI-test"
+        return "Ingen tidligere Claude-test"
     if cached.get("config_fingerprint") != fingerprint:
-        return "OpenAI-konfigurationen er ændret"
+        return "Claude-konfigurationen er ændret"
     try:
         next_test = datetime.fromisoformat(str(cached["next_test_at"]))
         if next_test.tzinfo is None:
             next_test = next_test.astimezone()
     except (KeyError, TypeError, ValueError):
-        return "Gemt OpenAI-cache er ugyldig"
+        return "Gemt Claude-cache er ugyldig"
     if now >= next_test:
-        return "OpenAI-cachen er udløbet"
+        return "Claude-cachen er udløbet"
     return None
 
 
 def _openai_fingerprint() -> str:
     material = "\0".join((
-        os.getenv("OPENAI_API_KEY", ""),
-        os.getenv("OPENAI_MODEL", DEFAULT_MODEL),
+        os.getenv("ANTHROPIC_API_KEY", ""),
+        os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL),
     ))
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
@@ -160,7 +160,7 @@ def _check_openai(
         )
     except Exception as error:
         return _result(
-            False, f"{type(error).__name__}: OpenAI-test fejlede", checked_at,
+            False, f"{type(error).__name__}: Claude-test fejlede", checked_at,
             error_type=type(error).__name__,
         )
 

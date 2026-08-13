@@ -15,6 +15,22 @@ from core.seo_history import SEOHealth
 from core.website_registry import ImportResult
 
 
+class _FakeContentConnector:
+    """Stand-in for WordPressConnector that never touches the network."""
+
+    def __init__(self, *, website_id, database) -> None:
+        self.website_id = website_id
+
+    def connect(self) -> bool:
+        return True
+
+    def import_content(self) -> dict:
+        return {"total": 0, "changed": 0}
+
+    def disconnect(self) -> None:
+        pass
+
+
 class Sprint7DerivedRefreshTests(unittest.TestCase):
     def service(
         self, *, daily: dict[str, int] | None = None,
@@ -121,6 +137,7 @@ class Sprint7DerivedRefreshTests(unittest.TestCase):
             intelligence=intelligence,
             plausible_import=plausible_import,
             health_check=Mock(return_value={}),
+            content_connector=_FakeContentConnector,
         )
         service._test_seo = seo
         service._test_intelligence = intelligence

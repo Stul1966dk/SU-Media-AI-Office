@@ -19,7 +19,7 @@ INTEGRATIONS = (
     ),
     ("plausible", "Plausible", "Plausible"),
     ("derived", "Afledte beregninger", None),
-    ("openai", "OpenAI systemstatus", "Systemstatus"),
+    ("openai", "Claude systemstatus", "Systemstatus"),
 )
 SECRET_KEYS = ("token", "api_key", "apikey", "credential", "authorization")
 SECRET_PATTERNS = (

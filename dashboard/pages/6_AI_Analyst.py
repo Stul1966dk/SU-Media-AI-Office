@@ -108,7 +108,7 @@ def main() -> None:
                     "kind": "Modelsvar eller AI-service",
                     "message": error.category,
                     "type": error.original_type or type(error).__name__,
-                    "next": "Kontrollér OpenAI-status og prøv analysen igen.",
+                    "next": "Kontrollér Claude-status og prøv analysen igen.",
                 }
                 selected = None
             except ValueError as error:

@@ -1,4 +1,4 @@
-"""Focused Sprint 8 tests for the persistent OpenAI health cache."""
+"""Focused Sprint 8 tests for the persistent Claude health cache."""
 
 import json
 import os
@@ -21,7 +21,7 @@ class CountingAI:
 
     def test_connection(self) -> str:
         type(self).calls += 1
-        return "SU Media AI Office er forbundet med OpenAI."
+        return "SU Media AI Office er forbundet med Claude."
 
 
 class FailingAI:
@@ -34,7 +34,7 @@ class FailingAI:
 
 class SecretFailureAI:
     def test_connection(self) -> str:
-        raise RuntimeError(os.environ["OPENAI_API_KEY"])
+        raise RuntimeError(os.environ["ANTHROPIC_API_KEY"])
 
 
 class Sprint8SystemStatusCacheTests(unittest.TestCase):
@@ -52,7 +52,10 @@ class Sprint8SystemStatusCacheTests(unittest.TestCase):
         FailingAI.calls = 0
         self.environment = patch.dict(
             os.environ,
-            {"OPENAI_API_KEY": "sk-test-secret", "OPENAI_MODEL": "test-model"},
+            {
+                "ANTHROPIC_API_KEY": "sk-test-secret",
+                "ANTHROPIC_MODEL": "test-model",
+            },
         )
         self.environment.start()
 
@@ -91,11 +94,11 @@ class Sprint8SystemStatusCacheTests(unittest.TestCase):
 
     def test_changed_configuration_fingerprint_executes_new_call(self) -> None:
         self.check()
-        os.environ["OPENAI_MODEL"] = "changed-model"
+        os.environ["ANTHROPIC_MODEL"] = "changed-model"
         result = self.check(when=NOW + timedelta(minutes=1))
         self.assertEqual(2, CountingAI.calls)
         self.assertEqual(
-            "OpenAI-konfigurationen er ændret", result["cache_reason"]
+            "Claude-konfigurationen er ændret", result["cache_reason"]
         )
 
     def test_force_system_check_executes_new_call(self) -> None:
@@ -118,7 +121,7 @@ class Sprint8SystemStatusCacheTests(unittest.TestCase):
         self.assertEqual(2, FailingAI.calls)
 
     def test_api_key_never_appears_in_cache_or_error(self) -> None:
-        secret = os.environ["OPENAI_API_KEY"]
+        secret = os.environ["ANTHROPIC_API_KEY"]
         result = self.check(factory=SecretFailureAI)
         stored = self.database.get_openai_health_cache()
         serialized = json.dumps(stored, ensure_ascii=False)

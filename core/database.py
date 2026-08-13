@@ -5260,7 +5260,7 @@ class Database:
         }
 
     def set_openai_health_cache(self, state: dict[str, Any]) -> None:
-        """Persist sanitized OpenAI connection-test metadata."""
+        """Persist sanitized Claude connection-test metadata."""
         allowed = {
             "last_attempt", "last_success", "is_ok", "detail",
             "error_type", "next_test_at", "config_fingerprint",
@@ -5279,7 +5279,7 @@ class Database:
             )
 
     def get_openai_health_cache(self) -> dict[str, Any] | None:
-        """Return sanitized cached OpenAI health metadata."""
+        """Return sanitized cached Claude health metadata."""
         row = self._connection.execute(
             "SELECT value FROM app_state WHERE key = ?",
             ("system_health_cache:openai",),

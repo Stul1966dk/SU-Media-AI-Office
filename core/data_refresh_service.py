@@ -18,6 +18,7 @@ from core.system_health import check_runtime_services
 from core.refresh_status import classify_step, normalize_step, summarize_steps
 from core.search_console_diagnosis import SearchConsoleDiagnosisService
 from core.website_registry import WebsiteRegistry
+from connectors.wordpress_connector import WordPressConnector
 from integrations.search_console_integration import SearchConsoleIntegration
 
 
@@ -28,7 +29,8 @@ class DataRefreshService:
     """Refresh persisted sources without triggering analytical AI calls."""
 
     STEPS = (
-        "Website Registry", "Partner Ads", "Search Console-properties",
+        "Website Registry", "Website-indhold", "Partner Ads",
+        "Search Console-properties",
         "Search Console-dagstal", "Search Console-sider og søgeord",
         "Plausible", "SEO History", "Website Intelligence",
         "SEO-eksperimentovervågning", "Systemstatus", "Prioriteringsscore",
@@ -43,6 +45,7 @@ class DataRefreshService:
         plausible_diagnosis: Any | None = None,
         search_diagnosis: Any | None = None,
         health_check: Callable | None = None,
+        content_connector: Any | None = None,
     ) -> None:
         self.database = database
         self.project_root = project_root or Path(__file__).resolve().parents[1]
@@ -70,6 +73,7 @@ class DataRefreshService:
             or SearchConsoleDiagnosisService(database, self.search_console)
         )
         self.health_check = health_check or check_runtime_services
+        self.content_connector = content_connector or WordPressConnector
 
     def refresh_all(
         self, progress: Progress | None = None,
@@ -121,6 +125,11 @@ class DataRefreshService:
 
         registry = self._run(
             "Website Registry", self.refresh_website_registry, notify, steps
+        )
+        self._run(
+            "Website-indhold",
+            lambda: self.refresh_website_content(website_ids),
+            notify, steps,
         )
         self._run("Partner Ads", self.refresh_partner_ads, notify, steps)
         properties = self._run(
@@ -281,6 +290,73 @@ class DataRefreshService:
         return self.partner_refresh(
             self.database, force_full_refresh=False
         )
+
+    def refresh_website_content(
+        self, website_ids: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Sync public website content for active sites into the store.
+
+        Each site is fault-isolated: a site that cannot be reached is
+        skipped, an import error is recorded, and the remaining sites still
+        run. Uses only the public connector (read-only against the site).
+        """
+        selected = (
+            list(website_ids) if website_ids is not None
+            else list(self.database.get_active_website_ids())
+        )
+        processed = skipped = failed = 0
+        records = changed = 0
+        errors: list[dict[str, Any]] = []
+        site_results: list[dict[str, Any]] = []
+        for website_id in selected:
+            connector = self.content_connector(
+                website_id=website_id, database=self.database
+            )
+            try:
+                connected = connector.connect()
+                counts = connector.import_content() if connected else {}
+            except Exception as error:
+                failed += 1
+                errors.append({
+                    "website_id": website_id,
+                    "error_type": type(error).__name__,
+                    "message": "Indholdshentning fejlede.",
+                })
+                site_results.append({
+                    "website_id": website_id, "status": "error",
+                    "error_type": type(error).__name__,
+                })
+                continue
+            finally:
+                try:
+                    connector.disconnect()
+                except Exception:
+                    pass
+            if not connected:
+                skipped += 1
+                site_results.append({
+                    "website_id": website_id, "status": "skipped",
+                    "reason": "ingen offentlig forbindelse",
+                })
+                continue
+            processed += 1
+            records += int(counts.get("total", 0) or 0)
+            changed += int(counts.get("changed", 0) or 0)
+            site_results.append({
+                "website_id": website_id, "status": "success",
+                "total": int(counts.get("total", 0) or 0),
+                "changed": int(counts.get("changed", 0) or 0),
+            })
+        return {
+            "websites_attempted": len(selected),
+            "websites_processed": processed,
+            "websites_failed": failed,
+            "websites_skipped": skipped,
+            "records_processed": records,
+            "records_updated": changed,
+            "errors": errors,
+            "site_results": site_results,
+        }
 
     def refresh_search_console_properties(self) -> dict[str, Any]:
         return asdict(self.search_console.synchronize())

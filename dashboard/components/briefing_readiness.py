@@ -20,7 +20,7 @@ def get_website_briefing_readiness(
         "Website Registry": database.get_website(website_id) is not None,
         "Website Profile": database.get_website_profile_detail(website_id) is not None,
         "Mindst 14 Search Console-dage": len(metrics) >= 14,
-        "OpenAI-forbindelse": bool(health.get("is_ok")),
+        "Claude-forbindelse": bool(health.get("is_ok")),
     }
     recommended = {
         "Mindst 28 Search Console-dage": len(metrics) >= 28,

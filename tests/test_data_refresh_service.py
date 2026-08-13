@@ -20,6 +20,22 @@ from dashboard.components.briefing_readiness import (
 )
 
 
+class _FakeContentConnector:
+    """Stand-in for WordPressConnector that never touches the network."""
+
+    def __init__(self, *, website_id, database) -> None:
+        self.website_id = website_id
+
+    def connect(self) -> bool:
+        return True
+
+    def import_content(self) -> dict:
+        return {"total": 5, "changed": 2}
+
+    def disconnect(self) -> None:
+        pass
+
+
 class DataRefreshServiceTests(unittest.TestCase):
     def _service(self, *, search_failure: bool = False) -> DataRefreshService:
         database = Mock()
@@ -93,9 +109,43 @@ class DataRefreshServiceTests(unittest.TestCase):
             intelligence=intelligence,
             plausible_import=plausible,
             health_check=Mock(return_value={}),
+            content_connector=_FakeContentConnector,
         )
         service._test_parts = (registry, search, seo, intelligence, plausible)
         return service
+
+    def test_website_content_step_syncs_active_sites_fault_isolated(self) -> None:
+        database = Mock()
+        database.get_active_website_ids.return_value = ["a.dk", "b.dk", "c.dk"]
+
+        class MixedConnector:
+            def __init__(self, *, website_id, database):
+                self.website_id = website_id
+
+            def connect(self):
+                return self.website_id != "b.dk"  # b.dk unreachable
+
+            def import_content(self):
+                if self.website_id == "c.dk":
+                    raise RuntimeError("import fejlede")
+                return {"total": 10, "changed": 3}
+
+            def disconnect(self):
+                pass
+
+        service = DataRefreshService(
+            database, registry=Mock(), partner_refresh=Mock(),
+            search_console=Mock(), seo_history=Mock(), intelligence=Mock(),
+            plausible_import=Mock(), health_check=Mock(),
+            content_connector=MixedConnector,
+        )
+        result = service.refresh_website_content()
+
+        self.assertEqual(1, result["websites_processed"])  # a.dk
+        self.assertEqual(1, result["websites_skipped"])     # b.dk
+        self.assertEqual(1, result["websites_failed"])      # c.dk
+        self.assertEqual(10, result["records_processed"])
+        self.assertEqual("RuntimeError", result["errors"][0]["error_type"])
 
     def test_refresh_all_runs_in_required_order(self) -> None:
         events = []

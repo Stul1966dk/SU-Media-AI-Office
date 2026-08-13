@@ -42,6 +42,17 @@ def generate_task_deliverable(
             if row.get("relation") == "mulig relateret side"
             and row.get("url")
         ],
+        evidence_fallback=[
+            candidate
+            for candidate in (
+                [
+                    str(row.get("query") or "").strip()
+                    for row in (recommendation.get("search_queries") or [])
+                ]
+                + [str(recommendation.get("target_query") or "").strip()]
+            )
+            if candidate
+        ],
     )
     if deliverable["deliverable_type"] == "content_update":
         validate_content_novelty(
@@ -56,6 +67,7 @@ def validate_task_deliverable(
     *,
     expected_target_url: str = "",
     allowed_source_urls: list[str] | None = None,
+    evidence_fallback: list[str] | None = None,
 ) -> dict[str, Any]:
     """Validate and normalize a model-produced work draft."""
     cleaned = text.strip()
@@ -90,6 +102,13 @@ def validate_task_deliverable(
             )
         value["recommended_option"] = format_title_meta_option(title, meta)
     elif deliverable_type == "content_update":
+        if not str(value.get("replacement_content") or "").strip():
+            value["replacement_content"] = value.get("recommended_option", "")
+        evidence = value.get("evidence_queries")
+        if not isinstance(evidence, list) or not any(
+            str(query).strip() for query in evidence
+        ):
+            value["evidence_queries"] = list(evidence_fallback or [])
         validate_content_change(value)
         value["recommended_option"] = value["replacement_content"]
     elif deliverable_type == "internal_links":
@@ -811,6 +830,10 @@ eksisterende passage skal content_location entydigt sige "Erstat denne passage",
 current_content skal være et ordret citat, og replacement_content skal være den
 færdige erstatning. Hvis ingen passage kan dokumenteres, må du ikke foregive en:
 angiv i stedet en præcis placering for en ny sektion.
+replacement_content skal altid være udfyldt med den fuldstændige færdige tekst –
+den samme tekst som recommended_option – og må aldrig være tom.
+evidence_queries skal altid indeholde de faktiske Search Console-søgeord fra data
+(query og search_queries) og må aldrig være tom.
 Brug naturlig dansk retskrivning og sammenskriv danske sammensatte ord.
 Undgå engelskinspirerede bindestreger som "Kalender-appen"; skriv eksempelvis
 "Kalenderappen". Brug kun en bindestreg, når dansk retskrivning faktisk kræver

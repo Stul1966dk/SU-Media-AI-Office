@@ -41,7 +41,7 @@ def main() -> None:
     render_help_panel(
         purpose="Lav tre målbare title- og metabeskrivelsesforslag til én URL.",
         requirements=(
-            "To Search Console-perioder, offentlig adgang til siden og OpenAI."
+            "To Search Console-perioder, offentlig adgang til siden og Claude."
         ),
         actions="Generér, redigér, godkend eller afvis en kladde.",
         limitations=(
