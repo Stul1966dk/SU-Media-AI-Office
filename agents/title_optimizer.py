@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import time
 from datetime import datetime
 from html.parser import HTMLParser
 from typing import Any
@@ -18,6 +19,8 @@ from core.workflow_status import DRAFT_TRANSITIONS, validate_transition
 
 
 USER_AGENT = "SU-Media-AI-Office/1.0 (public read-only analysis)"
+SNIPPET_FETCH_ATTEMPTS = 2
+SNIPPET_FETCH_BACKOFF_SECONDS = 1.0
 SPAM_WORDS = {
     "garanteret", "verdens bedste", "helt fantastisk", "mirakel",
     "nummer 1", "billigst",
@@ -152,10 +155,7 @@ class TitleOptimizer:
         self, candidate: dict[str, Any]
     ) -> dict[str, Any]:
         """Read one public page without login, cookies, or mutation."""
-        response = self.session.get(
-            candidate["target_url"], timeout=15, allow_redirects=True
-        )
-        response.raise_for_status()
+        response = self._fetch_public_page(candidate["target_url"])
         parser = _PageParser(response.url)
         parser.feed(response.text[:2_000_000])
         domain = urlsplit(response.url).netloc.lower().removeprefix("www.")
@@ -173,6 +173,26 @@ class TitleOptimizer:
             "internal_links": internal_links,
             "schema": sorted(set(parser.schema)),
         }
+
+    def _fetch_public_page(self, url: str) -> requests.Response:
+        """GET a public page, retrying once on a transient failure."""
+        last_error: Exception | None = None
+        for attempt in range(1, SNIPPET_FETCH_ATTEMPTS + 1):
+            try:
+                response = self.session.get(
+                    url, timeout=15, allow_redirects=True
+                )
+                response.raise_for_status()
+                return response
+            except requests.RequestException as error:
+                last_error = error
+                if attempt < SNIPPET_FETCH_ATTEMPTS:
+                    self.logger.warning(
+                        "Kunne ikke hente %s (forsøg %d/%d): %s",
+                        url, attempt, SNIPPET_FETCH_ATTEMPTS, error,
+                    )
+                    time.sleep(SNIPPET_FETCH_BACKOFF_SECONDS)
+        raise last_error
 
     def analyze_competitors(
         self, candidate: dict[str, Any]

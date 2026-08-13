@@ -1107,6 +1107,7 @@ def _generate_deliverable(
         )
     public_context = []
     has_target_context = False
+    target_fetch_error = ""
     if item.get("target_url"):
         try:
             current_page = _optimizer(database).analyze_current_snippet({
@@ -1117,8 +1118,8 @@ def _generate_deliverable(
                 **current_page,
             })
             has_target_context = bool(current_page.get("content_sections"))
-        except Exception:
-            pass
+        except Exception as error:
+            target_fetch_error = f"{type(error).__name__}: {error}".strip()
     try:
         content_rows = database.get_content(item["website"])
         if not has_target_context:
@@ -1200,6 +1201,10 @@ def _generate_deliverable(
             )
         ),
     }
+    grounded_target = any(
+        row.get("relation") == "berørt side" and row.get("content_sections")
+        for row in public_context
+    )
     try:
         return generate_task_deliverable(
             guided_item,
@@ -1212,16 +1217,27 @@ def _generate_deliverable(
             "Forslaget er derfor lavet med faste regler og bør kontrolleres "
             "ekstra grundigt."
         )
-    except (ValueError, json.JSONDecodeError):
+    except (ValueError, json.JSONDecodeError) as error:
         fallback_reason = (
             "AI-forbindelsen virker, men svaret opfyldte ikke appens "
-            "kvalitetskrav. Der vises derfor et regelbaseret forslag, som "
-            "bør kontrolleres ekstra grundigt."
+            f"kvalitetskrav ({error}). Der vises derfor et regelbaseret "
+            "forslag, som bør kontrolleres ekstra grundigt."
         )
-    except Exception:
+    except Exception as error:
         fallback_reason = (
-            "AI-svaret kunne ikke behandles. Der vises derfor et "
+            f"AI-svaret kunne ikke behandles ({error}). Der vises derfor et "
             "regelbaseret forslag, som bør kontrolleres ekstra grundigt."
+        )
+    if not grounded_target and item.get("target_url"):
+        blocker = (
+            f"Siden kunne ikke hentes ({target_fetch_error})."
+            if target_fetch_error
+            else "Sidens artikeltekst er ikke hentet eller gemt endnu."
+        )
+        fallback_reason = (
+            "Forslaget kan ikke forankres, fordi artikelteksten for den "
+            f"berørte side mangler. {blocker} Crawl/synkronisér siden, og "
+            "prøv igen."
         )
     try:
         fallback = fallback_task_deliverable(
