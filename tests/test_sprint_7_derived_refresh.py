@@ -38,6 +38,13 @@ class _FakeScanner:
         return {"cms": "wordpress", "scan_status": "completed"}
 
 
+class _FakeEvaluator:
+    """Stand-in for ExperimentEvaluationService (no AI, nothing due)."""
+
+    def evaluate_due_experiments(self, reference_date=None) -> list:
+        return []
+
+
 class Sprint7DerivedRefreshTests(unittest.TestCase):
     def service(
         self, *, daily: dict[str, int] | None = None,
@@ -148,6 +155,7 @@ class Sprint7DerivedRefreshTests(unittest.TestCase):
             health_check=Mock(return_value={}),
             content_connector=_FakeContentConnector,
             discovery_scanner=_FakeScanner(),
+            experiment_evaluator=_FakeEvaluator(),
         )
         service._test_seo = seo
         service._test_intelligence = intelligence

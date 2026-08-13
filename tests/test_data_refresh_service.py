@@ -45,6 +45,13 @@ class _FakeScanner:
         return {"cms": "wordpress", "scan_status": "completed"}
 
 
+class _FakeEvaluator:
+    """Stand-in for ExperimentEvaluationService (no AI, nothing due)."""
+
+    def evaluate_due_experiments(self, reference_date=None) -> list:
+        return []
+
+
 class DataRefreshServiceTests(unittest.TestCase):
     def _service(self, *, search_failure: bool = False) -> DataRefreshService:
         database = Mock()
@@ -122,9 +129,44 @@ class DataRefreshServiceTests(unittest.TestCase):
             health_check=Mock(return_value={}),
             content_connector=_FakeContentConnector,
             discovery_scanner=_FakeScanner(),
+            experiment_evaluator=_FakeEvaluator(),
         )
         service._test_parts = (registry, search, seo, intelligence, plausible)
         return service
+
+    def test_experiment_evaluation_counts_completed_and_failed(self) -> None:
+        class Evaluator:
+            def evaluate_due_experiments(self, reference_date=None):
+                return [
+                    {"experiment_id": 1, "result_status": "improvement"},
+                    {"experiment_id": 2, "result_status": "evaluation_failed"},
+                    {"experiment_id": 3, "result_status": "neutral"},
+                ]
+
+        service = DataRefreshService(
+            Mock(), registry=Mock(), partner_refresh=Mock(),
+            search_console=Mock(), seo_history=Mock(), intelligence=Mock(),
+            plausible_import=Mock(), health_check=Mock(),
+            experiment_evaluator=Evaluator(),
+        )
+        result = service.refresh_experiment_evaluation()
+
+        self.assertEqual(3, result["objects_processed"])
+        self.assertEqual(1, result["objects_failed"])
+        self.assertEqual(2, result["evaluated"])
+        self.assertTrue(result["data_changed"])
+
+    def test_experiment_evaluation_no_due_is_noop_success(self) -> None:
+        service = DataRefreshService(
+            Mock(), registry=Mock(), partner_refresh=Mock(),
+            search_console=Mock(), seo_history=Mock(), intelligence=Mock(),
+            plausible_import=Mock(), health_check=Mock(),
+            experiment_evaluator=_FakeEvaluator(),
+        )
+        result = service.refresh_experiment_evaluation()
+
+        self.assertEqual(0, result["objects_processed"])
+        self.assertFalse(result["data_changed"])
 
     def test_discovery_scans_only_sites_without_completed_profile(self) -> None:
         database = Mock()

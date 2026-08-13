@@ -13,6 +13,7 @@ from core.partner_ads_import import execute_partner_ads_check
 from core.plausible_import import PlausibleImportService
 from core.plausible_diagnosis import PlausibleDiagnosisService
 from core.experiment_monitoring import ExperimentMonitoringService
+from core.experiment_evaluation import ExperimentEvaluationService
 from core.seo_history import SEOHistory
 from core.system_health import check_runtime_services
 from core.refresh_status import classify_step, normalize_step, summarize_steps
@@ -38,7 +39,8 @@ class DataRefreshService:
         "Partner Ads", "Search Console-properties",
         "Search Console-dagstal", "Search Console-sider og søgeord",
         "Plausible", "SEO History", "Website Intelligence",
-        "SEO-eksperimentovervågning", "Systemstatus", "Prioriteringsscore",
+        "SEO-eksperimentovervågning", "Eksperimentevaluering",
+        "Systemstatus", "Prioriteringsscore",
     )
 
     def __init__(
@@ -52,6 +54,7 @@ class DataRefreshService:
         health_check: Callable | None = None,
         content_connector: Any | None = None,
         discovery_scanner: Any | None = None,
+        experiment_evaluator: Any | None = None,
     ) -> None:
         self.database = database
         self.project_root = project_root or Path(__file__).resolve().parents[1]
@@ -81,6 +84,10 @@ class DataRefreshService:
         self.health_check = health_check or check_runtime_services
         self.content_connector = content_connector or WordPressConnector
         self.discovery_scanner = discovery_scanner or WebsiteScanner()
+        self.experiment_evaluator = (
+            experiment_evaluator
+            or ExperimentEvaluationService(self.database)
+        )
 
     def refresh_all(
         self, progress: Progress | None = None,
@@ -241,6 +248,11 @@ class DataRefreshService:
         )
         if experiment_result.get("data_changed"):
             changes["global"].add("experiment_status")
+        self._run(
+            "Eksperimentevaluering",
+            self.refresh_experiment_evaluation,
+            notify, steps,
+        )
         self._run(
             "Systemstatus",
             lambda: self.refresh_system_status(force_system_check),
@@ -403,6 +415,31 @@ class DataRefreshService:
             "records_updated": changed,
             "errors": errors,
             "site_results": site_results,
+        }
+
+    def refresh_experiment_evaluation(self) -> dict[str, Any]:
+        """Evaluate experiments whose 28-day measurement window has elapsed.
+
+        Date-triggered (not change-gated): a due experiment must be closed
+        even on a day when no site data changed. The evaluation service
+        computes the deterministic result, records the documented learning,
+        and completes each experiment, isolating per-experiment failures.
+        Does no work — and makes no AI calls — when nothing is due.
+        """
+        evaluated = self.experiment_evaluator.evaluate_due_experiments()
+        failed = sum(
+            1 for item in evaluated
+            if str(item.get("result_status")) == "evaluation_failed"
+        )
+        completed = len(evaluated) - failed
+        return {
+            "objects_processed": len(evaluated),
+            "objects_failed": failed,
+            "objects_skipped": 0,
+            "records_processed": len(evaluated),
+            "records_updated": completed,
+            "evaluated": completed,
+            "data_changed": bool(evaluated),
         }
 
     def refresh_website_discovery(
