@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -23,6 +23,9 @@ from integrations.search_console_integration import SearchConsoleIntegration
 
 
 Progress = Callable[[str, str, dict[str, Any]], None]
+
+CONTENT_FULL_RECONCILE_DAYS = 7
+CONTENT_INCREMENTAL_MARGIN = timedelta(hours=2)
 
 
 class DataRefreshService:
@@ -292,14 +295,19 @@ class DataRefreshService:
         )
 
     def refresh_website_content(
-        self, website_ids: list[str] | None = None
+        self, website_ids: list[str] | None = None,
+        *, now: datetime | None = None,
     ) -> dict[str, Any]:
         """Sync public website content for active sites into the store.
 
-        Each site is fault-isolated: a site that cannot be reached is
-        skipped, an import error is recorded, and the remaining sites still
-        run. Uses only the public connector (read-only against the site).
+        Incremental by default: each site fetches only pages changed since
+        its last successful sync (``modified_after``), and does a full
+        reconcile at most every ``CONTENT_FULL_RECONCILE_DAYS`` (or on the
+        first sync) to catch deletions. Each site is fault-isolated — a site
+        that cannot be reached is skipped, an import error is recorded, and
+        the remaining sites still run. Read-only against the site.
         """
+        reference = now or datetime.now().astimezone()
         selected = (
             list(website_ids) if website_ids is not None
             else list(self.database.get_active_website_ids())
@@ -309,12 +317,31 @@ class DataRefreshService:
         errors: list[dict[str, Any]] = []
         site_results: list[dict[str, Any]] = []
         for website_id in selected:
+            state = self.database.get_integration_state(
+                f"content_sync:{website_id}"
+            ) or {}
+            last_full = self._parse_dt(state.get("last_full_at"))
+            last_sync = self._parse_dt(state.get("last_synced_at"))
+            do_full = (
+                last_sync is None
+                or last_full is None
+                or (reference - last_full).days >= CONTENT_FULL_RECONCILE_DAYS
+            )
+            modified_after = (
+                None if do_full
+                else (last_sync - CONTENT_INCREMENTAL_MARGIN).isoformat(
+                    timespec="seconds"
+                )
+            )
             connector = self.content_connector(
                 website_id=website_id, database=self.database
             )
             try:
                 connected = connector.connect()
-                counts = connector.import_content() if connected else {}
+                counts = (
+                    connector.import_content(modified_after=modified_after)
+                    if connected else {}
+                )
             except Exception as error:
                 failed += 1
                 errors.append({
@@ -339,11 +366,22 @@ class DataRefreshService:
                     "reason": "ingen offentlig forbindelse",
                 })
                 continue
+            self.database.set_integration_state(
+                f"content_sync:{website_id}",
+                {
+                    "last_synced_at": reference.isoformat(timespec="seconds"),
+                    "last_full_at": (
+                        reference.isoformat(timespec="seconds") if do_full
+                        else state.get("last_full_at")
+                    ),
+                },
+            )
             processed += 1
             records += int(counts.get("total", 0) or 0)
             changed += int(counts.get("changed", 0) or 0)
             site_results.append({
                 "website_id": website_id, "status": "success",
+                "mode": "full" if do_full else "incremental",
                 "total": int(counts.get("total", 0) or 0),
                 "changed": int(counts.get("changed", 0) or 0),
             })
@@ -357,6 +395,17 @@ class DataRefreshService:
             "errors": errors,
             "site_results": site_results,
         }
+
+    @staticmethod
+    def _parse_dt(value: Any) -> datetime | None:
+        """Parse a stored ISO timestamp, tolerating missing/garbled values."""
+        if not value or not isinstance(value, str):
+            return None
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.astimezone()
 
     def refresh_search_console_properties(self) -> dict[str, Any]:
         return asdict(self.search_console.synchronize())

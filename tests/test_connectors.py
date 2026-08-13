@@ -174,6 +174,32 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual("website_content_updated",
                          orchestrator.events[0].event_type)
 
+    def test_incremental_import_only_fetches_changed_posts_and_pages(self) -> None:
+        posts_url = (
+            "https://wp.dk/wp-json/wp/v2/posts?per_page=100&_embed=1"
+            "&modified_after=2026-08-01T00%3A00%3A00"
+        )
+        pages_url = (
+            "https://wp.dk/wp-json/wp/v2/pages?per_page=100&_embed=1"
+            "&modified_after=2026-08-01T00%3A00%3A00"
+        )
+        session = Session({
+            "https://wp.dk/wp-json/": Response({"name": "WP"}),
+            posts_url: Response([post(1)]),
+            pages_url: Response([]),
+        })
+        connector = WordPressConnector(
+            website_id="wp.dk", database=self.database, session=session
+        )
+        connector.connect()
+        result = connector.import_content(modified_after="2026-08-01T00:00:00")
+
+        fetched = [call[0] for call in session.calls]
+        self.assertIn(posts_url, fetched)
+        self.assertTrue(all("categories" not in url for url in fetched))
+        self.assertTrue(all("/media?" not in url for url in fetched))
+        self.assertEqual(1, result["total"])
+
 
 if __name__ == "__main__":
     unittest.main()

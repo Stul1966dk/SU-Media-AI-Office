@@ -5,7 +5,7 @@ import re
 from html import unescape
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import quote, urljoin, urlsplit
 
 import requests
 
@@ -144,11 +144,15 @@ class WordPressConnector(BaseConnector):
             "wordpress_version": version,
         }
 
-    def get_posts(self) -> list[dict[str, Any]]:
-        return self._content("posts", "post")
+    def get_posts(
+        self, *, modified_after: str | None = None
+    ) -> list[dict[str, Any]]:
+        return self._content("posts", "post", modified_after=modified_after)
 
-    def get_pages(self) -> list[dict[str, Any]]:
-        return self._content("pages", "page")
+    def get_pages(
+        self, *, modified_after: str | None = None
+    ) -> list[dict[str, Any]]:
+        return self._content("pages", "page", modified_after=modified_after)
 
     def get_categories(self) -> list[dict[str, Any]]:
         return self._taxonomy("categories")
@@ -193,13 +197,26 @@ class WordPressConnector(BaseConnector):
             cookies.clear()
         self.mode = None
 
-    def import_content(self) -> dict[str, int]:
-        """Persist public content and emit one event after >20 changed items."""
-        groups = {
-            "post": self.get_posts(), "page": self.get_pages(),
-            "category": self.get_categories(), "tag": self.get_tags(),
-            "media": self.get_media(),
-        }
+    def import_content(
+        self, *, modified_after: str | None = None
+    ) -> dict[str, int]:
+        """Persist public content and emit one event after >20 changed items.
+
+        With ``modified_after`` set, only posts and pages changed since that
+        ISO-8601 timestamp are fetched (incremental sync); taxonomies and
+        media are refreshed only on a full sync (``modified_after`` unset).
+        """
+        if modified_after:
+            groups = {
+                "post": self.get_posts(modified_after=modified_after),
+                "page": self.get_pages(modified_after=modified_after),
+            }
+        else:
+            groups = {
+                "post": self.get_posts(), "page": self.get_pages(),
+                "category": self.get_categories(), "tag": self.get_tags(),
+                "media": self.get_media(),
+            }
         changed = 0
         changed_pages = 0
         total = 0
@@ -226,13 +243,21 @@ class WordPressConnector(BaseConnector):
             ))
         return {"total": total, "changed": changed}
 
-    def _content(self, endpoint: str, content_type: str) -> list[dict[str, Any]]:
+    def _content(
+        self, endpoint: str, content_type: str,
+        *, modified_after: str | None = None,
+    ) -> list[dict[str, Any]]:
         self._ensure_connected()
         if self.mode != "rest":
             if content_type == "post":
                 return []
             return self._html_pages()
-        return [self._normalize_content(item) for item in self._rest_collection(endpoint)]
+        return [
+            self._normalize_content(item)
+            for item in self._rest_collection(
+                endpoint, modified_after=modified_after
+            )
+        ]
 
     def _taxonomy(self, endpoint: str) -> list[dict[str, Any]]:
         self._ensure_connected()
@@ -250,8 +275,12 @@ class WordPressConnector(BaseConnector):
             for item in self._rest_collection(endpoint)
         ]
 
-    def _rest_collection(self, endpoint: str) -> list[dict[str, Any]]:
+    def _rest_collection(
+        self, endpoint: str, *, modified_after: str | None = None
+    ) -> list[dict[str, Any]]:
         base = f"{self.site_url}/wp-json/wp/v2/{endpoint}?per_page=100&_embed=1"
+        if modified_after:
+            base += f"&modified_after={quote(modified_after, safe='')}"
         response = self._get(base)
         data = self._json(response)
         items = list(data) if isinstance(data, list) else []

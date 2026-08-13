@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -29,7 +30,7 @@ class _FakeContentConnector:
     def connect(self) -> bool:
         return True
 
-    def import_content(self) -> dict:
+    def import_content(self, *, modified_after=None) -> dict:
         return {"total": 5, "changed": 2}
 
     def disconnect(self) -> None:
@@ -40,6 +41,7 @@ class DataRefreshServiceTests(unittest.TestCase):
     def _service(self, *, search_failure: bool = False) -> DataRefreshService:
         database = Mock()
         database.get_active_website_ids.return_value = ["a.dk", "b.dk"]
+        database.get_integration_state.return_value = None
         database.get_seo_experiments.return_value = []
         database.get_priority_task_scores.return_value = []
         registry = Mock()
@@ -114,9 +116,19 @@ class DataRefreshServiceTests(unittest.TestCase):
         service._test_parts = (registry, search, seo, intelligence, plausible)
         return service
 
+    @staticmethod
+    def _content_service(database, connector) -> DataRefreshService:
+        return DataRefreshService(
+            database, registry=Mock(), partner_refresh=Mock(),
+            search_console=Mock(), seo_history=Mock(), intelligence=Mock(),
+            plausible_import=Mock(), health_check=Mock(),
+            content_connector=connector,
+        )
+
     def test_website_content_step_syncs_active_sites_fault_isolated(self) -> None:
         database = Mock()
         database.get_active_website_ids.return_value = ["a.dk", "b.dk", "c.dk"]
+        database.get_integration_state.return_value = None
 
         class MixedConnector:
             def __init__(self, *, website_id, database):
@@ -125,7 +137,7 @@ class DataRefreshServiceTests(unittest.TestCase):
             def connect(self):
                 return self.website_id != "b.dk"  # b.dk unreachable
 
-            def import_content(self):
+            def import_content(self, *, modified_after=None):
                 if self.website_id == "c.dk":
                     raise RuntimeError("import fejlede")
                 return {"total": 10, "changed": 3}
@@ -133,19 +145,135 @@ class DataRefreshServiceTests(unittest.TestCase):
             def disconnect(self):
                 pass
 
-        service = DataRefreshService(
-            database, registry=Mock(), partner_refresh=Mock(),
-            search_console=Mock(), seo_history=Mock(), intelligence=Mock(),
-            plausible_import=Mock(), health_check=Mock(),
-            content_connector=MixedConnector,
-        )
-        result = service.refresh_website_content()
+        result = self._content_service(database, MixedConnector) \
+            .refresh_website_content()
 
         self.assertEqual(1, result["websites_processed"])  # a.dk
         self.assertEqual(1, result["websites_skipped"])     # b.dk
         self.assertEqual(1, result["websites_failed"])      # c.dk
         self.assertEqual(10, result["records_processed"])
         self.assertEqual("RuntimeError", result["errors"][0]["error_type"])
+
+    def test_first_sync_is_full_and_stores_full_timestamp(self) -> None:
+        database = Mock()
+        database.get_active_website_ids.return_value = ["a.dk"]
+        database.get_integration_state.return_value = None  # never synced
+        calls = []
+
+        class RecordingConnector:
+            def __init__(self, *, website_id, database):
+                pass
+
+            def connect(self):
+                return True
+
+            def import_content(self, *, modified_after=None):
+                calls.append(modified_after)
+                return {"total": 1, "changed": 0}
+
+            def disconnect(self):
+                pass
+
+        now = datetime(2026, 8, 13, 10, 0, tzinfo=timezone.utc)
+        result = self._content_service(database, RecordingConnector) \
+            .refresh_website_content(now=now)
+
+        self.assertEqual([None], calls)  # full: no modified_after
+        self.assertEqual("full", result["site_results"][0]["mode"])
+        stored = database.set_integration_state.call_args
+        self.assertEqual("content_sync:a.dk", stored.args[0])
+        self.assertEqual(
+            now.isoformat(timespec="seconds"), stored.args[1]["last_full_at"]
+        )
+
+    def test_recent_sync_is_incremental_with_margin(self) -> None:
+        database = Mock()
+        database.get_active_website_ids.return_value = ["a.dk"]
+        yesterday = datetime(2026, 8, 12, 10, 0, tzinfo=timezone.utc)
+        database.get_integration_state.return_value = {
+            "last_synced_at": yesterday.isoformat(timespec="seconds"),
+            "last_full_at": yesterday.isoformat(timespec="seconds"),
+        }
+        calls = []
+
+        class RecordingConnector:
+            def __init__(self, *, website_id, database):
+                pass
+
+            def connect(self):
+                return True
+
+            def import_content(self, *, modified_after=None):
+                calls.append(modified_after)
+                return {"total": 0, "changed": 0}
+
+            def disconnect(self):
+                pass
+
+        now = datetime(2026, 8, 13, 10, 0, tzinfo=timezone.utc)
+        result = self._content_service(database, RecordingConnector) \
+            .refresh_website_content(now=now)
+
+        self.assertEqual("incremental", result["site_results"][0]["mode"])
+        # modified_after = last sync minus the 2h safety margin
+        self.assertEqual(
+            (yesterday - timedelta(hours=2)).isoformat(timespec="seconds"),
+            calls[0],
+        )
+
+    def test_full_reconcile_after_a_week(self) -> None:
+        database = Mock()
+        database.get_active_website_ids.return_value = ["a.dk"]
+        now = datetime(2026, 8, 13, 10, 0, tzinfo=timezone.utc)
+        database.get_integration_state.return_value = {
+            "last_synced_at": (now - timedelta(days=1)).isoformat(),
+            "last_full_at": (now - timedelta(days=8)).isoformat(),
+        }
+        calls = []
+
+        class RecordingConnector:
+            def __init__(self, *, website_id, database):
+                pass
+
+            def connect(self):
+                return True
+
+            def import_content(self, *, modified_after=None):
+                calls.append(modified_after)
+                return {"total": 1, "changed": 0}
+
+            def disconnect(self):
+                pass
+
+        result = self._content_service(database, RecordingConnector) \
+            .refresh_website_content(now=now)
+
+        self.assertEqual([None], calls)  # forced full reconcile
+        self.assertEqual("full", result["site_results"][0]["mode"])
+
+    def test_failed_sync_does_not_advance_state(self) -> None:
+        database = Mock()
+        database.get_active_website_ids.return_value = ["a.dk"]
+        database.get_integration_state.return_value = None
+
+        class FailingConnector:
+            def __init__(self, *, website_id, database):
+                pass
+
+            def connect(self):
+                return True
+
+            def import_content(self, *, modified_after=None):
+                raise RuntimeError("boom")
+
+            def disconnect(self):
+                pass
+
+        result = self._content_service(database, FailingConnector) \
+            .refresh_website_content()
+
+        self.assertEqual(1, result["websites_failed"])
+        database.set_integration_state.assert_not_called()
 
     def test_refresh_all_runs_in_required_order(self) -> None:
         events = []

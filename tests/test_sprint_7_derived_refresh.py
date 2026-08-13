@@ -24,7 +24,7 @@ class _FakeContentConnector:
     def connect(self) -> bool:
         return True
 
-    def import_content(self) -> dict:
+    def import_content(self, *, modified_after=None) -> dict:
         return {"total": 0, "changed": 0}
 
     def disconnect(self) -> None:
@@ -43,6 +43,7 @@ class Sprint7DerivedRefreshTests(unittest.TestCase):
     ) -> DataRefreshService:
         database = Mock()
         database.get_active_website_ids.return_value = ["a.dk", "b.dk"]
+        database.get_integration_state.return_value = None
         database.get_seo_experiments.return_value = experiments or []
         database.get_priority_task_scores.return_value = []
         database.get_dashboard_action_context.return_value = {}
