@@ -86,7 +86,23 @@ class DecisionEngine:
                     page["current_impressions"] >= 50
                     and page["current_ctr"] < .03
                 )
-                if click_drop <= 0 and not low_ctr:
+                commission = page_revenue.get(
+                    page_key_for_url(target_url), 0.0
+                )
+                site_has_revenue = (
+                    site_revenue.get(_domain(target_url), 0.0) > 0
+                )
+                # A pure monetisation gap: real traffic on a monetised page,
+                # on a site that has proven it can earn, with little/no
+                # commission — surfaced even without a separate SEO problem.
+                monetization_gap = (
+                    bool(website.get("monetized"))
+                    and site_has_revenue
+                    and commission < MONETIZATION_GAP_MAX_COMMISSION
+                    and page["current_impressions"]
+                    >= MONETIZATION_GAP_MIN_IMPRESSIONS
+                )
+                if click_drop <= 0 and not low_ctr and not monetization_gap:
                     continue
                 candidate = {
                     "website": site, "target_url": target_url,
@@ -141,19 +157,60 @@ class DecisionEngine:
                 candidate.update(self._website_signals(site))
                 # Per-page commission (Fase 1 uid attribution) replaces the
                 # coarse website-level figure so proven earners rank higher.
-                candidate["affiliate_commission"] = page_revenue.get(
-                    page_key_for_url(target_url), 0.0
-                )
-                # A monetisation gap only counts on a site that has proven it can
-                # earn — otherwise "traffic, no sales" is just non-commercial
-                # content, not an opportunity.
-                candidate["site_has_revenue"] = (
-                    site_revenue.get(_domain(target_url), 0.0) > 0
-                )
+                candidate["affiliate_commission"] = commission
+                candidate["site_has_revenue"] = site_has_revenue
+                # A pure monetisation gap (no separate SEO problem) becomes a
+                # monetisation change instead of a title/meta rewrite.
+                if monetization_gap and click_drop <= 0 and not low_ctr:
+                    self._to_monetization_candidate(candidate, page)
                 if not include_locked and self.has_conflict(candidate):
                     continue
                 candidates.append(candidate)
         return candidates
+
+    @staticmethod
+    def _to_monetization_candidate(
+        candidate: dict[str, Any], page: dict[str, Any]
+    ) -> None:
+        """Convert a base candidate into a monetization change suggestion."""
+        impressions = int(page["current_impressions"])
+        target_url = candidate["target_url"]
+        candidate.update({
+            "experiment_type": "monetization",
+            "task_title": f"Tjen på trafikken på {target_url}",
+            "task_description": (
+                f"Siden får {impressions} visninger, men lav eller ingen "
+                "provision. Foreslå en konkret monetisering (fx en "
+                "sammenligningstabel eller en købsknap) forankret i de "
+                "produkter, siden allerede omtaler."
+            ),
+            "exact_steps": [
+                "Gennemgå sidens indhold og de produkter, den omtaler.",
+                "Vælg den bedste monetiseringsform (tabel, links eller knap).",
+                "Udarbejd den færdige, kopiér-klare ændring.",
+                "Gem ændringsforslaget til godkendelse.",
+            ],
+            "completion_criteria": (
+                "Et konkret, kopiér-klart monetiseringsforslag ligger klar "
+                "til godkendelse."
+            ),
+            "estimated_minutes": 45,
+            "expected_effect": "Provision fra den trafik, siden allerede har.",
+            "expected_effect_reason": (
+                f"Siden har {impressions} visninger uden tilsvarende provision."
+            ),
+            "measurement_method": (
+                "Sammenlign den målte provision fra siden før og efter "
+                "ændringen over 28 dage."
+            ),
+            "experiment_goal": (
+                "Skab målbar provision fra en side, der før tjente lidt."
+            ),
+            "goal_metric": "commission",
+            "goal_direction": "increase",
+            "target_change_pct": 25,
+            "risk": "Lav",
+        })
 
     def page_revenue_map(self) -> dict[str, float]:
         """Return DKK commission earned per page key from recorded sales."""

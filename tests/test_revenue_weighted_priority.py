@@ -181,6 +181,41 @@ class RevenueWeightedPriorityTests(unittest.TestCase):
 
         self.assertGreaterEqual(earner["priority_score"], gap["priority_score"])
 
+    def test_stable_traffic_without_commission_becomes_monetization_suggestion(
+        self,
+    ) -> None:
+        # A page with steady traffic (no SEO decline, healthy CTR) on a
+        # proven-earning site, earning nothing itself, is invisible today —
+        # now it surfaces as a monetization change suggestion.
+        self._period(
+            "earner.dk", "/stabil/", "2026-05-24", "2026-06-20", 400, 5000
+        )
+        self._period(
+            "earner.dk", "/stabil/", "2026-06-21", "2026-07-18", 400, 5000
+        )
+        self._sale("earner.dk", "/andet/", "1500", "k-andet")
+
+        candidate = self._candidate("https://earner.dk/stabil/")
+
+        self.assertEqual("monetization", candidate["experiment_type"])
+        self.assertEqual("commission", candidate["goal_metric"])
+        self.assertEqual("increase", candidate["goal_direction"])
+        self.assertIn("Tjen på trafikken", candidate["task_title"])
+
+    def test_stable_traffic_without_earning_site_is_not_surfaced(self) -> None:
+        # Steady traffic on a site that has never earned anywhere is not an
+        # opportunity — it stays invisible (no SEO signal, no monetisation gap).
+        self._period(
+            "earner.dk", "/kun-info/", "2026-05-24", "2026-06-20", 400, 5000
+        )
+        self._period(
+            "earner.dk", "/kun-info/", "2026-06-21", "2026-07-18", 400, 5000
+        )
+
+        ranked = self.engine.rank_candidates(self.engine.collect_candidates())
+        urls = {item["target_url"] for item in ranked}
+        self.assertNotIn("https://earner.dk/kun-info/", urls)
+
     def test_non_monetised_site_gets_no_monetisation_gap(self) -> None:
         self._traffic("plain.dk", "/side/")
 
