@@ -80,6 +80,28 @@ class SearchConsoleIntegrationTests(unittest.TestCase):
             )["last_error"],
         )
 
+    def test_recorded_auth_error_produces_a_warning(self) -> None:
+        self.assertIsNone(self.integration.authentication_warning())
+        self.integration.record_authentication_error(
+            SearchConsoleAuthenticationError("Tokenet er udløbet.")
+        )
+        warning = self.integration.authentication_warning()
+        self.assertIsNotNone(warning)
+        self.assertIn("Forbind igen", warning)
+
+    def test_clearing_the_error_removes_the_warning(self) -> None:
+        self.integration.record_authentication_error(
+            SearchConsoleAuthenticationError("Tokenet er udløbet.")
+        )
+        self.assertIsNotNone(self.integration.authentication_warning())
+
+        self.integration.clear_authentication_error()
+
+        self.assertIsNone(self.integration.authentication_warning())
+        state = self.database.get_integration_state("search_console")
+        self.assertIsNone(state["last_error"])
+        self.assertNotIn("error_at", state)
+
 
 if __name__ == "__main__":
     unittest.main()

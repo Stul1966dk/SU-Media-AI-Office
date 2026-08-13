@@ -8,6 +8,7 @@ from unittest.mock import Mock
 
 from core.data_refresh_service import DataRefreshService
 from core.database import Database
+from integrations.search_console import SearchConsoleAuthenticationError
 from core.search_console_service import (
     SearchConsoleDataSyncResult, SearchConsoleDimensionSyncResult,
     SearchConsoleSyncResult,
@@ -274,6 +275,42 @@ class DataRefreshServiceTests(unittest.TestCase):
 
         self.assertEqual(1, result["websites_failed"])
         database.set_integration_state.assert_not_called()
+
+    def _search_console_service(self) -> DataRefreshService:
+        return DataRefreshService(
+            Mock(), registry=Mock(), partner_refresh=Mock(),
+            search_console=Mock(), seo_history=Mock(), intelligence=Mock(),
+            plausible_import=Mock(), health_check=Mock(),
+        )
+
+    def test_search_console_auth_failure_is_recorded(self) -> None:
+        service = self._search_console_service()
+        service.search_console.synchronize.side_effect = \
+            SearchConsoleAuthenticationError("token dead")
+        service.search_console_integration = Mock()
+
+        with self.assertRaises(SearchConsoleAuthenticationError):
+            service.refresh_search_console_properties()
+
+        service.search_console_integration \
+            .record_authentication_error.assert_called_once()
+        service.search_console_integration \
+            .clear_authentication_error.assert_not_called()
+
+    def test_search_console_success_clears_recorded_error(self) -> None:
+        service = self._search_console_service()
+        service.search_console.synchronize.return_value = SearchConsoleSyncResult(
+            connection_ok=True, total=0, matched=0, unmatched=0,
+            properties=[], error=None,
+        )
+        service.search_console_integration = Mock()
+
+        service.refresh_search_console_properties()
+
+        service.search_console_integration \
+            .clear_authentication_error.assert_called_once()
+        service.search_console_integration \
+            .record_authentication_error.assert_not_called()
 
     def test_refresh_all_runs_in_required_order(self) -> None:
         events = []

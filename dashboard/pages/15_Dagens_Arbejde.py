@@ -45,6 +45,7 @@ from core.prompt_guidelines import PromptGuidelines
 from core.priority_scoring import stable_priority_key
 from core.website_registry import WebsiteRegistry
 from connectors.wordpress_connector import WordPressConnector
+from integrations.search_console_integration import SearchConsoleIntegration
 from core.work_queue_service import WorkQueueService
 from dashboard.components.data import (
     _filter_decided_recommendations,
@@ -122,6 +123,11 @@ def main() -> None:
 
     database = open_database()
     try:
+        search_console_warning = SearchConsoleIntegration(
+            PROJECT_ROOT, database
+        ).authentication_warning()
+        if search_console_warning:
+            st.error(search_console_warning, icon="⚠️")
         registry = WebsiteRegistry(database)
         queue = WorkQueueService(
             database,

@@ -165,6 +165,30 @@ class SearchConsoleIntegration:
         self._set_state(state)
         self.database.set_system_status(self.NAME, False)
 
+    def clear_authentication_error(self) -> None:
+        """Drop a stored auth error after a successful authentication."""
+        state = self._get_state() or {}
+        if state.get("last_error") or state.get("error_at"):
+            state["last_error"] = None
+            state.pop("error_at", None)
+            self._set_state(state)
+        self.database.set_system_status(self.NAME, True)
+
+    def authentication_warning(self) -> str | None:
+        """Return a user-facing warning when the stored login has failed.
+
+        Reads persisted state only (no network), so it is safe to call on
+        every page render. Returns None while the login is healthy.
+        """
+        state = self._get_state() or {}
+        if state.get("last_error"):
+            return (
+                "Search Console-login er udløbet eller afvist, så nye "
+                "søgedata ikke kan hentes. Gå til Integrationer og klik "
+                "“Forbind igen” for at forny adgangen."
+            )
+        return None
+
     def _account_email(self, credentials: Any) -> str | None:
         try:
             response = AuthorizedSession(credentials).get(

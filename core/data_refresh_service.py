@@ -19,6 +19,7 @@ from core.refresh_status import classify_step, normalize_step, summarize_steps
 from core.search_console_diagnosis import SearchConsoleDiagnosisService
 from core.website_registry import WebsiteRegistry
 from connectors.wordpress_connector import WordPressConnector
+from integrations.search_console import SearchConsoleAuthenticationError
 from integrations.search_console_integration import SearchConsoleIntegration
 
 
@@ -408,7 +409,13 @@ class DataRefreshService:
         return parsed if parsed.tzinfo else parsed.astimezone()
 
     def refresh_search_console_properties(self) -> dict[str, Any]:
-        return asdict(self.search_console.synchronize())
+        try:
+            result = asdict(self.search_console.synchronize())
+        except SearchConsoleAuthenticationError as error:
+            self.search_console_integration.record_authentication_error(error)
+            raise
+        self.search_console_integration.clear_authentication_error()
+        return result
 
     def refresh_search_console(
         self, website_ids: list[str] | None = None
