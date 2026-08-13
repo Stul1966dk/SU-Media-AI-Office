@@ -42,6 +42,9 @@ class TitleOptimizationValidationError(ValueError):
         super().__init__(detail)
 
 
+_NOISE_TAGS = {"script", "style", "noscript", "template", "svg"}
+
+
 class _PageParser(HTMLParser):
     def __init__(self, base_url: str) -> None:
         super().__init__()
@@ -57,11 +60,14 @@ class _PageParser(HTMLParser):
         self._capture = ""
         self._section_tag = ""
         self._section_text: list[str] = []
+        self._noise_depth = 0
 
     def handle_starttag(
         self, tag: str, attrs: list[tuple[str, str | None]]
     ) -> None:
         values = {key.lower(): value or "" for key, value in attrs}
+        if tag in _NOISE_TAGS:
+            self._noise_depth += 1
         if tag in {"title", "h1"}:
             self._capture = tag
         if tag in {"h1", "h2", "h3", "p", "li"}:
@@ -79,6 +85,8 @@ class _PageParser(HTMLParser):
             self.schema.append(values["itemtype"].rstrip("/").split("/")[-1])
 
     def handle_endtag(self, tag: str) -> None:
+        if tag in _NOISE_TAGS and self._noise_depth:
+            self._noise_depth -= 1
         if tag == self._capture:
             self._capture = ""
         if tag == self._section_tag:
@@ -89,6 +97,8 @@ class _PageParser(HTMLParser):
             self._section_text = []
 
     def handle_data(self, data: str) -> None:
+        if self._noise_depth:
+            return
         text = data.strip()
         if not text:
             return

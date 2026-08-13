@@ -1122,28 +1122,43 @@ def _generate_deliverable(
             target_fetch_error = f"{type(error).__name__}: {error}".strip()
     try:
         content_rows = database.get_content(item["website"])
-        if not has_target_context:
-            target = str(item.get("target_url") or "").rstrip("/").casefold()
-            for row in content_rows:
-                if not row.get("content_sections") and row.get(
-                    "content_sections_json"
-                ):
-                    try:
-                        row["content_sections"] = json.loads(
-                            row["content_sections_json"]
-                        )
-                    except (TypeError, ValueError):
-                        row["content_sections"] = []
-            stored_target = next(
+        target = str(item.get("target_url") or "").rstrip("/").casefold()
+        stored_target = next(
+            (
+                row for row in content_rows
+                if str(row.get("url") or "").rstrip("/").casefold() == target
+            ),
+            None,
+        )
+        stored_sections = list(
+            (stored_target or {}).get("content_sections") or []
+        )
+        if (
+            not stored_sections
+            and stored_target
+            and stored_target.get("content_sections_json")
+        ):
+            try:
+                stored_sections = json.loads(
+                    stored_target["content_sections_json"]
+                )
+            except (TypeError, ValueError):
+                stored_sections = []
+        if stored_sections:
+            affected = next(
                 (
-                    row for row in content_rows
-                    if str(row.get("url") or "").rstrip("/").casefold()
-                    == target
-                    and row.get("content_sections")
+                    row for row in public_context
+                    if row.get("relation") == "berørt side"
                 ),
                 None,
             )
-            if stored_target:
+            if affected is not None:
+                # Prefer the crawled main-content sections; the live scrape's
+                # leading sections are the site's navigation menu.
+                affected["content_sections"] = stored_sections
+                if stored_target.get("content_text"):
+                    affected["content_excerpt"] = stored_target["content_text"]
+            else:
                 public_context.append({
                     "relation": "berørt side",
                     "title": stored_target.get("title", ""),
@@ -1151,14 +1166,15 @@ def _generate_deliverable(
                     "h1": next(
                         (
                             section.get("text", "")
-                            for section in stored_target["content_sections"]
+                            for section in stored_sections
                             if section.get("element") == "h1"
                         ),
                         "",
                     ),
                     "content_excerpt": stored_target.get("content_text", ""),
-                    "content_sections": stored_target["content_sections"],
+                    "content_sections": stored_sections,
                 })
+            has_target_context = True
         candidate_rows = content_rows
         if item.get("experiment_type") == "internal_links":
             candidate_rows = _rank_internal_link_candidates(

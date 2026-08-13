@@ -791,12 +791,120 @@ def mentions_price(text: str) -> bool:
     ))
 
 
+PROMPT_MAX_BODY_SECTIONS = 12
+PROMPT_MAX_HEADINGS = 4
+PROMPT_MAX_EXCERPT = 600
+PROMPT_MAX_RELATED_EXCERPT = 300
+_MARKUP_MARKERS = (
+    '{"', '{ "', '"@context"', 'schema.org', 'window.', 'function(', 'gtag(',
+)
+
+
+def _looks_like_markup(text: str) -> bool:
+    """True for JSON-LD/script/CSS fragments that are not readable prose."""
+    stripped = str(text or "").strip()
+    lowered = stripped.casefold()
+    return (
+        stripped.startswith("{")
+        or stripped.startswith(".")
+        or any(marker.casefold() in lowered for marker in _MARKUP_MARKERS)
+    )
+
+
+def _clean_prose(text: str, limit: int) -> str:
+    """Drop JSON-LD/script blobs and collapse whitespace for the prompt."""
+    value = str(text or "")
+    for marker in _MARKUP_MARKERS:
+        index = value.find(marker)
+        if index != -1:
+            value = value[:index]
+    return " ".join(value.split())[:limit]
+
+
+def _condense_sections(
+    sections: list[Any], queries: list[str]
+) -> list[dict[str, str]]:
+    """Keep only headings and the query-relevant body passages."""
+    query_tokens = _content_tokens(" ".join(queries)) - CONTENT_STOPWORDS
+    headings: list[dict[str, str]] = []
+    scored: list[tuple[int, int, dict[str, str]]] = []
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        element = str(section.get("element") or "")
+        text = str(section.get("text") or "").strip()
+        if (
+            not text
+            or _looks_like_markup(text)
+            or _is_boilerplate_passage(text)
+        ):
+            continue
+        if element in {"h1", "h2", "h3"}:
+            if len(headings) < PROMPT_MAX_HEADINGS:
+                headings.append({"element": element, "text": text[:160]})
+        elif element in {"p", "li"} and len(text) >= 30:
+            overlap = len(
+                query_tokens & (_content_tokens(text) - CONTENT_STOPWORDS)
+            )
+            scored.append(
+                (overlap, len(text), {"element": element, "text": text[:400]})
+            )
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    bodies = [row for _, _, row in scored[:PROMPT_MAX_BODY_SECTIONS]]
+    return headings + bodies
+
+
+def _condense_context_for_prompt(
+    public_context: list[dict[str, Any]], queries: list[str]
+) -> list[dict[str, Any]]:
+    """Trim the public context to the smallest grounded payload for the model.
+
+    Sends only headings and query-relevant passages instead of every raw
+    section, strips JSON-LD/CSS noise from excerpts, and drops heavy fields
+    the model never uses. This cuts input tokens per suggestion sharply
+    without weakening the grounding.
+    """
+    condensed: list[dict[str, Any]] = []
+    for original in public_context[:8]:
+        row = dict(original)
+        if row.get("content_sections"):
+            row["content_sections"] = _condense_sections(
+                row["content_sections"], queries
+            )
+        if row.get("content_excerpt"):
+            row["content_excerpt"] = _clean_prose(
+                row["content_excerpt"], PROMPT_MAX_EXCERPT
+            )
+        if row.get("excerpt"):
+            row["excerpt"] = _clean_prose(
+                row["excerpt"], PROMPT_MAX_RELATED_EXCERPT
+            )
+        for heavy in (
+            "schema", "word_count", "internal_links", "canonical",
+            "content_text",
+        ):
+            row.pop(heavy, None)
+        condensed.append(row)
+    return condensed
+
+
 def _prompt(
     recommendation: dict[str, Any],
     public_context: list[dict[str, Any]],
 ) -> str:
     cause = str(recommendation.get("measured_cause") or "")
     deliverable_type = _deliverable_type(recommendation)
+    prompt_queries = [
+        candidate
+        for candidate in (
+            [str(recommendation.get("target_query") or "").strip()]
+            + [
+                str(row.get("query") or "").strip()
+                for row in (recommendation.get("search_queries") or [])
+            ]
+        )
+        if candidate
+    ]
     payload = {
         "website": recommendation.get("website"),
         "url": recommendation.get("target_url"),
@@ -810,7 +918,9 @@ def _prompt(
         "freshness_verification": (
             recommendation.get("freshness_verification") or {}
         ),
-        "public_content_candidates": public_context[:8],
+        "public_content_candidates": _condense_context_for_prompt(
+            public_context, prompt_queries
+        ),
     }
     content_requirements = ""
     content_schema = ""
