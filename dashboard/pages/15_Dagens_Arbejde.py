@@ -42,6 +42,7 @@ from core.daily_work_preparation import DailyWorkPreparationService
 from core.current_diagnosis_reader import read_latest_diagnoses
 from core.seo_experiment_engine import SEOExperimentEngine
 from core.prompt_guidelines import PromptGuidelines
+from core.pipeline_health import pipeline_health
 from core.priority_scoring import stable_priority_key
 from core.website_registry import WebsiteRegistry
 from connectors.wordpress_connector import WordPressConnector
@@ -128,6 +129,10 @@ def main() -> None:
         ).authentication_warning()
         if search_console_warning:
             st.error(search_console_warning, icon="⚠️")
+        for pipeline_warning in pipeline_health(
+            database.get_feature_runs()
+        )["warnings"]:
+            st.warning(pipeline_warning, icon="⏱️")
         registry = WebsiteRegistry(database)
         queue = WorkQueueService(
             database,
