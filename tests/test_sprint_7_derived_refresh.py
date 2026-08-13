@@ -31,6 +31,13 @@ class _FakeContentConnector:
         pass
 
 
+class _FakeScanner:
+    """Stand-in for WebsiteScanner that never touches the network."""
+
+    def scan(self, domain: str) -> dict:
+        return {"cms": "wordpress", "scan_status": "completed"}
+
+
 class Sprint7DerivedRefreshTests(unittest.TestCase):
     def service(
         self, *, daily: dict[str, int] | None = None,
@@ -44,6 +51,7 @@ class Sprint7DerivedRefreshTests(unittest.TestCase):
         database = Mock()
         database.get_active_website_ids.return_value = ["a.dk", "b.dk"]
         database.get_integration_state.return_value = None
+        database.get_website_discovery_profiles.return_value = []
         database.get_seo_experiments.return_value = experiments or []
         database.get_priority_task_scores.return_value = []
         database.get_dashboard_action_context.return_value = {}
@@ -139,6 +147,7 @@ class Sprint7DerivedRefreshTests(unittest.TestCase):
             plausible_import=plausible_import,
             health_check=Mock(return_value={}),
             content_connector=_FakeContentConnector,
+            discovery_scanner=_FakeScanner(),
         )
         service._test_seo = seo
         service._test_intelligence = intelligence

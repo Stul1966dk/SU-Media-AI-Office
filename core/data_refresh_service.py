@@ -21,6 +21,7 @@ from core.website_registry import WebsiteRegistry
 from connectors.wordpress_connector import WordPressConnector
 from integrations.search_console import SearchConsoleAuthenticationError
 from integrations.search_console_integration import SearchConsoleIntegration
+from integrations.website_scanner import WebsiteScanner
 
 
 Progress = Callable[[str, str, dict[str, Any]], None]
@@ -33,8 +34,8 @@ class DataRefreshService:
     """Refresh persisted sources without triggering analytical AI calls."""
 
     STEPS = (
-        "Website Registry", "Website-indhold", "Partner Ads",
-        "Search Console-properties",
+        "Website Registry", "Website-indhold", "Website Discovery",
+        "Partner Ads", "Search Console-properties",
         "Search Console-dagstal", "Search Console-sider og søgeord",
         "Plausible", "SEO History", "Website Intelligence",
         "SEO-eksperimentovervågning", "Systemstatus", "Prioriteringsscore",
@@ -50,6 +51,7 @@ class DataRefreshService:
         search_diagnosis: Any | None = None,
         health_check: Callable | None = None,
         content_connector: Any | None = None,
+        discovery_scanner: Any | None = None,
     ) -> None:
         self.database = database
         self.project_root = project_root or Path(__file__).resolve().parents[1]
@@ -78,6 +80,7 @@ class DataRefreshService:
         )
         self.health_check = health_check or check_runtime_services
         self.content_connector = content_connector or WordPressConnector
+        self.discovery_scanner = discovery_scanner or WebsiteScanner()
 
     def refresh_all(
         self, progress: Progress | None = None,
@@ -133,6 +136,11 @@ class DataRefreshService:
         self._run(
             "Website-indhold",
             lambda: self.refresh_website_content(website_ids),
+            notify, steps,
+        )
+        self._run(
+            "Website Discovery",
+            lambda: self.refresh_website_discovery(website_ids),
             notify, steps,
         )
         self._run("Partner Ads", self.refresh_partner_ads, notify, steps)
@@ -254,7 +262,7 @@ class DataRefreshService:
             "duration_seconds": round((completed - started).total_seconds(), 1),
             "steps": steps,
             **summary,
-            "optional_steps": ["Website Discovery", "Content Explorer"],
+            "optional_steps": ["Content Explorer"],
         }
         try:
             self.database.save_feature_run(
@@ -393,6 +401,62 @@ class DataRefreshService:
             "websites_skipped": skipped,
             "records_processed": records,
             "records_updated": changed,
+            "errors": errors,
+            "site_results": site_results,
+        }
+
+    def refresh_website_discovery(
+        self, website_ids: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Scan newly activated sites that lack a completed discovery profile.
+
+        This is the onboarding step: an active site that has never been
+        scanned gets its public facts (CMS, HTTPS, sitemap, connector hint)
+        recorded, so it becomes visible to the connector selection and the
+        Content Explorer. Already-scanned sites are skipped, so on a normal
+        day this does no work. Read-only against the site, fault-isolated.
+        """
+        selected = (
+            list(website_ids) if website_ids is not None
+            else list(self.database.get_active_website_ids())
+        )
+        completed = {
+            str(profile.get("website_id"))
+            for profile in self.database.get_website_discovery_profiles()
+            if str(profile.get("scan_status")) == "completed"
+        }
+        to_scan = [site for site in selected if site not in completed]
+        processed = failed = 0
+        errors: list[dict[str, Any]] = []
+        site_results: list[dict[str, Any]] = []
+        for website_id in to_scan:
+            scanned_at = datetime.now().astimezone().isoformat(
+                timespec="seconds"
+            )
+            try:
+                facts = self.discovery_scanner.scan(website_id)
+            except Exception as error:
+                failed += 1
+                errors.append({
+                    "website_id": website_id,
+                    "error_type": type(error).__name__,
+                    "message": "Website-scanning fejlede.",
+                })
+                continue
+            self.database.save_website_discovery_profile({
+                **facts, "website_id": website_id, "scanned_at": scanned_at,
+            })
+            processed += 1
+            site_results.append({
+                "website_id": website_id,
+                "scan_status": str(facts.get("scan_status") or "completed"),
+            })
+        return {
+            "websites_attempted": len(to_scan),
+            "websites_processed": processed,
+            "websites_failed": failed,
+            "websites_skipped": len(selected) - len(to_scan),
+            "records_processed": processed,
             "errors": errors,
             "site_results": site_results,
         }

@@ -38,11 +38,19 @@ class _FakeContentConnector:
         pass
 
 
+class _FakeScanner:
+    """Stand-in for WebsiteScanner that never touches the network."""
+
+    def scan(self, domain: str) -> dict:
+        return {"cms": "wordpress", "scan_status": "completed"}
+
+
 class DataRefreshServiceTests(unittest.TestCase):
     def _service(self, *, search_failure: bool = False) -> DataRefreshService:
         database = Mock()
         database.get_active_website_ids.return_value = ["a.dk", "b.dk"]
         database.get_integration_state.return_value = None
+        database.get_website_discovery_profiles.return_value = []
         database.get_seo_experiments.return_value = []
         database.get_priority_task_scores.return_value = []
         registry = Mock()
@@ -113,9 +121,56 @@ class DataRefreshServiceTests(unittest.TestCase):
             plausible_import=plausible,
             health_check=Mock(return_value={}),
             content_connector=_FakeContentConnector,
+            discovery_scanner=_FakeScanner(),
         )
         service._test_parts = (registry, search, seo, intelligence, plausible)
         return service
+
+    def test_discovery_scans_only_sites_without_completed_profile(self) -> None:
+        database = Mock()
+        database.get_active_website_ids.return_value = ["new.dk", "known.dk"]
+        database.get_website_discovery_profiles.return_value = [
+            {"website_id": "known.dk", "scan_status": "completed"},
+        ]
+        scanned = []
+
+        class RecordingScanner:
+            def scan(self, domain):
+                scanned.append(domain)
+                return {"cms": "wordpress", "scan_status": "completed"}
+
+        service = DataRefreshService(
+            database, registry=Mock(), partner_refresh=Mock(),
+            search_console=Mock(), seo_history=Mock(), intelligence=Mock(),
+            plausible_import=Mock(), health_check=Mock(),
+            discovery_scanner=RecordingScanner(),
+        )
+        result = service.refresh_website_discovery()
+
+        self.assertEqual(["new.dk"], scanned)  # the already-scanned one is skipped
+        self.assertEqual(1, result["websites_processed"])
+        self.assertEqual(1, result["websites_skipped"])
+        database.save_website_discovery_profile.assert_called_once()
+
+    def test_discovery_scan_failure_is_isolated(self) -> None:
+        database = Mock()
+        database.get_active_website_ids.return_value = ["broken.dk"]
+        database.get_website_discovery_profiles.return_value = []
+
+        class FailingScanner:
+            def scan(self, domain):
+                raise RuntimeError("timeout")
+
+        service = DataRefreshService(
+            database, registry=Mock(), partner_refresh=Mock(),
+            search_console=Mock(), seo_history=Mock(), intelligence=Mock(),
+            plausible_import=Mock(), health_check=Mock(),
+            discovery_scanner=FailingScanner(),
+        )
+        result = service.refresh_website_discovery()
+
+        self.assertEqual(1, result["websites_failed"])
+        database.save_website_discovery_profile.assert_not_called()
 
     @staticmethod
     def _content_service(database, connector) -> DataRefreshService:
