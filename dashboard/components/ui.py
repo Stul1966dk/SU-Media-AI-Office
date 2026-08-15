@@ -30,6 +30,7 @@ def render_sidebar(*, show_website_selector: bool = True) -> None:
     primary_pages = (
         ("app.py", "I dag", ":material/today:"),
         ("pages/22_Overblik.py", "Overblik", ":material/insights:"),
+        ("pages/23_Koereplan.py", "Køreplan", ":material/map:"),
         ("pages/11_Websites.py", "Websites", ":material/public:"),
         ("pages/13_Eksperimenter.py", "Resultater", ":material/science:"),
         ("pages/19_Portefolje.py", "Portefølje", ":material/dashboard:"),
