@@ -102,9 +102,13 @@ def main() -> None:
                 "ready_for_evaluation", "evaluating",
             }
         ]
-        completed = [
+        finished = [
             item for item in experiments
-            if item["status"] in {"completed", "cancelled", "failed"}
+            if item["status"] == "completed"
+        ]
+        discarded = [
+            item for item in experiments
+            if item["status"] in {"cancelled", "failed"}
         ]
         st.subheader("Aktive målinger")
         if not active:
@@ -112,9 +116,9 @@ def main() -> None:
         for experiment in active:
             _active_card(database, experiment)
         st.subheader("Afsluttede resultater")
-        if not completed:
+        if not finished:
             st.info("Ingen afsluttede eksperimenter endnu.")
-        for experiment in completed:
+        for experiment in finished:
             with st.container(border=True):
                 st.write(
                     f"**{experiment['website_id']} · "
@@ -133,6 +137,14 @@ def main() -> None:
                     _detail(experiment, learnings.get(experiment["id"]),
                             evaluations.get(experiment["id"]),
                             approved_changes.get(experiment["id"]))
+        if discarded:
+            st.subheader("Afbrudte forslag")
+            st.caption(
+                "Disse eksperimenter blev aldrig gennemført og har derfor "
+                "intet datagrundlag."
+            )
+            for experiment in discarded:
+                _discarded_card(experiment)
         _render_learning(learning_entries)
     finally:
         database.close()
@@ -391,6 +403,48 @@ def _render_page_revenue(database: Any, item: dict[str, Any]) -> None:
     st.caption(f"Datagrundlag: {effect.confidence_label}")
 
 
+def _measurement_scope(item: dict[str, Any]) -> str:
+    """Describe what the experiment actually measures. A query-scoped
+    experiment counts clicks for one search term only, so a low number must
+    not be mistaken for the page's total traffic."""
+    query = (item.get("target_query") or "").strip()
+    if not query:
+        return "Måles på hele siden (alle søgeord)."
+    position = float(item.get("baseline_position") or 0)
+    scope = f"Måles kun på søgeordet: **{query}**"
+    if position:
+        scope += f" · placering ~{position:.0f}"
+    return scope + ". Klik gælder dette søgeord alene, ikke hele sidens trafik."
+
+
+def _discarded_card(experiment: dict[str, Any]) -> None:
+    """Show a cancelled or failed experiment without pretending it produced a
+    result: label it by its actual status and explain why there is no data."""
+    status = experiment.get("status")
+    if status == "failed":
+        explanation = (
+            "Eksperimentet fejlede og blev ikke gennemført. Der er intet "
+            "datagrundlag."
+        )
+    elif not experiment.get("started_at"):
+        explanation = (
+            "Annulleret før måling — eksperimentet blev aldrig startet, så "
+            "der er intet datagrundlag."
+        )
+    else:
+        explanation = (
+            "Annulleret undervejs i måleperioden. Målingen nåede ikke frem "
+            "til en konklusion."
+        )
+    with st.container(border=True):
+        st.write(
+            f"**{experiment['website_id']} · "
+            f"{STATUS_LABELS.get(status, 'Afbrudt')}**"
+        )
+        st.write(experiment["target_url"])
+        st.caption(explanation)
+
+
 def _active_card(database: Any, item: dict[str, Any]) -> None:
     snapshots = database.get_experiment_snapshots(item["id"])
     latest = snapshots[-1] if snapshots else {}
@@ -413,6 +467,7 @@ def _active_card(database: Any, item: dict[str, Any]) -> None:
     with st.container(border=True):
         st.subheader(item["website_id"])
         st.link_button(item["target_url"], item["target_url"])
+        st.caption(_measurement_scope(item))
         implemented_change = next(iter(database.get_approved_changes(
             experiment_id=item["id"]
         )), {})
@@ -518,6 +573,7 @@ def _development(
     database: Any, item: dict[str, Any],
     snapshots: list[dict[str, Any]],
 ) -> None:
+    st.caption(_measurement_scope(item))
     st.write(
         f"**Baseline:** {item.get('baseline_clicks') or 0} klik · "
         f"{float(item.get('baseline_ctr') or 0)*100:.1f}% CTR · "
@@ -531,7 +587,9 @@ def _development(
             f"placering {latest['average_position']:.1f}"
         )
         chart_rows = [{
-            "Dato": format_date(row["observed_date"]),
+            # A real date keeps the chart's x-axis chronological; a formatted
+            # string would be sorted alphabetically (13.08 before 20.07).
+            "Dato": date.fromisoformat(row["observed_date"][:10]),
             "Klik": row["clicks"], "CTR": row["ctr"] * 100,
             "Placering": row["average_position"],
             "Visninger": row["impressions"],
