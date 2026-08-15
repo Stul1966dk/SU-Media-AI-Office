@@ -40,7 +40,7 @@ class DataRefreshService:
         "Search Console-dagstal", "Search Console-sider og søgeord",
         "Plausible", "SEO History", "Website Intelligence",
         "SEO-eksperimentovervågning", "Eksperimentevaluering",
-        "Systemstatus", "Prioriteringsscore",
+        "SEO-projekter", "Systemstatus", "Prioriteringsscore",
     )
 
     def __init__(
@@ -254,6 +254,11 @@ class DataRefreshService:
             notify, steps,
         )
         self._run(
+            "SEO-projekter",
+            self.refresh_seo_projects,
+            notify, steps,
+        )
+        self._run(
             "Systemstatus",
             lambda: self.refresh_system_status(force_system_check),
             notify, steps,
@@ -440,6 +445,57 @@ class DataRefreshService:
             "records_updated": completed,
             "evaluated": completed,
             "data_changed": bool(evaluated),
+        }
+
+    def refresh_seo_projects(self) -> dict[str, Any]:
+        """Advance goal-driven projects after evaluation.
+
+        Date-triggered: for each active project whose current experiment just
+        finished, propose the next experiment on its URL or suggest completion
+        (goal reached or page exhausted). New steps land in the work queue for
+        the user's approval; completion always waits for confirmation.
+        """
+        empty = {
+            "objects_processed": 0, "objects_failed": 0, "objects_skipped": 0,
+            "records_processed": 0, "records_updated": 0, "data_changed": False,
+        }
+        if not self.database.get_seo_goal_projects(status="active"):
+            return empty  # nothing to advance; build no AI/optimizer
+
+        from agents.title_optimizer import TitleOptimizer
+        from core.ai_service import AIService
+        from core.daily_work_preparation import DailyWorkPreparationService
+        from core.seo_project import SEOProjectService
+        from core.work_queue_service import WorkQueueService
+
+        queue = WorkQueueService(self.database, self.registry)
+        preparation = DailyWorkPreparationService(
+            database=self.database, queue=queue,
+            title_optimizer=TitleOptimizer(
+                database=self.database, website_registry=self.registry,
+                ai_service=AIService(),
+            ),
+        )
+        outcomes = SEOProjectService(
+            self.database, preparation=preparation
+        ).advance_due_projects()
+        advanced = sum(
+            1 for item in outcomes
+            if item.get("action") in {
+                "enqueued_first", "enqueued_next", "goal_met", "exhausted",
+            }
+        )
+        return {
+            "objects_processed": len(outcomes),
+            "objects_failed": sum(
+                1 for item in outcomes if item.get("action") == "failed"
+            ),
+            "objects_skipped": sum(
+                1 for item in outcomes if item.get("action") == "waiting"
+            ),
+            "records_processed": len(outcomes),
+            "records_updated": advanced,
+            "data_changed": bool(advanced),
         }
 
     def refresh_website_discovery(
