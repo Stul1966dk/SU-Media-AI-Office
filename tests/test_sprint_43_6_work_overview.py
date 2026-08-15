@@ -128,9 +128,7 @@ class TrafficWorkOverviewTests(unittest.TestCase):
             Path(__file__).resolve().parents[1]
             / "dashboard" / "pages" / "15_Dagens_Arbejde.py"
         ).read_text(encoding="utf-8")
-        self.assertIn(
-            "priority_tasks = _build_current_priority_tasks(", source
-        )
+        self.assertIn("preparation.prepare_next(website_id)", source)
         self.assertNotIn(
             "priority_tasks = database.get_priority_task_scores", source
         )

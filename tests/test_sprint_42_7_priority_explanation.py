@@ -60,11 +60,9 @@ class PriorityExplanationTests(unittest.TestCase):
 
     def test_website_filter_is_applied_before_selecting_first_task(self) -> None:
         source = PAGE_PATH.read_text(encoding="utf-8")
-        filter_position = source.index("if website_id:", source.index(
-            "priority_tasks = _build_current_priority_tasks"
-        ))
-        render_position = source.index("if priority_tasks:", filter_position)
-        self.assertLess(filter_position, render_position)
+        # The active-website filter is applied when the work queue selects the
+        # next task: website_id is passed straight into prepare_next.
+        self.assertIn("preparation.prepare_next(website_id)", source)
 
 
 if __name__ == "__main__":

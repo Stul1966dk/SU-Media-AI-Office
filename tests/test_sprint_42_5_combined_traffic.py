@@ -112,16 +112,16 @@ class CombinedTrafficTaskTests(unittest.TestCase):
             Path(__file__).resolve().parents[1]
             / "dashboard" / "pages" / "15_Dagens_Arbejde.py"
         ).read_text(encoding="utf-8")
-        combined_branch = page.index(
-            "priority_tasks = _build_current_priority_tasks("
+        # The income-first work queue is the single primary source; the freshness
+        # fallback only runs after it, and the retired traffic selection is gone.
+        queue_select = page.index(
+            "prepared = preparation.prepare_next(website_id)"
         )
-        optimizer = page.index("optimizer = _optimizer(database)")
-        self.assertLess(combined_branch, optimizer)
+        freshness_fallback = page.index("build_freshness_recommendations(")
+        self.assertLess(queue_select, freshness_fallback)
         self.assertIn(
-            "_render_priority_task(database, priority_tasks[0])", page
+            "_render_recommendation(database, queue, current)", page
         )
-        self.assertIn("Plausible-ændring", page)
-        self.assertIn("Search Console-ændring", page)
 
 
 if __name__ == "__main__":

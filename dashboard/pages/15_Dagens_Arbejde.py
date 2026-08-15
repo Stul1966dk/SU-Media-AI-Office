@@ -161,83 +161,10 @@ def main() -> None:
         _render_work_overview(database, work_overview)
         if work_module.next_actionable_work(work_overview):
             return
-        context = database.get_dashboard_action_context()
-        search_diagnoses = _current_diagnoses(
-            database, websites, context,
-            context_key="search_diagnoses",
-            reader_name="get_latest_search_console_diagnosis",
-        )
-        plausible_diagnoses = _current_diagnoses(
-            database, websites, context,
-            context_key="plausible_diagnoses",
-            reader_name="get_latest_plausible_diagnosis",
-        )
-        priority_tasks = _build_current_priority_tasks(
-            system_status=database.get_dashboard_system_health(),
-            seo_sites=context["seo_health"],
-            project_tasks=database.get_priority_tasks(),
-            experiments=context["experiments"],
-            active_experiments=context["active_experiments"],
-            coverage=context["coverage"],
-            plausible_rows=context["plausible_daily"],
-            search_diagnoses=search_diagnoses,
-            plausible_diagnoses=plausible_diagnoses,
-            limit=None,
-        )
-        priority_tasks = [
-            item for item in priority_tasks
-            if item.get("task_type") in CONCRETE_TRAFFIC_TASKS
-        ]
-        priority_tasks = _filter_active_site_rows(
-            priority_tasks, active_ids, website_field="website"
-        )
-        priority_tasks = _filter_unlocked_recommendations(
-            database, priority_tasks
-        )
-        content_by_website = _content_by_website(database, active_ids)
-        priority_tasks = traffic_recommendations_module.expand_daily_work_types(
-            priority_tasks,
-            content_urls_by_website={
-                website: [
-                    str(row.get("url") or row.get("link") or "")
-                    for row in rows
-                ]
-                for website, rows in content_by_website.items()
-            },
-        )
-        priority_tasks.extend(
-            _filter_unlocked_recommendations(
-                database,
-                build_freshness_recommendations(
-                    content_by_website,
-                    verified_reviews=(
-                        database.get_content_freshness_reviews()
-                    ),
-                ),
-            )
-        )
-        priority_tasks = (
-            traffic_recommendations_module.apply_post_analysis_guidance(
-                priority_tasks, database.get_experiment_evaluations()
-            )
-        )
-        priority_tasks = traffic_recommendations_module.apply_measured_learning(
-            priority_tasks, database.get_seo_learning_entries()
-        )
-        priority_tasks = _filter_decided_recommendations(
-            priority_tasks, decisions,
-        )
-        # All eligible work types compete in one shared, evidence-based queue.
-        # This final sort prevents insertion order from favouring any task type.
-        priority_tasks = sorted(priority_tasks, key=stable_priority_key)
-        if website_id:
-            priority_tasks = [
-                item for item in priority_tasks
-                if item["website"] in {website_id, "—"}
-            ]
-        if priority_tasks:
-            _render_priority_task(database, priority_tasks[0])
-            return
+        # The income-first, learning-aware DecisionEngine work queue is the
+        # single source of new SEO experiments. The old decline-based traffic
+        # recommendation selection has been retired so every proposal follows
+        # the same logic (money first, one change per page, learn from results).
         optimizer = _optimizer(database)
         preparation = DailyWorkPreparationService(
             database=database, queue=queue, title_optimizer=optimizer
@@ -245,16 +172,43 @@ def main() -> None:
         with st.spinner("Forbereder næste opgave..."):
             prepared = preparation.prepare_next(website_id)
             current = prepared.item
-        if not current:
-            _render_empty_state(
-                queue, selected, websites,
-                reason=prepared.reason,
-                candidate_count=prepared.candidate_count,
-            )
-        elif current["status"] == "awaiting_implementation":
-            _render_implementation(database, queue, current)
-        else:
-            _render_recommendation(database, queue, current)
+        if current:
+            if current["status"] == "awaiting_implementation":
+                _render_implementation(database, queue, current)
+            else:
+                _render_recommendation(database, queue, current)
+            return
+        # No queued experiment. Until Fase 3 folds outdated-content detection
+        # into the queue itself, surface one freshness task as a fallback.
+        content_by_website = _content_by_website(database, active_ids)
+        freshness_tasks = _filter_decided_recommendations(
+            _filter_active_site_rows(
+                _filter_unlocked_recommendations(
+                    database,
+                    build_freshness_recommendations(
+                        content_by_website,
+                        verified_reviews=(
+                            database.get_content_freshness_reviews()
+                        ),
+                    ),
+                ),
+                active_ids, website_field="website",
+            ),
+            decisions,
+        )
+        if website_id:
+            freshness_tasks = [
+                item for item in freshness_tasks
+                if item["website"] in {website_id, "—"}
+            ]
+        if freshness_tasks:
+            _render_priority_task(database, freshness_tasks[0])
+            return
+        _render_empty_state(
+            queue, selected, websites,
+            reason=prepared.reason,
+            candidate_count=prepared.candidate_count,
+        )
     finally:
         database.close()
 
