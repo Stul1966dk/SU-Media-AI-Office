@@ -16,11 +16,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ALL_WEBSITES = "Alle websites"
 FILTER_SESSION_KEY = "daily_work_website_filter"
 FILTER_WIDGET_KEY = "daily_work_website_filter_widget"
-CONCRETE_TRAFFIC_TASKS = {
-    "combined_traffic_decline",
-    "search_only_decline",
-    "plausible_only_decline",
-}
 
 
 class NoSafeInternalLinkError(ValueError):
@@ -39,11 +34,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agents.title_optimizer import TitleOptimizer
 from core.daily_work_preparation import DailyWorkPreparationService
-from core.current_diagnosis_reader import read_latest_diagnoses
 from core.seo_experiment_engine import SEOExperimentEngine
 from core.prompt_guidelines import PromptGuidelines
 from core.pipeline_health import pipeline_health
-from core.priority_scoring import stable_priority_key
 from core.website_registry import WebsiteRegistry
 from connectors.wordpress_connector import WordPressConnector
 from integrations.search_console_integration import SearchConsoleIntegration
@@ -52,13 +45,11 @@ from dashboard.components.data import (
     _filter_decided_recommendations,
 )
 import dashboard.components.database as database_component_module
-import dashboard.components.data as dashboard_data_module
 import core.ai_service as ai_service_module
 import core.content_freshness as content_freshness_module
 import core.task_deliverables as task_deliverables_module
 import core.traffic_recommendation_store as traffic_store_module
 import core.traffic_recommendation_workflow as traffic_workflow_module
-import core.traffic_recommendations as traffic_recommendations_module
 import core.traffic_work_overview as traffic_work_module
 from dashboard.components.ui import (
     load_styles,
@@ -213,13 +204,6 @@ def main() -> None:
         database.close()
 
 
-def _build_current_priority_tasks(**context: Any) -> list[dict[str, Any]]:
-    """Use current pure recommendation code despite Streamlit module caching."""
-    importlib.reload(traffic_recommendations_module)
-    current_data = importlib.reload(dashboard_data_module)
-    return current_data.build_dashboard_priority_tasks(**context)
-
-
 def _filter_active_site_rows(
     rows: list[dict[str, Any]],
     active_ids: set[str],
@@ -257,38 +241,6 @@ def _filter_unlocked_recommendations(
         for item in rows
         if not item.get("target_url")
         or not experiments.is_url_locked(str(item["target_url"]))
-    ]
-
-
-def _current_diagnoses(
-    database: Any,
-    websites: list[Any],
-    context: dict[str, Any],
-    *,
-    context_key: str,
-    reader_name: str,
-) -> list[dict[str, Any]]:
-    """Read diagnoses across both current and hot-reloaded Database classes."""
-    website_ids = [
-        str(item.get("website", ""))
-        if isinstance(item, dict) else str(item)
-        for item in websites
-    ]
-    kind = "search" if context_key == "search_diagnoses" else "plausible"
-    result = read_latest_diagnoses(database, website_ids, kind=kind)
-    if result:
-        return result
-    stored = context.get(context_key)
-    if isinstance(stored, list) and stored:
-        return stored
-    reader = getattr(database, reader_name, None)
-    if reader is None:
-        return []
-    return [
-        diagnosis
-        for website in website_ids
-        if website
-        if (diagnosis := reader(website)) is not None
     ]
 
 

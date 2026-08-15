@@ -142,34 +142,6 @@ class TrafficWorkOverviewTests(unittest.TestCase):
             'st.subheader("Aktive målinger")', results
         )
 
-    def test_hot_reload_fallback_reads_diagnoses_per_website(self):
-        import importlib.util
-
-        page_path = (
-            Path(__file__).resolve().parents[1]
-            / "dashboard" / "pages" / "15_Dagens_Arbejde.py"
-        )
-        spec = importlib.util.spec_from_file_location(
-            "daily_work_43_6", page_path
-        )
-        page = importlib.util.module_from_spec(spec)
-        assert spec.loader is not None
-        spec.loader.exec_module(page)
-        database = Mock()
-        database.get_latest_search_console_diagnosis.side_effect = (
-            lambda website: (
-                {"website_id": website} if website == "a.dk" else None
-            )
-        )
-        result = page._current_diagnoses(
-            database,
-            [{"website": "a.dk"}, {"website": "b.dk"}],
-            {},
-            context_key="search_diagnoses",
-            reader_name="get_latest_search_console_diagnosis",
-        )
-        self.assertEqual([{"website_id": "a.dk"}], result)
-
     def test_seo_page_builds_the_same_concrete_current_plan(self):
         import importlib.util
 
