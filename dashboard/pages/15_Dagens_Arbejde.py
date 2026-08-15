@@ -1770,12 +1770,15 @@ def _render_recommendation(
     )
     if accept:
         try:
-            queue.approve(
-                item["id"],
-                title=prefer_pipe_separator(change["approved_title"]),
-                meta=change["approved_meta"],
-                title_optimizer=_optimizer(database),
-            )
+            if change.get("change_type") == "title_meta":
+                queue.approve(
+                    item["id"],
+                    title=prefer_pipe_separator(change["approved_title"]),
+                    meta=change["approved_meta"],
+                    title_optimizer=_optimizer(database),
+                )
+            else:
+                queue.approve(item["id"])
             st.rerun()
         except Exception:
             st.error("Opgaven kunne ikke accepteres. Prøv igen.")
@@ -1788,7 +1791,7 @@ def _render_implementation(
     database: Any, queue: WorkQueueService, item: dict[str, Any]
 ) -> None:
     _render_guided_progress("approved")
-    change = item.get("approved_change") or {}
+    change = _recommended_change(item)
     if not _has_concrete_change(change):
         st.error("Den godkendte ændring er ufuldstændig og kan ikke implementeres.")
         return
@@ -1797,13 +1800,25 @@ def _render_implementation(
     _render_change_card(item, change)
     with st.container(border=True):
         st.subheader("Det skal du gøre nu")
-        st.markdown(
-            "1. Åbn siden i WordPress.\n"
-            "2. Indsæt den nye title.\n"
-            "3. Indsæt den nye metabeskrivelse.\n"
-            "4. Gem siden.\n"
-            "5. Klik **Markér som implementeret**."
-        )
+        if change.get("change_type") == "title_meta":
+            st.markdown(
+                "1. Åbn siden i WordPress.\n"
+                "2. Indsæt den nye title.\n"
+                "3. Indsæt den nye metabeskrivelse.\n"
+                "4. Gem siden.\n"
+                "5. Klik **Markér som implementeret**."
+            )
+        else:
+            steps = change.get("steps") or []
+            lines = ["1. Åbn siden i WordPress."]
+            lines += [
+                f"{index}. {step}"
+                for index, step in enumerate(steps, start=2)
+            ]
+            lines.append(
+                f"{len(steps) + 2}. Klik **Markér som implementeret**."
+            )
+            st.markdown("\n".join(lines))
     if st.button(
         "🟢 Markér som implementeret",
         type="primary",
@@ -1832,6 +1847,22 @@ def _render_page_card(
 def _render_change_card(
     item: dict[str, Any], change: dict[str, Any]
 ) -> None:
+    if change.get("change_type") != "title_meta":
+        with st.container(border=True):
+            st.subheader("AI anbefaler")
+            st.write(
+                f"**{CHANGE_TYPE_LABELS.get(change.get('change_type'), 'Ændring')}**"
+            )
+            st.write(change.get("recommended_change") or "")
+            steps = change.get("steps") or []
+            if steps:
+                st.markdown(
+                    "\n".join(
+                        f"{index}. {step}"
+                        for index, step in enumerate(steps, start=1)
+                    )
+                )
+        return
     with st.container(border=True):
         st.subheader("AI anbefaler")
         st.write("**Ny title**")
@@ -1887,17 +1918,46 @@ def _render_reason_card(item: dict[str, Any]) -> None:
             st.write(sentence)
 
 
-def _recommended_change(item: dict[str, Any]) -> dict[str, str]:
+CHANGE_TYPE_LABELS = {
+    "title_meta": "Title og metabeskrivelse",
+    "monetization": "Monetisering",
+    "content_update": "Indhold / placering",
+    "internal_links": "Interne links",
+    "schema": "Strukturerede data",
+    "technical_fix": "Teknisk forbedring",
+}
+
+
+def _recommended_change(item: dict[str, Any]) -> dict[str, Any]:
     approved = item.get("approved_change") or {}
-    if approved:
-        return approved
     implementation = item.get("implementation") or {}
+    candidate = item.get("candidate") or {}
+    change_type = str(
+        approved.get("change_type")
+        or implementation.get("change_type")
+        or candidate.get("experiment_type") or "title_meta"
+    )
+    if change_type == "title_meta":
+        if approved:
+            return approved
+        return {
+            "change_type": "title_meta",
+            "current_title": str(implementation.get("current_title") or ""),
+            "approved_title": str(implementation.get("new_title") or ""),
+            "current_meta": str(implementation.get("current_meta") or ""),
+            "approved_meta": str(implementation.get("new_meta") or ""),
+        }
+    # Non-title: the sparse approved_change lacks the deliverable, so always
+    # build the concrete change from the stored instructions.
     return {
-        "change_type": "title_meta",
-        "current_title": str(implementation.get("current_title") or ""),
-        "approved_title": str(implementation.get("new_title") or ""),
-        "current_meta": str(implementation.get("current_meta") or ""),
-        "approved_meta": str(implementation.get("new_meta") or ""),
+        "change_type": change_type,
+        "recommended_change": str(
+            implementation.get("recommended_change")
+            or candidate.get("task_description") or ""
+        ),
+        "steps": list(
+            implementation.get("steps") or candidate.get("exact_steps") or []
+        ),
     }
 
 
@@ -1918,16 +1978,42 @@ def _short_reason(item: dict[str, Any]) -> list[str]:
     ).strip()
     sentences = [part.strip() for part in raw.replace("!", ".").split(".") if part.strip()]
     first = (sentences[0] + ".") if sentences else raw
-    second = "En bedre title og metabeskrivelse vurderes at kunne give flere klik."
+    change_type = str(
+        candidate.get("experiment_type")
+        or (item.get("approved_change") or {}).get("change_type")
+        or "title_meta"
+    )
+    second = {
+        "monetization": (
+            "En konkret monetisering vurderes at kunne skabe provision fra "
+            "den eksisterende trafik."
+        ),
+        "content_update": (
+            "Stærkere indhold vurderes at kunne løfte placeringen og dermed "
+            "klikkene."
+        ),
+        "internal_links": (
+            "Bedre interne links vurderes at kunne styrke sidens placering."
+        ),
+        "schema": (
+            "Strukturerede data vurderes at kunne forbedre visningen i "
+            "søgeresultatet."
+        ),
+    }.get(
+        change_type,
+        "En bedre title og metabeskrivelse vurderes at kunne give flere klik.",
+    )
     return [first, second][:2]
 
 
 def _has_concrete_change(content: dict[str, Any]) -> bool:
-    return bool(
-        content.get("change_type") == "title_meta"
-        and str(content.get("approved_title", "")).strip()
-        and str(content.get("approved_meta", "")).strip()
-    )
+    if content.get("change_type") == "title_meta":
+        return bool(
+            str(content.get("approved_title", "")).strip()
+            and str(content.get("approved_meta", "")).strip()
+        )
+    # A non-title change is concrete once it has a recommended change text.
+    return bool(str(content.get("recommended_change", "")).strip())
 
 
 def _render_daily_summary(

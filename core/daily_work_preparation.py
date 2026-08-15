@@ -95,6 +95,18 @@ class DailyWorkPreparationService:
                     None, "all_candidates_locked", len(candidates)
                 )
 
+            # A non-title change already carries concrete instructions from the
+            # income-first DecisionEngine (monetisation, content, links, schema);
+            # enqueue it as its own type without forcing a title draft.
+            if str(candidate.get("experiment_type") or "title_meta") != "title_meta":
+                item = self.queue.enqueue_candidate(
+                    self._non_title_candidate(candidate)
+                )
+                self._log(
+                    "persist_prepared_work", "completed", website_id,
+                    candidate=candidate, item=item,
+                )
+                return PreparationResult(item)
             # Recheck after acquiring the process lock and before any AI call.
             reviewed = self._reviewed_candidates(website_id, target_url)
             if reviewed:
@@ -175,6 +187,24 @@ class DailyWorkPreparationService:
                 "page", website_id=website_id
             ))
         return bool(self.database.get_search_console_dimensions("page"))
+
+    @staticmethod
+    def _non_title_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+        """Package a non-title candidate for the queue: its own change type plus
+        the concrete instructions the DecisionEngine already produced."""
+        return {
+            **candidate,
+            "implementation_content": {
+                "change_type": str(candidate.get("experiment_type") or ""),
+                "recommended_change": str(
+                    candidate.get("task_description") or ""
+                ),
+                "steps": list(candidate.get("exact_steps") or []),
+                "measurement_method": str(
+                    candidate.get("measurement_method") or ""
+                ),
+            },
+        }
 
     @staticmethod
     def _optimizer_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
