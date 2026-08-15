@@ -19,6 +19,18 @@ WAITING_PERIODS = {
     "technical_fix": (14, 28),
     "schema": (21, 28),
 }
+# The metric each change type is measured on, so the goal follows the problem:
+# money for monetisation, ranking for content/link/technical changes, CTR for
+# copy that targets the search result (title/meta and schema snippets).
+GOAL_METRIC_BY_TYPE = {
+    "monetization": "commission",
+    "title_meta": "ctr",
+    "content_update": "position",
+    "content_gap": "position",
+    "internal_links": "position",
+    "technical_fix": "position",
+    "schema": "ctr",
+}
 
 
 class SEOExperimentEngine:
@@ -70,7 +82,11 @@ class SEOExperimentEngine:
             "experiment_type": experiment_type,
             "hypothesis": hypothesis,
             "change_description": decision["task_description"],
-            "goal_metric": decision.get("goal_metric", "ctr"),
+            # The change type is authoritative for the metric, so every creation
+            # path (auto and manual) measures the right thing.
+            "goal_metric": GOAL_METRIC_BY_TYPE.get(
+                experiment_type, decision.get("goal_metric", "ctr")
+            ),
             "goal_direction": decision.get("goal_direction", "increase"),
             "target_change_pct": float(
                 decision.get("target_change_pct", 15)

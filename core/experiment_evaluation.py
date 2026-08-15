@@ -25,6 +25,17 @@ RESULT_LABELS = {
     "insufficient_data": "Utilstrækkelige data",
     "evaluation_failed": "Evaluering mislykkedes",
 }
+# The learning store and its consumers use the legacy classification words, so a
+# recorded outcome speaks the same language as the rest of the learning code.
+LEARNING_CLASSIFICATION = {
+    "strong_improvement": "Tydeligt forbedret",
+    "improvement": "Forbedret",
+    "neutral": "Uændret",
+    "decline": "Forværret",
+    "strong_decline": "Forværret",
+}
+# Outcomes that mean a change type did not work on a URL.
+NON_POSITIVE_CLASSIFICATION = {"Uændret", "Forværret"}
 
 
 @dataclass(frozen=True)
@@ -118,13 +129,18 @@ class ExperimentEvaluationService:
         original_status = experiment["status"]
         self.database.update_seo_experiment(experiment_id, {"status": "evaluating"})
         try:
+            goal_metric = str(experiment.get("goal_metric") or "ctr")
             periods = self._periods(experiment)
             after = self._comparison_data(experiment, periods)
             metrics = self.calculate_metrics(experiment, after)
-            quality, caveats = self._sample_quality(metrics, periods)
-            if str(experiment.get("goal_metric")) == "commission":
+            quality, caveats = self._sample_quality(
+                metrics, periods, goal_metric
+            )
+            if goal_metric == "commission":
                 self._add_commission_metrics(experiment, periods, metrics)
                 result_status = self._classify_commission(metrics, quality)
+            elif goal_metric == "position":
+                result_status = self._classify_position(metrics, quality)
             else:
                 result_status = self.classify(metrics, quality, caveats)
             conclusion = self._ai_conclusion(metrics, result_status, caveats)
@@ -198,6 +214,19 @@ class ExperimentEvaluationService:
                 self.database.update_seo_experiment(
                     experiment_id, completed_update
                 )
+                # Record the measured outcome as reusable learning so the
+                # selection engine can favour what worked and avoid repeating
+                # what did not. Isolated: a learning failure must not undo the
+                # completed evaluation.
+                try:
+                    self._record_learning(
+                        experiment, metrics, result_status, quality
+                    )
+                except Exception:  # never let learning break evaluation
+                    self.logger.exception(json.dumps({
+                        "event": "experiment_learning_failed",
+                        "experiment_id": experiment_id,
+                    }, ensure_ascii=False))
             self.logger.info(json.dumps({
                 "event": "experiment_evaluated", "experiment_id": experiment_id,
                 "website_id": experiment["website_id"],
@@ -211,6 +240,78 @@ class ExperimentEvaluationService:
                 experiment_id, {"status": original_status}
             )
             raise
+
+    def _record_learning(
+        self, experiment: dict[str, Any], metrics: dict[str, Any],
+        result_status: str, quality: str,
+    ) -> None:
+        """Persist one completed outcome as reusable learning and update the
+        URL's status, so a repeatedly failing change type is steered away from
+        and a proven one can be favoured."""
+        change_type = str(experiment.get("experiment_type") or "")
+        classification = LEARNING_CLASSIFICATION.get(result_status, "Uændret")
+        goal_metric = str(experiment.get("goal_metric") or "ctr")
+        if goal_metric == "commission":
+            effect = float(metrics.get("commission_change") or 0)
+        elif goal_metric == "position":
+            effect = float(metrics.get("position_change") or 0)
+        else:
+            effect = float(metrics.get("ctr_percentage_point_change") or 0)
+        prior_same_type = sum(
+            1 for entry in self.database.get_seo_learning_entries()
+            if entry["change_type"] == change_type
+        )
+        pattern = (
+            "Understøttet mønster" if prior_same_type + 1 >= 10
+            else "Foreløbigt mønster" if prior_same_type + 1 >= 3
+            else "Enkelt observation"
+        )
+        self.database.save_seo_learning_entry({
+            "experiment_id": experiment["id"],
+            "website_id": experiment["website_id"],
+            "target_url": experiment["target_url"],
+            "page_type": "ukendt",
+            "change_type": change_type,
+            "target_query": experiment.get("target_query", ""),
+            "hypothesis": experiment.get("hypothesis", ""),
+            "original_change": {},
+            "implemented_change": {},
+            "baseline": {
+                "clicks": experiment.get("baseline_clicks"),
+                "impressions": experiment.get("baseline_impressions"),
+                "ctr": experiment.get("baseline_ctr"),
+                "position": experiment.get("baseline_position"),
+            },
+            "result": {"result_status": result_status, **metrics},
+            "effect_size": effect,
+            "data_quality": quality,
+            "classification": classification,
+            "conclusion": (
+                f"På denne URL gav ændringstypen {change_type} resultatet "
+                f"{classification.lower()}. Det er {pattern.lower()} og ikke "
+                "en generel SEO-regel."
+            ),
+            "pattern_level": pattern,
+        })
+        failed = sum(
+            1 for entry in self.database.get_seo_learning_entries()
+            if entry["target_url"] == experiment["target_url"]
+            and entry["change_type"] == change_type
+            and entry["classification"] in NON_POSITIVE_CLASSIFICATION
+        )
+        if failed >= 2:
+            url_status = "Kræver ny strategi"
+        elif result_status in {"improvement", "strong_improvement"}:
+            url_status = "Har fortsat potentiale"
+        else:
+            url_status = "Optimeringskandidat"
+        self.database.upsert_seo_url_status(
+            target_url=experiment["target_url"],
+            website_id=experiment["website_id"],
+            status=url_status,
+            observation_until=None,
+            failed_same_type_count=failed,
+        )
 
     @staticmethod
     def build_post_analysis(
@@ -409,6 +510,29 @@ class ExperimentEvaluationService:
         metrics["commission_after"] = after
         metrics["commission_change"] = round(after - before, 2)
 
+    def _classify_position(
+        self, metrics: dict[str, Any], quality: str
+    ) -> str:
+        """Classify a ranking experiment on its average-position change.
+
+        ``position_change`` is positive when the page moved up (a lower position
+        number is better). A gain only counts if impressions did not collapse.
+        """
+        if quality == "insufficient":
+            return "insufficient_data"
+        change = float(metrics.get("position_change") or 0)
+        impressions = metrics.get("impressions_relative_change")
+        impression_value = impressions if impressions is not None else 0
+        if change >= 3 and impression_value > -20:
+            return "strong_improvement"
+        if change >= 1 and impression_value > -20:
+            return "improvement"
+        if change <= -3:
+            return "strong_decline"
+        if change <= -1:
+            return "decline"
+        return "neutral"
+
     def _classify_commission(
         self, metrics: dict[str, Any], quality: str
     ) -> str:
@@ -480,21 +604,31 @@ class ExperimentEvaluationService:
         return rows[0]
 
     def _sample_quality(
-        self, metrics: dict[str, Any], periods: dict[str, Any]
+        self, metrics: dict[str, Any], periods: dict[str, Any],
+        goal_metric: str = "ctr",
     ) -> tuple[str, list[str]]:
-        caveats = []
+        # Only genuine data-quality problems make a measurement insufficient.
+        data_caveats = []
         if periods["comparison_days"] < self.rules.minimum_days:
-            caveats.append("Måleperioden indeholder for få dage.")
+            data_caveats.append("Måleperioden indeholder for få dage.")
         if metrics["impressions_after"] < self.rules.minimum_impressions:
-            caveats.append("Efterperioden har for få visninger.")
-        if metrics["clicks_after"] < self.rules.minimum_clicks:
-            caveats.append("Efterperioden har for få klik.")
-        if metrics["position_change"] >= 1:
+            data_caveats.append("Efterperioden har for få visninger.")
+        # Too few clicks only undermines a click/CTR verdict; a ranking or
+        # commission verdict does not depend on click volume.
+        if (
+            goal_metric in {"ctr", "clicks"}
+            and metrics["clicks_after"] < self.rules.minimum_clicks
+        ):
+            data_caveats.append("Efterperioden har for få klik.")
+        caveats = list(data_caveats)
+        # A ranking gain is only a confounder for a CTR/click verdict — it is
+        # informational and must never by itself make the sample insufficient.
+        if goal_metric in {"ctr", "clicks"} and metrics["position_change"] >= 1:
             caveats.append(
                 "Placeringen blev også forbedret mærkbart, så effekten kan ikke "
                 "tilskrives title eller meta alene."
             )
-        return ("insufficient" if caveats[:3] else "sufficient", caveats)
+        return ("insufficient" if data_caveats else "sufficient", caveats)
 
     def _ai_conclusion(
         self, metrics: dict[str, Any], result: str, caveats: list[str]

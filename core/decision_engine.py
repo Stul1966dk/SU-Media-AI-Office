@@ -26,6 +26,25 @@ MONETIZATION_GAP_MIN_IMPRESSIONS = 100
 MONETIZATION_GAP_MAX_COMMISSION = 50.0
 MONETIZATION_GAP_CAP = 6.0
 
+# A page ranking beyond this average position sits on Google's page 2+, where a
+# title/meta rewrite cannot win clicks — the lever is ranking, so such pages get
+# a content/ranking experiment (measured on position) instead of a CTR test.
+CLICKABLE_POSITION_MAX = 10.0
+
+# Learning from measured outcomes. A change type that has failed twice on a URL
+# is avoided in favour of an alternative; documented site-level wins/losses give
+# a bounded ranking nudge so proven choices are favoured and poor ones are not
+# repeated. Bounds keep learning from ever overturning the money invariants.
+LEARNING_FAILURE_THRESHOLD = 2
+LEARNING_SITE_BIAS_CAP = 5.0
+LEARNING_REPEAT_PENALTY = 8.0
+LEARNING_ALTERNATIVES = {
+    "title_meta": ("content_update",),
+    "content_update": ("title_meta",),
+}
+POSITIVE_CLASSIFICATIONS = {"Tydeligt forbedret", "Forbedret", "Delvist forbedret"}
+NEGATIVE_CLASSIFICATIONS = {"Uændret", "Forværret"}
+
 
 class DecisionEngine:
     """Rank evidence-backed candidates and persist at most one decision."""
@@ -59,6 +78,7 @@ class DecisionEngine:
         site_revenue: dict[str, float] = defaultdict(float)
         for key, amount in page_revenue.items():
             site_revenue[key.split("/", 1)[0]] += amount
+        url_type_failures, site_type_net = self._learning_signals()
         candidates = []
         for website in websites:
             site = website["website"]
@@ -159,10 +179,30 @@ class DecisionEngine:
                 # coarse website-level figure so proven earners rank higher.
                 candidate["affiliate_commission"] = commission
                 candidate["site_has_revenue"] = site_has_revenue
-                # A pure monetisation gap (no separate SEO problem) becomes a
-                # monetisation change instead of a title/meta rewrite.
-                if monetization_gap and click_drop <= 0 and not low_ctr:
+                # Prescribe the change that fits the measured problem, income
+                # first. A monetised page with real traffic that under-earns
+                # becomes a commission experiment even when its CTR is low; a
+                # page ranking on page 2+ gets a ranking change; only a clickable
+                # page keeps the CTR-focused title/meta default.
+                position = float(page.get("current_position") or 0)
+                if monetization_gap:
+                    intent = "monetization"
+                elif position > CLICKABLE_POSITION_MAX:
+                    intent = "content_update"
+                else:
+                    intent = "title_meta"
+                # Avoid repeating a change type that already failed on this URL.
+                intent = self._steer_by_learning(
+                    target_url, intent, url_type_failures
+                )
+                if intent == "monetization":
                     self._to_monetization_candidate(candidate, page)
+                elif intent == "content_update":
+                    self._to_content_candidate(candidate, page)
+                # title_meta keeps the base candidate as built.
+                candidate["learning_adjustment"] = self._learning_adjustment(
+                    site, target_url, intent, url_type_failures, site_type_net
+                )
                 if not include_locked and self.has_conflict(candidate):
                     continue
                 candidates.append(candidate)
@@ -177,6 +217,8 @@ class DecisionEngine:
         target_url = candidate["target_url"]
         candidate.update({
             "experiment_type": "monetization",
+            # Commission is attributed per page, so measure at page level.
+            "target_query": "",
             "task_title": f"Tjen på trafikken på {target_url}",
             "task_description": (
                 f"Siden får {impressions} visninger, men lav eller ingen "
@@ -212,9 +254,111 @@ class DecisionEngine:
             "risk": "Lav",
         })
 
+    @staticmethod
+    def _to_content_candidate(
+        candidate: dict[str, Any], page: dict[str, Any]
+    ) -> None:
+        """Convert a base candidate into a content/ranking change for a page that
+        sits on page 2+. A title rewrite cannot win clicks there, so the change
+        targets search intent and content strength and is measured on position."""
+        impressions = int(page["current_impressions"])
+        position = float(page.get("current_position") or 0)
+        target_url = candidate["target_url"]
+        query = str(candidate.get("target_query") or "").strip()
+        focus = f"“{query}”" if query else "sidens vigtigste søgeord"
+        candidate.update({
+            "experiment_type": "content_update",
+            # Measure the whole page's ranking, not a single low-volume query.
+            "target_query": "",
+            "task_title": f"Styrk indholdet på {target_url} for bedre placering",
+            "task_description": (
+                f"Siden ligger på plads {position:.0f} med {impressions} "
+                f"visninger og henter derfor næsten ingen klik. Opdatér "
+                f"indholdet, så det bedre besvarer søgeintentionen bag {focus}, "
+                "og styrk de svageste afsnit."
+            ),
+            "exact_steps": [
+                f"Sammenhold sidens indhold med søgeintentionen bag {focus}.",
+                "Opdatér eller tilføj det afsnit, der mangler et klart svar.",
+                "Tilføj 2-3 relevante interne links til siden.",
+                "Gem ændringsforslaget til godkendelse.",
+            ],
+            "completion_criteria": (
+                "Et konkret, kopiér-klart indholdsforslag ligger klar til "
+                "godkendelse."
+            ),
+            "estimated_minutes": 90,
+            "expected_effect": "Bedre placering og dermed flere klik.",
+            "expected_effect_reason": (
+                f"Siden ligger på plads {position:.0f} med {impressions} "
+                "visninger — ranking, ikke CTR, er flaskehalsen."
+            ),
+            "measurement_method": (
+                "Sammenlign sidens gennemsnitlige placering og klik før og "
+                "efter ændringen over 28 dage."
+            ),
+            "experiment_goal": (
+                "Forbedr sidens placering, så den henter flere klik."
+            ),
+            "goal_metric": "position",
+            "goal_direction": "increase",
+            "target_change_pct": 15,
+            "risk": "Mellem",
+        })
+
     def page_revenue_map(self) -> dict[str, float]:
         """Return DKK commission earned per page key from recorded sales."""
         return revenue_by_page(self.database.get_commission_records())
+
+    def _learning_signals(
+        self,
+    ) -> tuple[dict[tuple[str, str], int], dict[tuple[str, str], int]]:
+        """Summarise measured learning once: how often a change type failed on a
+        URL, and each site's net win/loss per change type."""
+        url_type_failures: dict[tuple[str, str], int] = defaultdict(int)
+        site_type_net: dict[tuple[str, str], int] = defaultdict(int)
+        for entry in self.database.get_seo_learning_entries():
+            change_type = entry.get("change_type", "")
+            classification = entry.get("classification", "")
+            if classification in NEGATIVE_CLASSIFICATIONS:
+                url_type_failures[(entry.get("target_url", ""), change_type)] += 1
+                site_type_net[(entry.get("website_id", ""), change_type)] -= 1
+            elif classification in POSITIVE_CLASSIFICATIONS:
+                site_type_net[(entry.get("website_id", ""), change_type)] += 1
+        return url_type_failures, site_type_net
+
+    @staticmethod
+    def _steer_by_learning(
+        target_url: str, intent: str,
+        url_type_failures: dict[tuple[str, str], int],
+    ) -> str:
+        """Switch away from a change type that already failed twice on this URL
+        toward an alternative that has not, so bad choices are not repeated."""
+        if url_type_failures.get((target_url, intent), 0) < LEARNING_FAILURE_THRESHOLD:
+            return intent
+        for alternative in LEARNING_ALTERNATIVES.get(intent, ()):
+            if url_type_failures.get(
+                (target_url, alternative), 0
+            ) < LEARNING_FAILURE_THRESHOLD:
+                return alternative
+        return intent
+
+    @staticmethod
+    def _learning_adjustment(
+        website: str, target_url: str, change_type: str,
+        url_type_failures: dict[tuple[str, str], int],
+        site_type_net: dict[tuple[str, str], int],
+    ) -> float:
+        """Bounded ranking nudge: reward a site's proven change types, penalise a
+        type that keeps failing here. Bounded so learning never overturns the
+        income invariants."""
+        net = site_type_net.get((website, change_type), 0)
+        bias = max(-LEARNING_SITE_BIAS_CAP, min(LEARNING_SITE_BIAS_CAP, net * 1.5))
+        if url_type_failures.get(
+            (target_url, change_type), 0
+        ) >= LEARNING_FAILURE_THRESHOLD:
+            bias -= LEARNING_REPEAT_PENALTY
+        return round(bias, 1)
 
     def score_candidate(self, candidate: dict[str, Any]) -> dict[str, Any]:
         """Return a transparent bounded score where data volume matters."""
@@ -269,11 +413,12 @@ class DecisionEngine:
         work_penalty = 3 if candidate.get("has_active_work") else 0
         experiment_penalty = 0
         risk_penalty = 5 if candidate["risk"] == "Høj" else 0
+        learning_adjustment = float(candidate.get("learning_adjustment", 0))
         score = round(min(
             100, volume_score + loss_score + ctr_opportunity
             + monetization + monetization_gap + manual + confidence
             + data_quality + health_opportunity + trend + waiting
-            + expected_gain
+            + expected_gain + learning_adjustment
             - work_penalty - experiment_penalty - risk_penalty
         ))
         score = max(0, score)
@@ -294,6 +439,7 @@ class DecisionEngine:
                 "active_experiment_penalty": -experiment_penalty,
                 "waiting_time": round(waiting, 1),
                 "expected_gain": round(expected_gain, 1),
+                "learning": round(learning_adjustment, 1),
             },
         }
         candidate["priority_label"] = self._label(score)
