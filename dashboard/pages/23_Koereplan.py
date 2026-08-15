@@ -59,21 +59,22 @@ def main() -> None:
     database = open_database()
     try:
         roadmap = build_website_roadmap(database, website_id)
+        st.subheader(website_id)
+        _render_summary(roadmap["summary"])
+        st.write(roadmap["narrative"])
+        _render_active_projects(database, website_id)
+        st.subheader("Mål")
+        if not roadmap["goals"]:
+            st.info(
+                "Der er endnu ikke nok målte signaler til at sætte mål for dette "
+                "website. Importér mere Search Console- og salgsdata først."
+            )
+        for goal in roadmap["goals"]:
+            _render_goal(database, website_id, goal)
+        st.subheader("Anbefalet rækkefølge")
+        _render_sequence(roadmap["recommended_sequence"])
     finally:
         database.close()
-    st.subheader(website_id)
-    _render_summary(roadmap["summary"])
-    st.write(roadmap["narrative"])
-    st.subheader("Mål")
-    if not roadmap["goals"]:
-        st.info(
-            "Der er endnu ikke nok målte signaler til at sætte mål for dette "
-            "website. Importér mere Search Console- og salgsdata først."
-        )
-    for goal in roadmap["goals"]:
-        _render_goal(goal)
-    st.subheader("Anbefalet rækkefølge")
-    _render_sequence(roadmap["recommended_sequence"])
 
 
 def _render_summary(summary: dict[str, Any]) -> None:
@@ -87,7 +88,9 @@ def _render_summary(summary: dict[str, Any]) -> None:
     )
 
 
-def _render_goal(goal: dict[str, Any]) -> None:
+def _render_goal(
+    database: Any, website_id: str, goal: dict[str, Any]
+) -> None:
     icon = GOAL_ICONS.get(goal["type"], "•")
     with st.container(border=True):
         st.markdown(f"#### {icon} {goal['title']}")
@@ -95,6 +98,154 @@ def _render_goal(goal: dict[str, Any]) -> None:
         rows = [_goal_row(goal["type"], item) for item in goal["items"]]
         if rows:
             st.table(rows)
+        _render_goal_project_control(database, website_id, goal)
+
+
+def _render_goal_project_control(
+    database: Any, website_id: str, goal: dict[str, Any]
+) -> None:
+    """Let the user turn one page from a goal into a multi-experiment project."""
+    urls = list(dict.fromkeys(item["url"] for item in goal["items"]))
+    active_urls = {
+        project["target_url"]
+        for project in database.get_seo_goal_projects()
+        if project["status"] in {"active", "awaiting_confirmation"}
+    }
+    choices = [url for url in urls if url not in active_urls]
+    if not choices:
+        st.caption("Alle sider i dette mål har allerede et aktivt projekt.")
+        return
+    columns = st.columns([3, 1])
+    selected_url = columns[0].selectbox(
+        "Gør en side til et projekt", choices,
+        key=f"project_url_{goal['type']}", format_func=_path,
+    )
+    if columns[1].button("Gør til projekt", key=f"project_btn_{goal['type']}"):
+        try:
+            _full_project_service(database).start_project(
+                website_id, selected_url, goal["metric"]
+            )
+            st.success(
+                f"Projekt oprettet for {_path(selected_url)}. Første "
+                "eksperiment er lagt i køen på 'I dag'."
+            )
+            st.rerun()
+        except Exception as error:  # surface a friendly message
+            st.error(f"Kunne ikke oprette projektet: {error}")
+
+
+def _render_active_projects(database: Any, website_id: str) -> None:
+    from core.seo_project import SEOProjectService
+
+    projects = [
+        project for project in database.get_seo_goal_projects()
+        if project["website_id"] == website_id
+        and project["status"] in {"active", "awaiting_confirmation"}
+    ]
+    if not projects:
+        return
+    st.subheader("Aktive projekter")
+    service = SEOProjectService(database)
+    for project in projects:
+        progress = service.project_progress(project["id"])
+        with st.container(border=True):
+            st.markdown(
+                f"#### 🚩 {progress['goal_label']} — "
+                f"{_path(progress['target_url'])}"
+            )
+            done = [
+                item for item in progress["experiments"]
+                if item["status"] == "completed"
+            ]
+            st.caption(
+                f"Status: {progress['status']} · "
+                f"{len(progress['experiments'])} eksperiment(er), "
+                f"{len(done)} afsluttet"
+            )
+            if progress["experiments"]:
+                st.table([
+                    {
+                        "Ændring": EXPERIMENT_LABELS.get(
+                            item["experiment_type"], item["experiment_type"]
+                        ),
+                        "Status": item["status"],
+                        "Resultat": item.get("result") or "—",
+                    }
+                    for item in progress["experiments"]
+                ])
+            if project["status"] == "awaiting_confirmation":
+                reason = (
+                    "Målet ser ud til at være nået."
+                    if progress["goal_reached"]
+                    else "Siden er udtømt for oplagte ændringer."
+                )
+                st.info(f"{reason} Skal projektet markeres som fuldført?")
+                confirm, abandon = st.columns(2)
+                if confirm.button(
+                    "Bekræft fuldført", key=f"confirm_{project['id']}",
+                    type="primary",
+                ):
+                    service.confirm_completion(project["id"])
+                    st.rerun()
+                if abandon.button(
+                    "Afbryd projekt", key=f"abandon_{project['id']}"
+                ):
+                    service.abandon(project["id"])
+                    st.rerun()
+            _render_project_dialog(database, project["id"])
+
+
+def _render_project_dialog(database: Any, project_id: int) -> None:
+    """A small AI dialog scoped to one project, grounded in its measured data."""
+    with st.expander("Spørg AI om projektet"):
+        quick = None
+        columns = st.columns(3)
+        if columns[0].button("Forklar baggrunden", key=f"q_bg_{project_id}"):
+            quick = "Forklar baggrunden for dette projekt."
+        if columns[1].button("Status", key=f"q_st_{project_id}"):
+            quick = "Hvad er status på projektet lige nu?"
+        if columns[2].button("Næste skridt", key=f"q_ns_{project_id}"):
+            quick = "Hvad er næste skridt i projektet?"
+        typed = st.text_input(
+            "Eller skriv et spørgsmål", key=f"q_in_{project_id}"
+        )
+        asked = st.button("Spørg", key=f"q_ask_{project_id}")
+        question = quick or (typed.strip() if asked and typed.strip() else None)
+        if question:
+            from core.ai_service import AIService
+            from core.seo_project import SEOProjectService
+
+            answer = SEOProjectService(
+                database, ai_service=AIService()
+            ).answer_question(project_id, question)
+            st.markdown(f"**Spørgsmål:** {question}")
+            st.write(answer)
+
+
+def _full_project_service(database: Any) -> Any:
+    from agents.title_optimizer import TitleOptimizer
+    from core.ai_service import AIService
+    from core.daily_work_preparation import DailyWorkPreparationService
+    from core.seo_experiment_engine import SEOExperimentEngine
+    from core.seo_project import SEOProjectService
+    from core.website_registry import WebsiteRegistry
+    from core.work_queue_service import WorkQueueService
+
+    registry = WebsiteRegistry(database)
+    queue = WorkQueueService(
+        database, registry,
+        experiment_engine=SEOExperimentEngine(database),
+    )
+    preparation = DailyWorkPreparationService(
+        database=database, queue=queue,
+        title_optimizer=TitleOptimizer(
+            database=database, website_registry=registry,
+            ai_service=AIService(),
+        ),
+    )
+    return SEOProjectService(
+        database, preparation=preparation, ai_service=AIService()
+    )
 
 
 def _goal_row(goal_type: str, item: dict[str, Any]) -> dict[str, Any]:

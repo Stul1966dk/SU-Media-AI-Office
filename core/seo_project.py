@@ -35,8 +35,11 @@ class SEOProjectService:
     """Create and advance goal-driven SEO projects."""
 
     def __init__(
-        self, database: Any, *, preparation: Any, ai_service: Any | None = None
+        self, database: Any, *, preparation: Any | None = None,
+        ai_service: Any | None = None,
     ) -> None:
+        # preparation is only needed to enqueue new experiments (start/advance);
+        # reads (progress, dialog, confirm) work without it.
         self.database = database
         self.preparation = preparation
         self.ai_service = ai_service
@@ -217,6 +220,10 @@ class SEOProjectService:
     # -- helpers ------------------------------------------------------------
 
     def _enqueue_next(self, website_id: str, target_url: str) -> Any:
+        if self.preparation is None:
+            raise ValueError(
+                "Et forberedelses-led er påkrævet for at oprette eksperimenter."
+            )
         return self.preparation.prepare_next(
             website_id, only_url=target_url
         ).item

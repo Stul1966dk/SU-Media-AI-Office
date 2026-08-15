@@ -1747,10 +1747,29 @@ def _format_number(value: float) -> str:
     return f"{float(value):.1f}".replace(".", ",")
 
 
+def _render_project_banner(database: Any, item: dict[str, Any]) -> None:
+    """Show that a task is part of a goal-driven project, so the thread is
+    clear rather than feeling like a random single suggestion."""
+    from core.seo_project import GOAL_LABELS
+
+    project = next(
+        (
+            row for row in database.get_seo_goal_projects()
+            if row["target_url"] == item.get("target_url")
+            and row["status"] in {"active", "awaiting_confirmation"}
+        ),
+        None,
+    )
+    if project:
+        goal = GOAL_LABELS.get(project.get("goal_metric"), "projekt")
+        st.info(f"🚩 Del af projekt: {goal} — {item['target_url']}")
+
+
 def _render_recommendation(
     database: Any, queue: WorkQueueService, item: dict[str, Any]
 ) -> None:
     _render_guided_progress("draft")
+    _render_project_banner(database, item)
     change = _recommended_change(item)
     if not _has_concrete_change(change):
         st.error("Opgaven er ikke komplet og kan derfor ikke vises endnu.")
@@ -1791,6 +1810,7 @@ def _render_implementation(
     database: Any, queue: WorkQueueService, item: dict[str, Any]
 ) -> None:
     _render_guided_progress("approved")
+    _render_project_banner(database, item)
     change = _recommended_change(item)
     if not _has_concrete_change(change):
         st.error("Den godkendte ændring er ufuldstændig og kan ikke implementeres.")
