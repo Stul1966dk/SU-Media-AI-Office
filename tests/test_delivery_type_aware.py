@@ -6,10 +6,50 @@ surface, approve and implement — as their own type, not force them into a
 title/meta test.
 """
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
+
+
+class _FakeAI:
+    """Return one canned model response for deliverable generation."""
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def generate_response(self, prompt: str, tools=None):
+        return SimpleNamespace(text=self._text)
+
+
+_MONETIZATION_DELIVERABLE = json.dumps({
+    "deliverable_type": "monetization",
+    "summary": "Tilføj en sammenligningstabel med de omtalte løbebånd.",
+    "recommended_option": (
+        "Indsæt en sammenligningstabel med tre løbebånd (model, motor, "
+        "foldbar, pris-niveau) og en 'Se pris'-affiliate-knap ved hver række."
+    ),
+    "rationale": (
+        "Siden har trafik men ingen provision; en tabel konverterer den "
+        "eksisterende trafik til kommission."
+    ),
+    "alternatives": [
+        "En enkelt fremhævet købsknap øverst på siden",
+        "En liste med affiliate-links til hver omtalt model",
+    ],
+    "implementation_steps": [
+        "Åbn siden i WordPress",
+        "Indsæt sammenligningstabellen efter introafsnittet",
+        "Tilføj affiliate-links til hver række",
+    ],
+    "validation_checks": ["Alle links peger på gyldige produkter"],
+    "content_location": "Efter introafsnittet",
+    "current_state": "Ingen produktanbefaling på siden",
+    "opportunity_type": "comparison_table",
+    "evidence": "1222 visninger, 0 kr i provision",
+}, ensure_ascii=False)
 
 from core.daily_work_preparation import DailyWorkPreparationService
 from core.database import Database
@@ -81,6 +121,20 @@ class TypeAwareDeliveryTests(unittest.TestCase):
         # The queue surfaces it as actionable (no title required).
         current = self.queue.current("earner.dk")
         self.assertEqual(item["id"], current["id"])
+
+    def test_a_finished_ai_deliverable_is_used_when_available(self) -> None:
+        optimizer = Mock()
+        optimizer.ai_service = _FakeAI(_MONETIZATION_DELIVERABLE)
+        service = DailyWorkPreparationService(
+            database=self.database, queue=self.queue, title_optimizer=optimizer,
+        )
+        item = service.prepare_next("earner.dk").item
+        change = item["implementation"]["recommended_change"]
+        # The queue carries the finished, paste-ready element, not the generic
+        # "foreslå en konkret monetisering" instruction.
+        self.assertIn("sammenligningstabel", change)
+        self.assertNotIn("Foreslå en konkret monetisering", change)
+        self.assertTrue(item["implementation"]["steps"])
 
     def test_approve_and_implement_create_a_commission_experiment(self) -> None:
         item = self._prepare()

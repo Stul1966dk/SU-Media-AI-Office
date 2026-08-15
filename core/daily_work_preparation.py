@@ -196,23 +196,73 @@ class DailyWorkPreparationService:
             ))
         return bool(self.database.get_search_console_dimensions("page"))
 
-    @staticmethod
-    def _non_title_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
-        """Package a non-title candidate for the queue: its own change type plus
-        the concrete instructions the DecisionEngine already produced."""
+    def _non_title_candidate(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        """Package a non-title candidate for the queue. Prefer a finished,
+        paste-ready AI deliverable (a concrete monetisation element, a rewritten
+        passage); fall back to the DecisionEngine's own instructions."""
+        deliverable = self._rich_deliverable(candidate)
+        if deliverable:
+            recommended = str(deliverable.get("recommended_option") or "").strip()
+            summary = str(deliverable.get("summary") or "").strip()
+            recommended_change = (
+                f"{summary}\n\n{recommended}" if summary else recommended
+            )
+            steps = list(deliverable.get("implementation_steps") or [])
+        else:
+            recommended_change = str(candidate.get("task_description") or "")
+            steps = list(candidate.get("exact_steps") or [])
         return {
             **candidate,
             "implementation_content": {
                 "change_type": str(candidate.get("experiment_type") or ""),
-                "recommended_change": str(
-                    candidate.get("task_description") or ""
-                ),
-                "steps": list(candidate.get("exact_steps") or []),
+                "recommended_change": recommended_change,
+                "steps": steps,
                 "measurement_method": str(
                     candidate.get("measurement_method") or ""
                 ),
             },
         }
+
+    def _rich_deliverable(
+        self, candidate: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Generate a finished deliverable for a non-title change, grounded in
+        the page's content. Returns None (and the caller falls back) on any
+        failure, so a weak AI response never blocks the work."""
+        ai_service = getattr(self.optimizer, "ai_service", None)
+        if ai_service is None:
+            return None
+        from core.task_deliverables import generate_task_deliverable
+        try:
+            return generate_task_deliverable(
+                candidate, ai_service=ai_service,
+                public_context=self._page_content_context(candidate),
+            )
+        except Exception as error:
+            self._log(
+                "rich_deliverable", "failed", candidate.get("website"),
+                candidate=candidate, error=error,
+            )
+            return None
+
+    def _page_content_context(
+        self, candidate: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Return the target page's stored content so a deliverable is grounded
+        in what the page actually says (no invented products or claims)."""
+        target_url = str(candidate.get("target_url") or "")
+        try:
+            rows = self.database.get_content(str(candidate.get("website") or ""))
+        except Exception:
+            return []
+        if not isinstance(rows, list):
+            return []
+        context = []
+        for row in rows:
+            row_url = str(row.get("url") or row.get("link") or "")
+            if row_url == target_url:
+                context.append({**row, "url": row_url, "relation": "aktuel side"})
+        return context
 
     @staticmethod
     def _optimizer_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
