@@ -3695,6 +3695,20 @@ class Database:
                 ADD COLUMN measurement_method TEXT NOT NULL DEFAULT ''
                 """
             )
+        # A goal-driven SEO project binds a persistent, multi-experiment track to
+        # one URL and one goal metric. Legacy projects leave these NULL.
+        project_columns = {
+            row["name"]
+            for row in self._connection.execute("PRAGMA table_info(projects)")
+        }
+        if "target_url" not in project_columns:
+            self._connection.execute(
+                "ALTER TABLE projects ADD COLUMN target_url TEXT"
+            )
+        if "goal_metric" not in project_columns:
+            self._connection.execute(
+                "ALTER TABLE projects ADD COLUMN goal_metric TEXT"
+            )
 
     def create_project_record(self, values: dict[str, Any]) -> int:
         """Insert a project or return the matching existing project ID."""
@@ -3713,9 +3727,10 @@ class Database:
                 """
                 INSERT INTO projects (
                     website_id, title, description, status, priority,
-                    expected_effect, created_at, completed_at
+                    expected_effect, created_at, completed_at,
+                    target_url, goal_metric
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     values["website_id"],
@@ -3726,9 +3741,36 @@ class Database:
                     values["expected_effect"],
                     values["created_at"],
                     values.get("completed_at"),
+                    values.get("target_url"),
+                    values.get("goal_metric"),
                 ),
             )
         return int(cursor.lastrowid)
+
+    def get_seo_goal_projects(
+        self, *, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return goal-driven projects (those bound to a URL and goal metric)."""
+        query = "SELECT * FROM projects WHERE target_url IS NOT NULL"
+        parameters: tuple[Any, ...] = ()
+        if status is not None:
+            query += " AND status = ?"
+            parameters = (status,)
+        query += " ORDER BY id DESC"
+        return [
+            dict(row)
+            for row in self._connection.execute(query, parameters)
+        ]
+
+    def set_project_status(
+        self, project_id: int, status: str, *, completed_at: str | None = None
+    ) -> None:
+        """Update only a project's lifecycle status (and completion time)."""
+        with self._connection:
+            self._connection.execute(
+                "UPDATE projects SET status = ?, completed_at = ? WHERE id = ?",
+                (status, completed_at, project_id),
+            )
 
     def get_project_by_website_and_title(
         self,

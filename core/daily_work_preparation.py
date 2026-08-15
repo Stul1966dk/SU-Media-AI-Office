@@ -29,14 +29,21 @@ class DailyWorkPreparationService:
         self.optimizer = title_optimizer
         self.logger = logger or logging.getLogger(__name__)
 
-    def prepare_next(self, website_id: str | None = None) -> PreparationResult:
+    def prepare_next(
+        self, website_id: str | None = None, *, only_url: str | None = None
+    ) -> PreparationResult:
         with self._preparation_lock:
-            current = self.queue.current(website_id)
-            if current:
-                self._log("active_queue", "reused", website_id, item=current)
-                return PreparationResult(current)
+            # only_url targets one specific page (used by goal-driven projects);
+            # it must not reuse whatever happens to be the current queue item.
+            if only_url is None:
+                current = self.queue.current(website_id)
+                if current:
+                    self._log("active_queue", "reused", website_id, item=current)
+                    return PreparationResult(current)
 
-            reviewed = self._reviewed_candidates(website_id)
+            reviewed = (
+                self._reviewed_candidates(website_id) if only_url is None else []
+            )
             if reviewed:
                 try:
                     item = self.queue.enqueue_candidate(reviewed[0])
@@ -74,6 +81,7 @@ class DailyWorkPreparationService:
                 if not self.queue.experiments.is_url_locked(item["target_url"])
                 and not self.queue.decisions.has_conflict(item)
                 and item["target_url"] not in queued_urls
+                and (only_url is None or item["target_url"] == only_url)
             ]
             if not candidates:
                 reason = "all_candidates_locked" if all_candidates else (
