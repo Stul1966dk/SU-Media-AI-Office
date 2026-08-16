@@ -46,10 +46,10 @@ POSITIVE_CLASSIFICATIONS = {"Tydeligt forbedret", "Forbedret", "Delvist forbedre
 NEGATIVE_CLASSIFICATIONS = {"Uændret", "Forværret"}
 
 # A content gap: a query with real demand that the site half-serves because no
-# page focuses on it. The page shows up (impressions) but ranks poorly, so the
-# opportunity is dedicated content for the keyword, not tweaking an existing page.
+# page focuses on it. It must rank *beyond* striking distance (page 3+), so the
+# fix is dedicated content — not the striking-distance "just push it up" case.
 CONTENT_GAP_MIN_IMPRESSIONS = 100
-CONTENT_GAP_MIN_POSITION = 15.0
+CONTENT_GAP_MIN_POSITION = 20.0
 
 
 class DecisionEngine:

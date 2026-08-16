@@ -27,8 +27,9 @@ STRIKING_MIN_IMPRESSIONS = 100
 EARNER_GROWTH_MIN_POSITION = 3.0
 # Content-gap thresholds — kept local so the roadmap never breaks if a stale
 # DecisionEngine module is cached (they mirror the DecisionEngine constants).
+# Beyond striking distance (page 3+), so it never overlaps that goal.
 CONTENT_GAP_MIN_IMPRESSIONS = 100
-CONTENT_GAP_MIN_POSITION = 15.0
+CONTENT_GAP_MIN_POSITION = 20.0
 PLAUSIBLE_WINDOW_DAYS = 28
 RECOMMENDED_SEQUENCE_LIMIT = 8
 EXAMPLE_LIMIT = 10

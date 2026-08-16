@@ -61,9 +61,9 @@ class ContentGapTests(unittest.TestCase):
         self,
     ) -> None:
         # /guide/ focuses on "guide" (top, good position); "billig løbebånd" is a
-        # secondary keyword with demand that ranks on page 2 -> a content gap.
+        # secondary keyword with demand that ranks on page 3 -> a content gap.
         self._query("/guide/", "guide", position=4, impressions=1000)
-        self._query("/guide/", "billig løbebånd", position=18, impressions=300)
+        self._query("/guide/", "billig løbebånd", position=22, impressions=300)
         gaps = [
             c for c in self._candidates()
             if c["experiment_type"] == "content_gap"
@@ -77,7 +77,7 @@ class ContentGapTests(unittest.TestCase):
 
     def test_the_pages_focus_keyword_is_not_a_gap(self) -> None:
         self._query("/guide/", "guide", position=4, impressions=1000)
-        self._query("/guide/", "billig løbebånd", position=18, impressions=300)
+        self._query("/guide/", "billig løbebånd", position=22, impressions=300)
         self.assertFalse(any(
             c["experiment_type"] == "content_gap" and c["target_query"] == "guide"
             for c in self._candidates()

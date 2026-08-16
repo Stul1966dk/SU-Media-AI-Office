@@ -130,7 +130,7 @@ class SEORoadmapTests(unittest.TestCase):
         # with demand ranking on page 2 -> a content gap for new content.
         self._page("/guide/", position=8, clicks=5, impressions=1500)
         self._query("/guide/", "guide", position=4, clicks=30, impressions=1000)
-        self._query("/guide/", "billig romaskine", position=18,
+        self._query("/guide/", "billig romaskine", position=22,
                     clicks=1, impressions=300)
         roadmap = build_website_roadmap(self.database, "shop.dk")
         by_type = {goal["type"]: goal for goal in roadmap["goals"]}
