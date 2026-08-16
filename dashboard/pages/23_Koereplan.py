@@ -21,6 +21,7 @@ GOAL_ICONS = {
     "monetization_gap": "💰",
     "striking_distance": "🎯",
     "earner_growth": "📈",
+    "content_gap": "🆕",
 }
 EXPERIMENT_LABELS = {
     "monetization": "Monetisering",
@@ -249,7 +250,7 @@ def _full_project_service(database: Any) -> Any:
 
 
 def _goal_row(goal_type: str, item: dict[str, Any]) -> dict[str, Any]:
-    if goal_type == "striking_distance":
+    if goal_type in {"striking_distance", "content_gap"}:
         return {
             "Søgeord": item["query"],
             "Side": _path(item["url"]),

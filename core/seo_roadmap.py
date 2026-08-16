@@ -12,6 +12,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from core.decision_engine import (
+    CONTENT_GAP_MIN_IMPRESSIONS, CONTENT_GAP_MIN_POSITION,
+)
 from core.revenue_attribution import page_key_for_url, revenue_by_page
 
 
@@ -170,7 +173,61 @@ def _goals(
                 )[:EXAMPLE_LIMIT]
             ],
         })
+
+    gap = _content_gap_goal(queries)
+    if gap:
+        goals.append(gap)
     return goals
+
+
+def _content_gap_goal(
+    queries: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """A keyword with demand that a page shows up for but does not focus on —
+    ranking poorly because no page is dedicated to it: an opportunity for new
+    content targeting the keyword."""
+    top_by_page: dict[str, dict[str, Any]] = {}
+    best_by_query: dict[str, dict[str, Any]] = {}
+    for query in queries:
+        page = query["page_url"]
+        if top_by_page.get(page) is None or int(query["impressions"]) > int(
+            top_by_page[page]["impressions"]
+        ):
+            top_by_page[page] = query
+        word = query["query"]
+        if best_by_query.get(word) is None or int(query["impressions"]) > int(
+            best_by_query[word]["impressions"]
+        ):
+            best_by_query[word] = query
+    gaps = [
+        query for word, query in best_by_query.items()
+        if str(word).strip()
+        and top_by_page[query["page_url"]]["query"] != word
+        and int(query["impressions"]) >= CONTENT_GAP_MIN_IMPRESSIONS
+        and float(query["average_position"]) >= CONTENT_GAP_MIN_POSITION
+    ]
+    if not gaps:
+        return None
+    return {
+        "type": "content_gap",
+        "metric": "position",
+        "title": "Nye søgeord uden dedikeret indhold",
+        "target": (
+            f"Skab dedikeret indhold for {len(gaps)} søgeord med efterspørgsel "
+            f"(plads {CONTENT_GAP_MIN_POSITION:.0f}+)"
+        ),
+        "items": [
+            {
+                "query": query["query"],
+                "url": query["page_url"],
+                "impressions": int(query["impressions"]),
+                "position": round(float(query["average_position"]), 1),
+            }
+            for query in sorted(
+                gaps, key=lambda row: -int(row["impressions"])
+            )[:EXAMPLE_LIMIT]
+        ],
+    }
 
 
 def _recommended_sequence(

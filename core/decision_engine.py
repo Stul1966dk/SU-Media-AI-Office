@@ -45,6 +45,12 @@ LEARNING_ALTERNATIVES = {
 POSITIVE_CLASSIFICATIONS = {"Tydeligt forbedret", "Forbedret", "Delvist forbedret"}
 NEGATIVE_CLASSIFICATIONS = {"Uændret", "Forværret"}
 
+# A content gap: a query with real demand that the site half-serves because no
+# page focuses on it. The page shows up (impressions) but ranks poorly, so the
+# opportunity is dedicated content for the keyword, not tweaking an existing page.
+CONTENT_GAP_MIN_IMPRESSIONS = 100
+CONTENT_GAP_MIN_POSITION = 15.0
+
 
 class DecisionEngine:
     """Rank evidence-backed candidates and persist at most one decision."""
@@ -206,7 +212,126 @@ class DecisionEngine:
                 if not include_locked and self.has_conflict(candidate):
                     continue
                 candidates.append(candidate)
+            candidates.extend(self._content_gap_candidates(
+                site, website, page_queries, page_revenue, site_revenue,
+                url_type_failures, site_type_net,
+                include_locked=include_locked,
+            ))
         return candidates
+
+    def _content_gap_candidates(
+        self, site: str, website: dict[str, Any],
+        page_queries: list[dict[str, Any]], page_revenue: dict[str, float],
+        site_revenue: dict[str, float],
+        url_type_failures: dict[tuple[str, str], int],
+        site_type_net: dict[tuple[str, str], int], *,
+        include_locked: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Find keywords with demand that no page focuses on, and propose
+        dedicated content for them (measured on the query's page ranking)."""
+        if not page_queries:
+            return []
+        top_query_by_page: dict[str, dict[str, Any]] = {}
+        best_page_by_query: dict[str, dict[str, Any]] = {}
+        for row in page_queries:
+            page_best = top_query_by_page.get(row["page_url"])
+            if page_best is None or int(row["current_impressions"]) > int(
+                page_best["current_impressions"]
+            ):
+                top_query_by_page[row["page_url"]] = row
+            query_best = best_page_by_query.get(row["query"])
+            if query_best is None or int(row["current_impressions"]) > int(
+                query_best["current_impressions"]
+            ):
+                best_page_by_query[row["query"]] = row
+        candidates = []
+        for query, row in best_page_by_query.items():
+            if not str(query).strip():
+                continue
+            if top_query_by_page[row["page_url"]]["query"] == query:
+                continue  # the page already focuses on this query
+            if int(row["current_impressions"]) < CONTENT_GAP_MIN_IMPRESSIONS:
+                continue
+            if float(row["current_position"]) < CONTENT_GAP_MIN_POSITION:
+                continue
+            candidate = self._content_gap_candidate(
+                site, website, row, page_revenue, site_revenue
+            )
+            candidate["learning_adjustment"] = self._learning_adjustment(
+                site, row["page_url"], "content_gap",
+                url_type_failures, site_type_net,
+            )
+            if not include_locked and self.has_conflict(candidate):
+                continue
+            candidates.append(candidate)
+        return candidates
+
+    def _content_gap_candidate(
+        self, site: str, website: dict[str, Any], row: dict[str, Any],
+        page_revenue: dict[str, float], site_revenue: dict[str, float],
+    ) -> dict[str, Any]:
+        page_url = row["page_url"]
+        query = row["query"]
+        impressions = int(row["current_impressions"])
+        position = float(row["current_position"])
+        candidate = {
+            "website": site, "target_url": page_url, "target_query": query,
+            "current_clicks": row["current_clicks"],
+            "previous_clicks": row["previous_clicks"],
+            "current_impressions": impressions,
+            "previous_impressions": row["previous_impressions"],
+            "current_ctr": row["current_ctr"],
+            "previous_ctr": row["previous_ctr"],
+            "current_position": position,
+            "previous_position": row["previous_position"],
+            "monetized": bool(website.get("monetized")),
+            "manual_priority": website.get("priority", "medium"),
+            "experiment_type": "content_gap",
+            "forced_content_mode": "content_gap",
+            "search_queries": [{"query": query, "click_loss": 0}],
+            "task_title": f"Skab dedikeret indhold for søgeordet “{query}”",
+            "task_description": (
+                f"Søgeordet “{query}” har {impressions} visninger, men "
+                f"{page_url} rangerer kun på plads {position:.0f}, fordi ingen "
+                "side er dedikeret til det. Skab en ny artikel eller sektion, "
+                "der direkte besvarer søgeintentionen bag søgeordet."
+            ),
+            "exact_steps": [
+                f"Fastlæg søgeintentionen bag “{query}”.",
+                "Skriv en ny, dedikeret artikel eller sektion, der besvarer den.",
+                "Tilføj interne links fra relevante sider.",
+                "Gem forslaget til godkendelse.",
+            ],
+            "completion_criteria": (
+                "Et konkret, kopiér-klart indholdsforslag ligger klar til "
+                "godkendelse."
+            ),
+            "assigned_agent": "SEO Manager", "estimated_minutes": 90,
+            "expected_effect": (
+                "Bedre placering for et ubesvaret søgeord med efterspørgsel."
+            ),
+            "expected_effect_reason": (
+                f"{impressions} visninger på plads {position:.0f} uden "
+                "dedikeret indhold."
+            ),
+            "confidence": self._confidence(row),
+            "measurement_method": (
+                "Sammenlign søgeordets placering og klik på siden før og efter "
+                "over 28 dage."
+            ),
+            "experiment_goal": f"Forbedr placeringen for “{query}”.",
+            "goal_metric": "position", "goal_direction": "increase",
+            "target_change_pct": 15, "waiting_period_days": 28,
+            "risk": "Mellem", "data_quality": self._data_quality(row),
+        }
+        candidate.update(self._website_signals(site))
+        candidate["affiliate_commission"] = page_revenue.get(
+            page_key_for_url(page_url), 0.0
+        )
+        candidate["site_has_revenue"] = (
+            site_revenue.get(_domain(page_url), 0.0) > 0
+        )
+        return candidate
 
     @staticmethod
     def _to_monetization_candidate(

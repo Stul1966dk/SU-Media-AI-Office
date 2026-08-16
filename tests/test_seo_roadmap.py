@@ -125,6 +125,21 @@ class SEORoadmapTests(unittest.TestCase):
         self.assertEqual("monetization", gap["experiment_type"])
         self.assertEqual("commission", gap["goal_metric"])
 
+    def test_content_gap_goal_lists_underserved_keywords(self) -> None:
+        # /guide/ focuses on "guide"; "billig romaskine" is a secondary keyword
+        # with demand ranking on page 2 -> a content gap for new content.
+        self._page("/guide/", position=8, clicks=5, impressions=1500)
+        self._query("/guide/", "guide", position=4, clicks=30, impressions=1000)
+        self._query("/guide/", "billig romaskine", position=18,
+                    clicks=1, impressions=300)
+        roadmap = build_website_roadmap(self.database, "shop.dk")
+        by_type = {goal["type"]: goal for goal in roadmap["goals"]}
+        self.assertIn("content_gap", by_type)
+        self.assertEqual("position", by_type["content_gap"]["metric"])
+        queries = [item["query"] for item in by_type["content_gap"]["items"]]
+        self.assertIn("billig romaskine", queries)
+        self.assertNotIn("guide", queries)  # the page's focus keyword is no gap
+
     def test_empty_website_yields_no_goals_and_a_safe_narrative(self) -> None:
         roadmap = build_website_roadmap(self.database, "shop.dk")
         self.assertEqual([], roadmap["goals"])
