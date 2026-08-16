@@ -29,14 +29,21 @@ class DailyWorkPreparationService:
         self.optimizer = title_optimizer
         self.logger = logger or logging.getLogger(__name__)
 
-    def prepare_next(self, website_id: str | None = None) -> PreparationResult:
+    def prepare_next(
+        self, website_id: str | None = None, *, only_url: str | None = None
+    ) -> PreparationResult:
         with self._preparation_lock:
-            current = self.queue.current(website_id)
-            if current:
-                self._log("active_queue", "reused", website_id, item=current)
-                return PreparationResult(current)
+            # only_url targets one specific page (used by goal-driven projects);
+            # it must not reuse whatever happens to be the current queue item.
+            if only_url is None:
+                current = self.queue.current(website_id)
+                if current:
+                    self._log("active_queue", "reused", website_id, item=current)
+                    return PreparationResult(current)
 
-            reviewed = self._reviewed_candidates(website_id)
+            reviewed = (
+                self._reviewed_candidates(website_id) if only_url is None else []
+            )
             if reviewed:
                 try:
                     item = self.queue.enqueue_candidate(reviewed[0])
@@ -74,6 +81,7 @@ class DailyWorkPreparationService:
                 if not self.queue.experiments.is_url_locked(item["target_url"])
                 and not self.queue.decisions.has_conflict(item)
                 and item["target_url"] not in queued_urls
+                and (only_url is None or item["target_url"] == only_url)
             ]
             if not candidates:
                 reason = "all_candidates_locked" if all_candidates else (
@@ -95,6 +103,18 @@ class DailyWorkPreparationService:
                     None, "all_candidates_locked", len(candidates)
                 )
 
+            # A non-title change already carries concrete instructions from the
+            # income-first DecisionEngine (monetisation, content, links, schema);
+            # enqueue it as its own type without forcing a title draft.
+            if str(candidate.get("experiment_type") or "title_meta") != "title_meta":
+                item = self.queue.enqueue_candidate(
+                    self._non_title_candidate(candidate)
+                )
+                self._log(
+                    "persist_prepared_work", "completed", website_id,
+                    candidate=candidate, item=item,
+                )
+                return PreparationResult(item)
             # Recheck after acquiring the process lock and before any AI call.
             reviewed = self._reviewed_candidates(website_id, target_url)
             if reviewed:
@@ -175,6 +195,74 @@ class DailyWorkPreparationService:
                 "page", website_id=website_id
             ))
         return bool(self.database.get_search_console_dimensions("page"))
+
+    def _non_title_candidate(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        """Package a non-title candidate for the queue. Prefer a finished,
+        paste-ready AI deliverable (a concrete monetisation element, a rewritten
+        passage); fall back to the DecisionEngine's own instructions."""
+        deliverable = self._rich_deliverable(candidate)
+        if deliverable:
+            recommended = str(deliverable.get("recommended_option") or "").strip()
+            summary = str(deliverable.get("summary") or "").strip()
+            recommended_change = (
+                f"{summary}\n\n{recommended}" if summary else recommended
+            )
+            steps = list(deliverable.get("implementation_steps") or [])
+        else:
+            recommended_change = str(candidate.get("task_description") or "")
+            steps = list(candidate.get("exact_steps") or [])
+        return {
+            **candidate,
+            "implementation_content": {
+                "change_type": str(candidate.get("experiment_type") or ""),
+                "recommended_change": recommended_change,
+                "steps": steps,
+                "measurement_method": str(
+                    candidate.get("measurement_method") or ""
+                ),
+            },
+        }
+
+    def _rich_deliverable(
+        self, candidate: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Generate a finished deliverable for a non-title change, grounded in
+        the page's content. Returns None (and the caller falls back) on any
+        failure, so a weak AI response never blocks the work."""
+        ai_service = getattr(self.optimizer, "ai_service", None)
+        if ai_service is None:
+            return None
+        from core.task_deliverables import generate_task_deliverable
+        try:
+            return generate_task_deliverable(
+                candidate, ai_service=ai_service,
+                public_context=self._page_content_context(candidate),
+            )
+        except Exception as error:
+            self._log(
+                "rich_deliverable", "failed", candidate.get("website"),
+                candidate=candidate, error=error,
+            )
+            return None
+
+    def _page_content_context(
+        self, candidate: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """Return the target page's stored content so a deliverable is grounded
+        in what the page actually says (no invented products or claims)."""
+        target_url = str(candidate.get("target_url") or "")
+        try:
+            rows = self.database.get_content(str(candidate.get("website") or ""))
+        except Exception:
+            return []
+        if not isinstance(rows, list):
+            return []
+        context = []
+        for row in rows:
+            row_url = str(row.get("url") or row.get("link") or "")
+            if row_url == target_url:
+                context.append({**row, "url": row_url, "relation": "aktuel side"})
+        return context
 
     @staticmethod
     def _optimizer_candidate(candidate: dict[str, Any]) -> dict[str, Any]:

@@ -188,17 +188,26 @@ class WorkQueueService:
                 continue
             if item["status"] == "awaiting_implementation":
                 approved = item.get("approved_change") or {}
-                if (
-                    approved.get("change_type") == "title_meta"
-                    and str(approved.get("approved_title") or "").strip()
-                    and str(approved.get("approved_meta") or "").strip()
-                ):
+                change_type = str(approved.get("change_type") or "")
+                if change_type == "title_meta":
+                    if (
+                        str(approved.get("approved_title") or "").strip()
+                        and str(approved.get("approved_meta") or "").strip()
+                    ):
+                        ready.append(item)
+                elif change_type:
+                    # A non-title approved change is ready to implement as-is.
                     ready.append(item)
                 continue
-            if item["status"] != "queued" or not item.get("draft_id"):
+            if item["status"] != "queued":
                 continue
             change = item.get("implementation") or {}
-            if not self._concrete_title_meta(change):
+            if item.get("draft_id"):
+                # Title/meta item from a Title Optimizer draft.
+                if not self._concrete_title_meta(change):
+                    continue
+            elif not str(change.get("recommended_change") or "").strip():
+                # A non-title item must carry concrete instructions to be shown.
                 continue
             if self.experiments.is_url_locked(item["target_url"]):
                 continue

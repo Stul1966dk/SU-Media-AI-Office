@@ -49,9 +49,12 @@ class UnifiedResultFlowTests(unittest.TestCase):
         self.assertIn("def apply_measured_learning(", recommendations)
         self.assertIn("same_url_failures", recommendations)
         self.assertIn('"samme løsning."', recommendations)
-        self.assertIn("apply_measured_learning(", today)
-        self.assertIn("get_seo_learning_entries()", today)
-        self.assertIn("apply_post_analysis_guidance(", today)
+        # Learning now enriches selection inside the income-first DecisionEngine
+        # that the daily work queue uses, rather than as a page-level pass.
+        engine = source("core/decision_engine.py")
+        self.assertIn("get_seo_learning_entries()", engine)
+        self.assertIn("_steer_by_learning(", engine)
+        self.assertIn("learning_adjustment", engine)
 
     def test_two_failed_same_url_measurements_change_the_advice(self):
         recommendation = {

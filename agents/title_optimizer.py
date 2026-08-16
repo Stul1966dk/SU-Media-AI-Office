@@ -447,8 +447,33 @@ class TitleOptimizer:
         if not words:
             return True
         normalized = text.casefold()
-        matches = sum(word in normalized for word in words)
+        title_words = re.findall(r"[\wæøå]+", normalized)
+        matches = sum(
+            word in normalized
+            or any(
+                TitleOptimizer._inflected_match(word, title_word)
+                for title_word in title_words
+            )
+            for word in words
+        )
         return matches >= max(1, (len(words) + 1) // 2)
+
+    @staticmethod
+    def _inflected_match(query_word: str, title_word: str) -> bool:
+        """Accept a Danish inflection the raw substring test misses.
+
+        The substring test already catches the query word inside compounds
+        and title inflections that are shorter than the query word. It fails
+        only when the query carries an extra inflectional suffix the title
+        omits (e.g. plural "søgemaskiner" vs. the title's "søgemaskine"), so
+        accept a title word that is a stem the query word only extends by a
+        short suffix.
+        """
+        return (
+            len(title_word) >= 4
+            and query_word.startswith(title_word)
+            and len(query_word) - len(title_word) <= 3
+        )
 
     @staticmethod
     def _meta_opening(text: str) -> str:

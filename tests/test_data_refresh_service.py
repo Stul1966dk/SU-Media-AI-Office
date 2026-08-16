@@ -60,6 +60,7 @@ class DataRefreshServiceTests(unittest.TestCase):
         database.get_website_discovery_profiles.return_value = []
         database.get_seo_experiments.return_value = []
         database.get_priority_task_scores.return_value = []
+        database.get_seo_goal_projects.return_value = []
         registry = Mock()
         registry.sync.return_value = ImportResult(
             total=2, created=0, updated=2, phased_out=0

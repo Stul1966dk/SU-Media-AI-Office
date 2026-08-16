@@ -91,7 +91,7 @@ class Sprint30Tests(unittest.TestCase):
             "monetization_opportunity",
             "seo_health", "data_quality", "ai_confidence",
             "existing_work_penalty", "active_experiment_penalty",
-            "waiting_time", "expected_gain",
+            "waiting_time", "expected_gain", "learning",
         }, set(ranked[0]["score_factors"]))
 
     def test_active_work_only_gives_moderate_diversity_adjustment(self) -> None:

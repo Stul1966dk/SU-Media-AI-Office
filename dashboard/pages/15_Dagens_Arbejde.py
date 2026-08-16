@@ -16,11 +16,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ALL_WEBSITES = "Alle websites"
 FILTER_SESSION_KEY = "daily_work_website_filter"
 FILTER_WIDGET_KEY = "daily_work_website_filter_widget"
-CONCRETE_TRAFFIC_TASKS = {
-    "combined_traffic_decline",
-    "search_only_decline",
-    "plausible_only_decline",
-}
 
 
 class NoSafeInternalLinkError(ValueError):
@@ -39,11 +34,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agents.title_optimizer import TitleOptimizer
 from core.daily_work_preparation import DailyWorkPreparationService
-from core.current_diagnosis_reader import read_latest_diagnoses
 from core.seo_experiment_engine import SEOExperimentEngine
 from core.prompt_guidelines import PromptGuidelines
 from core.pipeline_health import pipeline_health
-from core.priority_scoring import stable_priority_key
 from core.website_registry import WebsiteRegistry
 from connectors.wordpress_connector import WordPressConnector
 from integrations.search_console_integration import SearchConsoleIntegration
@@ -52,13 +45,11 @@ from dashboard.components.data import (
     _filter_decided_recommendations,
 )
 import dashboard.components.database as database_component_module
-import dashboard.components.data as dashboard_data_module
 import core.ai_service as ai_service_module
 import core.content_freshness as content_freshness_module
 import core.task_deliverables as task_deliverables_module
 import core.traffic_recommendation_store as traffic_store_module
 import core.traffic_recommendation_workflow as traffic_workflow_module
-import core.traffic_recommendations as traffic_recommendations_module
 import core.traffic_work_overview as traffic_work_module
 from dashboard.components.ui import (
     load_styles,
@@ -161,83 +152,10 @@ def main() -> None:
         _render_work_overview(database, work_overview)
         if work_module.next_actionable_work(work_overview):
             return
-        context = database.get_dashboard_action_context()
-        search_diagnoses = _current_diagnoses(
-            database, websites, context,
-            context_key="search_diagnoses",
-            reader_name="get_latest_search_console_diagnosis",
-        )
-        plausible_diagnoses = _current_diagnoses(
-            database, websites, context,
-            context_key="plausible_diagnoses",
-            reader_name="get_latest_plausible_diagnosis",
-        )
-        priority_tasks = _build_current_priority_tasks(
-            system_status=database.get_dashboard_system_health(),
-            seo_sites=context["seo_health"],
-            project_tasks=database.get_priority_tasks(),
-            experiments=context["experiments"],
-            active_experiments=context["active_experiments"],
-            coverage=context["coverage"],
-            plausible_rows=context["plausible_daily"],
-            search_diagnoses=search_diagnoses,
-            plausible_diagnoses=plausible_diagnoses,
-            limit=None,
-        )
-        priority_tasks = [
-            item for item in priority_tasks
-            if item.get("task_type") in CONCRETE_TRAFFIC_TASKS
-        ]
-        priority_tasks = _filter_active_site_rows(
-            priority_tasks, active_ids, website_field="website"
-        )
-        priority_tasks = _filter_unlocked_recommendations(
-            database, priority_tasks
-        )
-        content_by_website = _content_by_website(database, active_ids)
-        priority_tasks = traffic_recommendations_module.expand_daily_work_types(
-            priority_tasks,
-            content_urls_by_website={
-                website: [
-                    str(row.get("url") or row.get("link") or "")
-                    for row in rows
-                ]
-                for website, rows in content_by_website.items()
-            },
-        )
-        priority_tasks.extend(
-            _filter_unlocked_recommendations(
-                database,
-                build_freshness_recommendations(
-                    content_by_website,
-                    verified_reviews=(
-                        database.get_content_freshness_reviews()
-                    ),
-                ),
-            )
-        )
-        priority_tasks = (
-            traffic_recommendations_module.apply_post_analysis_guidance(
-                priority_tasks, database.get_experiment_evaluations()
-            )
-        )
-        priority_tasks = traffic_recommendations_module.apply_measured_learning(
-            priority_tasks, database.get_seo_learning_entries()
-        )
-        priority_tasks = _filter_decided_recommendations(
-            priority_tasks, decisions,
-        )
-        # All eligible work types compete in one shared, evidence-based queue.
-        # This final sort prevents insertion order from favouring any task type.
-        priority_tasks = sorted(priority_tasks, key=stable_priority_key)
-        if website_id:
-            priority_tasks = [
-                item for item in priority_tasks
-                if item["website"] in {website_id, "—"}
-            ]
-        if priority_tasks:
-            _render_priority_task(database, priority_tasks[0])
-            return
+        # The income-first, learning-aware DecisionEngine work queue is the
+        # single source of new SEO experiments. The old decline-based traffic
+        # recommendation selection has been retired so every proposal follows
+        # the same logic (money first, one change per page, learn from results).
         optimizer = _optimizer(database)
         preparation = DailyWorkPreparationService(
             database=database, queue=queue, title_optimizer=optimizer
@@ -245,25 +163,45 @@ def main() -> None:
         with st.spinner("Forbereder næste opgave..."):
             prepared = preparation.prepare_next(website_id)
             current = prepared.item
-        if not current:
-            _render_empty_state(
-                queue, selected, websites,
-                reason=prepared.reason,
-                candidate_count=prepared.candidate_count,
-            )
-        elif current["status"] == "awaiting_implementation":
-            _render_implementation(database, queue, current)
-        else:
-            _render_recommendation(database, queue, current)
+        if current:
+            if current["status"] == "awaiting_implementation":
+                _render_implementation(database, queue, current)
+            else:
+                _render_recommendation(database, queue, current)
+            return
+        # No queued experiment. Until Fase 3 folds outdated-content detection
+        # into the queue itself, surface one freshness task as a fallback.
+        content_by_website = _content_by_website(database, active_ids)
+        freshness_tasks = _filter_decided_recommendations(
+            _filter_active_site_rows(
+                _filter_unlocked_recommendations(
+                    database,
+                    build_freshness_recommendations(
+                        content_by_website,
+                        verified_reviews=(
+                            database.get_content_freshness_reviews()
+                        ),
+                    ),
+                ),
+                active_ids, website_field="website",
+            ),
+            decisions,
+        )
+        if website_id:
+            freshness_tasks = [
+                item for item in freshness_tasks
+                if item["website"] in {website_id, "—"}
+            ]
+        if freshness_tasks:
+            _render_priority_task(database, freshness_tasks[0])
+            return
+        _render_empty_state(
+            queue, selected, websites,
+            reason=prepared.reason,
+            candidate_count=prepared.candidate_count,
+        )
     finally:
         database.close()
-
-
-def _build_current_priority_tasks(**context: Any) -> list[dict[str, Any]]:
-    """Use current pure recommendation code despite Streamlit module caching."""
-    importlib.reload(traffic_recommendations_module)
-    current_data = importlib.reload(dashboard_data_module)
-    return current_data.build_dashboard_priority_tasks(**context)
 
 
 def _filter_active_site_rows(
@@ -303,38 +241,6 @@ def _filter_unlocked_recommendations(
         for item in rows
         if not item.get("target_url")
         or not experiments.is_url_locked(str(item["target_url"]))
-    ]
-
-
-def _current_diagnoses(
-    database: Any,
-    websites: list[Any],
-    context: dict[str, Any],
-    *,
-    context_key: str,
-    reader_name: str,
-) -> list[dict[str, Any]]:
-    """Read diagnoses across both current and hot-reloaded Database classes."""
-    website_ids = [
-        str(item.get("website", ""))
-        if isinstance(item, dict) else str(item)
-        for item in websites
-    ]
-    kind = "search" if context_key == "search_diagnoses" else "plausible"
-    result = read_latest_diagnoses(database, website_ids, kind=kind)
-    if result:
-        return result
-    stored = context.get(context_key)
-    if isinstance(stored, list) and stored:
-        return stored
-    reader = getattr(database, reader_name, None)
-    if reader is None:
-        return []
-    return [
-        diagnosis
-        for website in website_ids
-        if website
-        if (diagnosis := reader(website)) is not None
     ]
 
 
@@ -1793,10 +1699,29 @@ def _format_number(value: float) -> str:
     return f"{float(value):.1f}".replace(".", ",")
 
 
+def _render_project_banner(database: Any, item: dict[str, Any]) -> None:
+    """Show that a task is part of a goal-driven project, so the thread is
+    clear rather than feeling like a random single suggestion."""
+    from core.seo_project import GOAL_LABELS
+
+    project = next(
+        (
+            row for row in database.get_seo_goal_projects()
+            if row["target_url"] == item.get("target_url")
+            and row["status"] in {"active", "awaiting_confirmation"}
+        ),
+        None,
+    )
+    if project:
+        goal = GOAL_LABELS.get(project.get("goal_metric"), "projekt")
+        st.info(f"🚩 Del af projekt: {goal} — {item['target_url']}")
+
+
 def _render_recommendation(
     database: Any, queue: WorkQueueService, item: dict[str, Any]
 ) -> None:
     _render_guided_progress("draft")
+    _render_project_banner(database, item)
     change = _recommended_change(item)
     if not _has_concrete_change(change):
         st.error("Opgaven er ikke komplet og kan derfor ikke vises endnu.")
@@ -1816,12 +1741,15 @@ def _render_recommendation(
     )
     if accept:
         try:
-            queue.approve(
-                item["id"],
-                title=prefer_pipe_separator(change["approved_title"]),
-                meta=change["approved_meta"],
-                title_optimizer=_optimizer(database),
-            )
+            if change.get("change_type") == "title_meta":
+                queue.approve(
+                    item["id"],
+                    title=prefer_pipe_separator(change["approved_title"]),
+                    meta=change["approved_meta"],
+                    title_optimizer=_optimizer(database),
+                )
+            else:
+                queue.approve(item["id"])
             st.rerun()
         except Exception:
             st.error("Opgaven kunne ikke accepteres. Prøv igen.")
@@ -1834,7 +1762,8 @@ def _render_implementation(
     database: Any, queue: WorkQueueService, item: dict[str, Any]
 ) -> None:
     _render_guided_progress("approved")
-    change = item.get("approved_change") or {}
+    _render_project_banner(database, item)
+    change = _recommended_change(item)
     if not _has_concrete_change(change):
         st.error("Den godkendte ændring er ufuldstændig og kan ikke implementeres.")
         return
@@ -1843,13 +1772,25 @@ def _render_implementation(
     _render_change_card(item, change)
     with st.container(border=True):
         st.subheader("Det skal du gøre nu")
-        st.markdown(
-            "1. Åbn siden i WordPress.\n"
-            "2. Indsæt den nye title.\n"
-            "3. Indsæt den nye metabeskrivelse.\n"
-            "4. Gem siden.\n"
-            "5. Klik **Markér som implementeret**."
-        )
+        if change.get("change_type") == "title_meta":
+            st.markdown(
+                "1. Åbn siden i WordPress.\n"
+                "2. Indsæt den nye title.\n"
+                "3. Indsæt den nye metabeskrivelse.\n"
+                "4. Gem siden.\n"
+                "5. Klik **Markér som implementeret**."
+            )
+        else:
+            steps = change.get("steps") or []
+            lines = ["1. Åbn siden i WordPress."]
+            lines += [
+                f"{index}. {step}"
+                for index, step in enumerate(steps, start=2)
+            ]
+            lines.append(
+                f"{len(steps) + 2}. Klik **Markér som implementeret**."
+            )
+            st.markdown("\n".join(lines))
     if st.button(
         "🟢 Markér som implementeret",
         type="primary",
@@ -1878,6 +1819,22 @@ def _render_page_card(
 def _render_change_card(
     item: dict[str, Any], change: dict[str, Any]
 ) -> None:
+    if change.get("change_type") != "title_meta":
+        with st.container(border=True):
+            st.subheader("AI anbefaler")
+            st.write(
+                f"**{CHANGE_TYPE_LABELS.get(change.get('change_type'), 'Ændring')}**"
+            )
+            st.write(change.get("recommended_change") or "")
+            steps = change.get("steps") or []
+            if steps:
+                st.markdown(
+                    "\n".join(
+                        f"{index}. {step}"
+                        for index, step in enumerate(steps, start=1)
+                    )
+                )
+        return
     with st.container(border=True):
         st.subheader("AI anbefaler")
         st.write("**Ny title**")
@@ -1933,17 +1890,46 @@ def _render_reason_card(item: dict[str, Any]) -> None:
             st.write(sentence)
 
 
-def _recommended_change(item: dict[str, Any]) -> dict[str, str]:
+CHANGE_TYPE_LABELS = {
+    "title_meta": "Title og metabeskrivelse",
+    "monetization": "Monetisering",
+    "content_update": "Indhold / placering",
+    "internal_links": "Interne links",
+    "schema": "Strukturerede data",
+    "technical_fix": "Teknisk forbedring",
+}
+
+
+def _recommended_change(item: dict[str, Any]) -> dict[str, Any]:
     approved = item.get("approved_change") or {}
-    if approved:
-        return approved
     implementation = item.get("implementation") or {}
+    candidate = item.get("candidate") or {}
+    change_type = str(
+        approved.get("change_type")
+        or implementation.get("change_type")
+        or candidate.get("experiment_type") or "title_meta"
+    )
+    if change_type == "title_meta":
+        if approved:
+            return approved
+        return {
+            "change_type": "title_meta",
+            "current_title": str(implementation.get("current_title") or ""),
+            "approved_title": str(implementation.get("new_title") or ""),
+            "current_meta": str(implementation.get("current_meta") or ""),
+            "approved_meta": str(implementation.get("new_meta") or ""),
+        }
+    # Non-title: the sparse approved_change lacks the deliverable, so always
+    # build the concrete change from the stored instructions.
     return {
-        "change_type": "title_meta",
-        "current_title": str(implementation.get("current_title") or ""),
-        "approved_title": str(implementation.get("new_title") or ""),
-        "current_meta": str(implementation.get("current_meta") or ""),
-        "approved_meta": str(implementation.get("new_meta") or ""),
+        "change_type": change_type,
+        "recommended_change": str(
+            implementation.get("recommended_change")
+            or candidate.get("task_description") or ""
+        ),
+        "steps": list(
+            implementation.get("steps") or candidate.get("exact_steps") or []
+        ),
     }
 
 
@@ -1964,16 +1950,42 @@ def _short_reason(item: dict[str, Any]) -> list[str]:
     ).strip()
     sentences = [part.strip() for part in raw.replace("!", ".").split(".") if part.strip()]
     first = (sentences[0] + ".") if sentences else raw
-    second = "En bedre title og metabeskrivelse vurderes at kunne give flere klik."
+    change_type = str(
+        candidate.get("experiment_type")
+        or (item.get("approved_change") or {}).get("change_type")
+        or "title_meta"
+    )
+    second = {
+        "monetization": (
+            "En konkret monetisering vurderes at kunne skabe provision fra "
+            "den eksisterende trafik."
+        ),
+        "content_update": (
+            "Stærkere indhold vurderes at kunne løfte placeringen og dermed "
+            "klikkene."
+        ),
+        "internal_links": (
+            "Bedre interne links vurderes at kunne styrke sidens placering."
+        ),
+        "schema": (
+            "Strukturerede data vurderes at kunne forbedre visningen i "
+            "søgeresultatet."
+        ),
+    }.get(
+        change_type,
+        "En bedre title og metabeskrivelse vurderes at kunne give flere klik.",
+    )
     return [first, second][:2]
 
 
 def _has_concrete_change(content: dict[str, Any]) -> bool:
-    return bool(
-        content.get("change_type") == "title_meta"
-        and str(content.get("approved_title", "")).strip()
-        and str(content.get("approved_meta", "")).strip()
-    )
+    if content.get("change_type") == "title_meta":
+        return bool(
+            str(content.get("approved_title", "")).strip()
+            and str(content.get("approved_meta", "")).strip()
+        )
+    # A non-title change is concrete once it has a recommended change text.
+    return bool(str(content.get("recommended_change", "")).strip())
 
 
 def _render_daily_summary(

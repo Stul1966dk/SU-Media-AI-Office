@@ -161,7 +161,7 @@ class ContentFreshnessTests(unittest.TestCase):
         self.assertIn("build_freshness_recommendations", today)
         self.assertIn('"content_freshness"', today)
         self.assertIn(
-            "sorted(priority_tasks, key=stable_priority_key)", today
+            "_render_priority_task(database, freshness_tasks[0])", today
         )
         self.assertIn(
             "Kontrollen køres stille i baggrunden", overview
