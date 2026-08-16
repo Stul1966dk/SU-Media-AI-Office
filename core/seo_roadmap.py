@@ -12,9 +12,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from core.decision_engine import (
-    CONTENT_GAP_MIN_IMPRESSIONS, CONTENT_GAP_MIN_POSITION,
-)
 from core.revenue_attribution import page_key_for_url, revenue_by_page
 
 
@@ -28,6 +25,10 @@ STRIKING_MAX_POSITION = 20.0
 STRIKING_MIN_IMPRESSIONS = 100
 # A page already earning is only worth growing once it ranks below the top few.
 EARNER_GROWTH_MIN_POSITION = 3.0
+# Content-gap thresholds — kept local so the roadmap never breaks if a stale
+# DecisionEngine module is cached (they mirror the DecisionEngine constants).
+CONTENT_GAP_MIN_IMPRESSIONS = 100
+CONTENT_GAP_MIN_POSITION = 15.0
 PLAUSIBLE_WINDOW_DAYS = 28
 RECOMMENDED_SEQUENCE_LIMIT = 8
 EXAMPLE_LIMIT = 10
